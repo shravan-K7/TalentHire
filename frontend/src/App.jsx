@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -9,54 +8,120 @@ import { getCurrentUser, logoutUser } from './js/auth';
 function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
-  const [error, setError] = useState('');
+  const [sessionError, setSessionError] = useState('');
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
 
-  const path = window.location.pathname;
+  // Sync client-side navigation with browser history
+  useEffect(() => {
+    function handlePopState() {
+      setCurrentPath(window.location.pathname);
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
+  const navigate = useCallback((path) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+      setCurrentPath(path);
+    }
+  }, []);
+
+  async function checkSession() {
+    setChecking(true);
+    setSessionError('');
+
+    try {
+      const currentUser = await getCurrentUser();
+      setUser(currentUser);
+    } catch (err) {
+      console.warn('Session check failed:', err);
+      setUser(null);
+      setSessionError('Could not verify existing session. Please sign in.');
+    } finally {
+      setChecking(false);
+    }
+  }
 
   useEffect(() => {
-    async function checkSession() {
+    let ignore = false;
+
+    async function initialCheck() {
       try {
         const currentUser = await getCurrentUser();
-        setUser(currentUser);
-      } catch (error) {
-        console.error('Session check failed:', error);
-        setError('Unable to check your login session.');
+        if (!ignore) {
+          setUser(currentUser);
+        }
+      } catch (err) {
+        console.warn('Session check failed:', err);
+        if (!ignore) {
+          setUser(null);
+          setSessionError('Could not verify existing session. Please sign in.');
+        }
       } finally {
-        setChecking(false);
+        if (!ignore) {
+          setChecking(false);
+        }
       }
     }
 
-    checkSession();
+    initialCheck();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
+
+
+  function handleLoginSuccess(loggedInUser) {
+    setUser(loggedInUser);
+    setSessionError('');
+    navigate('/');
+  }
 
   async function handleLogout() {
     try {
       await logoutUser();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
       setUser(null);
-      setError('');
-      window.location.href = '/login';
-    } catch (error) {
-      setError(error.message);
+      setSessionError('');
+      navigate('/login');
     }
   }
 
   if (checking) {
-    return <p>Checking login...</p>;
+    return (
+      <main>
+        <p>Loading TalentHire...</p>
+      </main>
+    );
   }
 
-  if (path === '/register') {
-    return <Register />;
-  }
+  return (
+    <>
+      {sessionError && (
+        <aside role="status">
+          <small>{sessionError}</small>{' '}
+          <button type="button" onClick={checkSession}>
+            Retry
+          </button>
+        </aside>
+      )}
 
-  if (error) {
-    return <p role="alert">{error}</p>;
-  }
-
-  if (user) {
-    return <Home user={user} onLogout={handleLogout} />;
-  }
-
-  return <Login onLogin={setUser} />;
+      {user ? (
+        <Home user={user} onLogout={handleLogout} />
+      ) : currentPath === '/register' ? (
+        <Register onLogin={handleLoginSuccess} navigate={navigate} />
+      ) : (
+        <Login onLogin={handleLoginSuccess} navigate={navigate} />
+      )}
+    </>
+  );
 }
 
 export default App;

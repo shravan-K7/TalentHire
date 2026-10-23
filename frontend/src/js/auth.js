@@ -1,7 +1,6 @@
-
 const API = '/api/auth'
 
-// Read the response safely
+// Read the response safely to prevent unexpected JSON parse exceptions
 async function readResponse(response) {
   const text = await response.text()
 
@@ -16,17 +15,45 @@ async function readResponse(response) {
 
 // Get CSRF token from Django
 export async function getCsrfToken() {
-  const response = await fetch(`/api/auth/csrf/`, {
+  const response = await fetch(`${API}/csrf/`, {
     credentials: 'include',
   })
 
-  const data = await response.json()
+  const data = await readResponse(response)
 
   if (!response.ok) {
     throw new Error(data.error || 'Unable to get CSRF token')
   }
 
   return data.csrfToken
+}
+
+// Register user
+export async function registerUser({ username, email, password }) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`${API}/register/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({
+      username,
+      email,
+      password,
+    }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    const errorMsg = data.error || (data.errors ? JSON.stringify(data.errors) : 'Registration failed.')
+    throw new Error(errorMsg)
+  }
+
+  return data
 }
 
 // Login user
@@ -62,26 +89,46 @@ export async function loginUser(usernameOrEmail, password) {
   return data
 }
 
+// Google login
+export async function googleLogin(credential) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`${API}/google/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ credential }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Google sign-in failed.')
+  }
+
+  return data
+}
+
 // Get currently logged-in user
 export async function getCurrentUser() {
-  try {
-    const response = await fetch(`/api/auth/me/`, {
-      credentials: 'include',
-    })
+  const response = await fetch(`${API}/me/`, {
+    credentials: 'include',
+  })
 
-    if (response.status === 401) {
-      return null
-    }
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Unable to get user')
-    }
-    return data
-  } catch (error) {
-    throw error
+  if (response.status === 401) {
+    return null
   }
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Unable to get user')
+  }
+
+  return data
 }
 
 // Logout user

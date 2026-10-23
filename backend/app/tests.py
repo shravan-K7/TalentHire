@@ -20,6 +20,75 @@ class AuthViewTests(TestCase):
         self.assertIn("csrfToken", data)
         self.assertTrue(bool(data["csrfToken"]))
 
+    def test_register_success(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            data=json.dumps({
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "strongPassword123!",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertIn("user", data)
+        self.assertEqual(data["user"]["username"], "newuser")
+
+    def test_register_invalid_email(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            data=json.dumps({
+                "username": "invalidemailuser",
+                "email": "not-a-valid-email",
+                "password": "strongPassword123!",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "Enter a valid email address.")
+
+    def test_register_duplicate_username(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            data=json.dumps({
+                "username": "TESTUSER",
+                "email": "another@example.com",
+                "password": "strongPassword123!",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "This username is already taken.")
+
+    def test_register_duplicate_email(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            data=json.dumps({
+                "username": "uniqueuser",
+                "email": "TEST@example.com",
+                "password": "strongPassword123!",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "This email is already registered.")
+
+    def test_register_short_password(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            data=json.dumps({
+                "username": "shortpassuser",
+                "email": "short@example.com",
+                "password": "short",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"], "Password must contain at least 8 characters."
+        )
+
     def test_login_success_with_username(self):
         response = self.client.post(
             "/api/auth/login/",
@@ -58,7 +127,9 @@ class AuthViewTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "Invalid username/email or password.")
+        self.assertEqual(
+            response.json()["error"], "Invalid username/email or password."
+        )
 
     def test_login_validation_error(self):
         response = self.client.post(
