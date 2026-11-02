@@ -399,3 +399,201 @@ export async function submitSupportInquiry({ subject, message }) {
   return data
 }
 
+// ============================================================================
+// PERFORMING ARTIST DASHBOARD API CLIENT
+// ============================================================================
+
+export async function fetchArtistDashboard() {
+  const response = await fetch('/api/artist/dashboard/', {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load artist dashboard data.')
+  }
+
+  return data
+}
+
+export async function respondArtistBooking(bookingId, { action, reason = '' }) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/bookings/${bookingId}/respond/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ action, reason }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to respond to booking request.')
+  }
+
+  return data
+}
+
+export async function completeArtistBooking(bookingId) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/bookings/${bookingId}/complete/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': token,
+    },
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to mark performance as completed.')
+  }
+
+  return data
+}
+
+export async function fetchArtistPortfolio() {
+  const response = await fetch('/api/artist/portfolio/', {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load portfolio items.')
+  }
+
+  return data
+}
+
+export async function addArtistPortfolio({ title, description, media_url }) {
+  const token = await getCsrfToken()
+
+  const response = await fetch('/api/artist/portfolio/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ title, description, media_url }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to add portfolio item.')
+  }
+
+  return data
+}
+
+export async function deleteArtistPortfolio(itemId) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/portfolio/${itemId}/delete/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': token,
+    },
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to delete portfolio item.')
+  }
+
+  return data
+}
+
+export async function fetchArtistAvailability() {
+  const response = await fetch('/api/artist/availability/', {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load availability.')
+  }
+
+  return data
+}
+
+export async function updateArtistAvailability({ date, is_available, reason = '' }) {
+  const token = await getCsrfToken()
+
+  const response = await fetch('/api/artist/availability/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ date, is_available, reason }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to update availability.')
+  }
+
+  return data
+}
+
+export async function deleteArtistAvailability(availId) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/availability/${availId}/delete/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': token,
+    },
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to delete availability record.')
+  }
+
+  return data
+}
+
+export async function updateArtistProfileData(formData) {
+  const token = await getCsrfToken()
+
+  const response = await fetch('/api/artist/profile/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': token,
+    },
+    body: formData,
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    const errorMsg = data.error || (data.errors ? JSON.stringify(data.errors) : 'Failed to save artist profile.')
+    throw new Error(errorMsg)
+  }
+
+  return data
+}
+
+

@@ -10,6 +10,7 @@ import { getCurrentUser, logoutUser } from "./js/auth";
 import Chatbot from "./components/Chatbot";
 import ArtistRegistration from "./components/ArtistRegistration";
 import CustomerDashboard from "./pages/CustomerDashboard";
+import ArtistDashboard from "./pages/ArtistDashboard";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -122,8 +123,8 @@ function App() {
     }
   }
 
-  // Check if navigating to customer dashboard views
-  const isCustomerDashboard =
+  // Check if navigating to dashboard views (handles both Customer & Performing Artist)
+  const isDashboard =
     currentPath === "/profile" ||
     currentPath === "/profile/" ||
     currentPath.startsWith("/profile?") ||
@@ -133,16 +134,19 @@ function App() {
     currentPath === "/customer-dashboard" ||
     currentPath === "/customer-dashboard/" ||
     currentPath.startsWith("/customer-dashboard?") ||
+    currentPath === "/artist-dashboard" ||
+    currentPath === "/artist-dashboard/" ||
+    currentPath.startsWith("/artist-dashboard?") ||
     currentPath === "/dashboard" ||
     currentPath === "/dashboard/" ||
     currentPath.startsWith("/dashboard?");
 
   // Automatically redirect unauthenticated users visiting protected dashboard views to /login
   useEffect(() => {
-    if (!checking && !user && isCustomerDashboard) {
+    if (!checking && !user && isDashboard) {
       queueMicrotask(() => navigate("/login"));
     }
-  }, [checking, user, isCustomerDashboard, navigate]);
+  }, [checking, user, isDashboard, navigate]);
 
   if (checking) {
     return (
@@ -236,13 +240,22 @@ function App() {
         <Login onLogin={handleLoginSuccess} navigate={navigate} />
       ) : currentPath === "/register" ? (
         <Register onLogin={handleLoginSuccess} navigate={navigate} />
-      ) : isCustomerDashboard ? (
-        <CustomerDashboard
-          user={user}
-          onLogout={handleLogout}
-          navigate={navigate}
-          onUserUpdate={(updatedUser) => setUser(updatedUser)}
-        />
+      ) : isDashboard ? (
+        (user?.role === "artist" || user?.is_artist) ? (
+          <ArtistDashboard
+            user={user}
+            onLogout={handleLogout}
+            navigate={navigate}
+            onUserUpdate={(updatedUser) => setUser(updatedUser)}
+          />
+        ) : (
+          <CustomerDashboard
+            user={user}
+            onLogout={handleLogout}
+            navigate={navigate}
+            onUserUpdate={(updatedUser) => setUser(updatedUser)}
+          />
+        )
       ) : currentPath === "/artist-register" || currentPath === "/artist-registration" ? (
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
           <Navbar user={user} onLogout={handleLogout} currentPath="/artist-register" navigate={navigate} />

@@ -18,6 +18,16 @@ urlpatterns = [
     path("api/customer/bookings/<int:booking_id>/cancel/", views.customer_cancel_booking_view, name="api_customer_cancel_booking"),
     path("api/customer/notifications/mark-read/", views.customer_notifications_read_view, name="api_customer_notifications_read"),
     path("api/customer/support/", views.customer_support_inquiry_view, name="api_customer_support_inquiry"),
+    # Artist Dashboard & Management API Endpoints
+    path("api/artist/dashboard/", views.artist_dashboard_view, name="api_artist_dashboard"),
+    path("api/artist/bookings/<int:booking_id>/respond/", views.artist_respond_booking_view, name="api_artist_respond_booking"),
+    path("api/artist/bookings/<int:booking_id>/complete/", views.artist_complete_booking_view, name="api_artist_complete_booking"),
+    path("api/artist/portfolio/", views.artist_portfolio_view, name="api_artist_portfolio"),
+    path("api/artist/portfolio/<int:item_id>/delete/", views.artist_portfolio_delete_view, name="api_artist_portfolio_delete"),
+    path("api/artist/availability/", views.artist_availability_view, name="api_artist_availability"),
+    path("api/artist/availability/<int:avail_id>/delete/", views.artist_availability_delete_view, name="api_artist_availability_delete"),
+    path("api/artist/profile/", views.artist_profile_view, name="api_artist_profile"),
+    path("api/artist/categories/", views.artist_categories, name="api_artist_categories"),
 ]
 
 if settings.DEBUG:

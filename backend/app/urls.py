@@ -23,4 +23,12 @@ urlpatterns = [
     path("customer/notifications/mark-read/", views.customer_notifications_read_view, name="customer_notifications_read"),
     path("customer/support/", views.customer_support_inquiry_view, name="customer_support_inquiry"),
     path("check-username/",views.check_username_view,name="check_username"),
+    # Performing Artist Dashboard endpoints
+    path("artist/dashboard/", views.artist_dashboard_view, name="artist_dashboard"),
+    path("artist/bookings/<int:booking_id>/respond/", views.artist_respond_booking_view, name="artist_respond_booking"),
+    path("artist/bookings/<int:booking_id>/complete/", views.artist_complete_booking_view, name="artist_complete_booking"),
+    path("artist/portfolio/", views.artist_portfolio_view, name="artist_portfolio"),
+    path("artist/portfolio/<int:item_id>/delete/", views.artist_portfolio_delete_view, name="artist_portfolio_delete"),
+    path("artist/availability/", views.artist_availability_view, name="artist_availability"),
+    path("artist/availability/<int:avail_id>/delete/", views.artist_availability_delete_view, name="artist_availability_delete"),
 ]

@@ -84,6 +84,7 @@ class Booking(models.Model):
     event_date = models.DateTimeField()
     event_location = models.CharField(max_length=200)
     message = models.TextField(blank=True)
+    response_message = models.TextField(blank=True, default="")
     agreed_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -197,3 +198,24 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"Notification({self.user.username}: {self.title})"
+
+
+class ArtistAvailability(models.Model):
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.CASCADE,
+        related_name="availabilities",
+    )
+    date = models.DateField()
+    is_available = models.BooleanField(default=True)
+    reason = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("artist", "date")
+        ordering = ["date"]
+
+    def __str__(self):
+        status_text = "Available" if self.is_available else "Unavailable"
+        return f"{self.artist.stage_name} - {self.date} ({status_text})"
+

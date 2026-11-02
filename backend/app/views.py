@@ -30,6 +30,7 @@ from .models import (
     CustomerProfile,
     FavoriteArtist,
     Notification,
+    ArtistAvailability,
 )
 
 logger = logging.getLogger(__name__)
@@ -1201,5 +1202,531 @@ def customer_support_inquiry_view(request):
     return JsonResponse({
         "message": "Support request submitted successfully. Our team will get back to you shortly.",
     })
+
+
+# ============================================================================
+# PERFORMING ARTIST DASHBOARD ENDPOINTS
+# ============================================================================
+
+@require_GET
+def artist_dashboard_view(request):
+    """
+    Returns aggregated performing artist dashboard data:
+    1. Artist Profile Information
+    2. Statistics: Total Booking Requests, Pending Requests, Accepted Bookings,
+       Completed Performances, Total Earnings, Upcoming Performances
+    3. Bookings (all incoming requests, accepted, completed, rejected)
+    4. Upcoming Performances
+    5. Recent Activity
+    6. Earnings & Payment Overview
+    7. Portfolio Items
+    8. Reviews & Ratings
+    9. Availability Dates
+    10. Notifications
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required. Please sign in."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse(
+            {"error": "Performing artist profile not found for this account."},
+            status=403,
+        )
+
+    # All bookings for this artist
+    bookings_qs = (
+        Booking.objects.filter(artist=artist)
+        .select_related("customer", "payment")
+        .order_by("-created_at")
+    )
+
+    total_requests = bookings_qs.count()
+    pending_requests = bookings_qs.filter(status=Booking.Status.PENDING).count()
+    accepted_bookings = bookings_qs.filter(status=Booking.Status.ACCEPTED).count()
+    completed_performances = bookings_qs.filter(status=Booking.Status.COMPLETED).count()
+    rejected_requests = bookings_qs.filter(status=Booking.Status.REJECTED).count()
+    cancelled_bookings = bookings_qs.filter(status=Booking.Status.CANCELLED).count()
+
+    # Upcoming performances
+    now = timezone.now()
+    upcoming_qs = bookings_qs.filter(
+        status=Booking.Status.ACCEPTED,
+        event_date__gte=now,
+    ).order_by("event_date")
+    upcoming_count = upcoming_qs.count()
+
+    # Calculate earnings
+    completed_earnings = sum(
+        (b.agreed_price or 0) for b in bookings_qs.filter(status=Booking.Status.COMPLETED)
+    )
+    pending_earnings = sum(
+        (b.agreed_price or 0) for b in bookings_qs.filter(status=Booking.Status.ACCEPTED)
+    )
+    total_earnings = completed_earnings + pending_earnings
+
+    serialized_bookings = []
+    payments_list = []
+    recent_activity = []
+
+    for b in bookings_qs:
+        payment = getattr(b, "payment", None)
+        payment_data = None
+        if payment:
+            payment_data = {
+                "id": payment.id,
+                "amount": str(payment.amount),
+                "status": payment.status,
+                "transaction_id": payment.transaction_id or f"TXN-{payment.id}",
+                "date": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
+                "customer_name": b.customer.get_full_name() or b.customer.username,
+            }
+            payments_list.append(payment_data)
+
+            recent_activity.append({
+                "id": f"pay-{payment.id}",
+                "type": "payment",
+                "title": f"Payment {payment.status.title()}",
+                "description": f"₹{payment.amount} for {b.event_type} from {b.customer.get_full_name() or b.customer.username}",
+                "timestamp": payment.created_at.isoformat(),
+                "formatted_time": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
+                "status": payment.status,
+            })
+
+        customer_profile = getattr(b.customer, "customer_profile", None)
+        booking_item = {
+            "id": b.id,
+            "customer_id": b.customer.id,
+            "customer_name": b.customer.get_full_name() or b.customer.username,
+            "customer_email": b.customer.email,
+            "customer_phone": customer_profile.phone if customer_profile else "",
+            "customer_location": customer_profile.location if customer_profile else "",
+            "customer_image": customer_profile.profile_image.url if (customer_profile and customer_profile.profile_image) else "",
+            "event_type": b.event_type,
+            "event_date": b.event_date.strftime("%b %d, %Y %I:%M %p") if b.event_date else "",
+            "event_date_iso": b.event_date.isoformat() if b.event_date else "",
+            "event_location": b.event_location,
+            "agreed_price": str(b.agreed_price) if b.agreed_price else "0.00",
+            "status": b.status,
+            "message": b.message,
+            "response_message": b.response_message,
+            "created_at": b.created_at.strftime("%b %d, %Y"),
+            "created_at_time": b.created_at.strftime("%b %d, %Y %I:%M %p"),
+            "payment": payment_data,
+        }
+        serialized_bookings.append(booking_item)
+
+        recent_activity.append({
+            "id": f"book-{b.id}",
+            "type": "booking_request",
+            "title": f"Booking {b.status.replace('_', ' ').title()}",
+            "description": f"{b.event_type} with {b.customer.get_full_name() or b.customer.username} in {b.event_location}",
+            "timestamp": b.created_at.isoformat(),
+            "formatted_time": b.created_at.strftime("%b %d, %Y %I:%M %p"),
+            "status": b.status,
+        })
+
+    # Portfolio items
+    portfolio_qs = artist.portfolio_items.all().order_by("-uploaded_at")
+    portfolio_items = [
+        {
+            "id": item.id,
+            "title": item.title,
+            "description": item.description,
+            "media_url": item.media_url,
+            "uploaded_at": item.uploaded_at.strftime("%b %d, %Y") if item.uploaded_at else "",
+        }
+        for item in portfolio_qs
+    ]
+
+    # Reviews
+    reviews_qs = artist.reviews.select_related("customer", "booking").order_by("-created_at")
+    reviews_data = [
+        {
+            "id": r.id,
+            "customer_name": r.customer.get_full_name() or r.customer.username,
+            "rating": r.rating,
+            "comment": r.comment,
+            "event_type": r.booking.event_type if r.booking else "",
+            "created_at": r.created_at.strftime("%b %d, %Y") if r.created_at else "",
+        }
+        for r in reviews_qs
+    ]
+    avg_rating = 0.0
+    if reviews_data:
+        avg_rating = round(sum(r["rating"] for r in reviews_data) / len(reviews_data), 1)
+
+    # Availability
+    avail_qs = artist.availabilities.all().order_by("date")
+    availability_list = [
+        {
+            "id": av.id,
+            "date": av.date.isoformat(),
+            "date_formatted": av.date.strftime("%b %d, %Y"),
+            "is_available": av.is_available,
+            "reason": av.reason,
+        }
+        for av in avail_qs
+    ]
+
+    # Notifications
+    notifications_qs = Notification.objects.filter(user=request.user).order_by("-created_at")
+    unread_notifications_count = notifications_qs.filter(is_read=False).count()
+    notifications_list = [
+        {
+            "id": n.id,
+            "title": n.title,
+            "message": n.message,
+            "notification_type": n.notification_type,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%b %d, %Y %I:%M %p"),
+        }
+        for n in notifications_qs[:30]
+    ]
+
+    # Sort recent activity descending
+    recent_activity.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    # Categories list for profile editing
+    categories_list = list(Category.objects.all().values("id", "name"))
+
+    return JsonResponse({
+        "artist": {
+            "id": artist.id,
+            "stage_name": artist.stage_name,
+            "gender": artist.gender,
+            "category_id": artist.category_id,
+            "category_name": artist.category.name if artist.category else "",
+            "bio": artist.bio,
+            "location": artist.location,
+            "phone": artist.phone,
+            "starting_price": str(artist.starting_price),
+            "years_of_experience": artist.years_of_experience,
+            "performance_types": artist.performance_types,
+            "travel_availability": artist.travel_availability,
+            "portfolio_url": artist.portfolio_url,
+            "additional_information": artist.additional_information,
+            "profile_image": artist.profile_image.url if artist.profile_image else "",
+            "is_verified": artist.is_verified,
+            "is_active": artist.is_active,
+            "created_at": artist.created_at.strftime("%b %Y") if artist.created_at else "",
+        },
+        "stats": {
+            "total_bookings": total_requests,
+            "pending_requests": pending_requests,
+            "accepted_bookings": accepted_bookings,
+            "completed_performances": completed_performances,
+            "rejected_requests": rejected_requests,
+            "cancelled_bookings": cancelled_bookings,
+            "upcoming_performances": upcoming_count,
+            "total_earnings": str(total_earnings),
+            "completed_earnings": str(completed_earnings),
+            "pending_earnings": str(pending_earnings),
+            "average_rating": avg_rating,
+            "total_reviews": len(reviews_data),
+        },
+        "bookings": serialized_bookings,
+        "upcoming_performances": [b for b in serialized_bookings if b["status"] == "accepted"],
+        "recent_activity": recent_activity[:20],
+        "payments": payments_list[:30],
+        "portfolio": portfolio_items,
+        "reviews": reviews_data,
+        "availability": availability_list,
+        "notifications": notifications_list,
+        "unread_notifications_count": unread_notifications_count,
+        "categories": categories_list,
+    })
+
+
+@csrf_protect
+@require_POST
+def artist_respond_booking_view(request, booking_id):
+    """
+    Accept or reject an incoming booking request.
+    Only the assigned artist can respond.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    booking = Booking.objects.filter(id=booking_id, artist=artist).select_related("customer").first()
+    if not booking:
+        return JsonResponse({"error": "Booking request not found or unauthorized."}, status=404)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid request body."}, status=400)
+
+    action = data.get("action", "").strip().lower()
+    reason = data.get("reason", "").strip()
+
+    if action == "accept":
+        booking.status = Booking.Status.ACCEPTED
+        booking.response_message = reason or "Booking request accepted by artist."
+        booking.save()
+
+        # Notify Customer
+        Notification.objects.create(
+            user=booking.customer,
+            title="Booking Request Accepted!",
+            message=f"{artist.stage_name} has accepted your booking for {booking.event_type} on {booking.event_date.strftime('%b %d, %Y')}.",
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        )
+
+        # Notify Artist
+        Notification.objects.create(
+            user=request.user,
+            title="Booking Confirmed",
+            message=f"You accepted the booking with {booking.customer.get_full_name() or booking.customer.username} for {booking.event_type}.",
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        )
+
+        return JsonResponse({
+            "message": "Booking request accepted successfully.",
+            "status": booking.status,
+            "booking_id": booking.id,
+        })
+
+    elif action == "reject":
+        booking.status = Booking.Status.REJECTED
+        booking.response_message = reason or "Artist is unavailable for this date."
+        booking.save()
+
+        # Update payment status if exists
+        payment = getattr(booking, "payment", None)
+        if payment and payment.status == Payment.Status.PENDING:
+            payment.status = Payment.Status.FAILED
+            payment.save()
+
+        # Notify Customer
+        Notification.objects.create(
+            user=booking.customer,
+            title="Booking Request Declined",
+            message=f"{artist.stage_name} was unable to accept your booking for {booking.event_type}. Reason: {booking.response_message}",
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        )
+
+        return JsonResponse({
+            "message": "Booking request declined.",
+            "status": booking.status,
+            "booking_id": booking.id,
+        })
+
+    return JsonResponse({"error": "Invalid action. Choose 'accept' or 'reject'."}, status=400)
+
+
+@csrf_protect
+@require_POST
+def artist_complete_booking_view(request, booking_id):
+    """
+    Mark an accepted performance as completed.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    booking = Booking.objects.filter(id=booking_id, artist=artist).select_related("customer", "payment").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found or unauthorized."}, status=404)
+
+    if booking.status not in (Booking.Status.ACCEPTED, Booking.Status.PENDING):
+        return JsonResponse({"error": f"Cannot complete a booking with status '{booking.status}'."}, status=400)
+
+    booking.status = Booking.Status.COMPLETED
+    booking.save()
+
+    payment = getattr(booking, "payment", None)
+    if payment:
+        payment.status = Payment.Status.SUCCESS
+        payment.save()
+
+    # Notify customer
+    Notification.objects.create(
+        user=booking.customer,
+        title="Performance Completed",
+        message=f"{artist.stage_name} marked your {booking.event_type} performance as completed. Feel free to leave a review!",
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    # Notify artist
+    Notification.objects.create(
+        user=request.user,
+        title="Performance Completed",
+        message=f"You marked {booking.event_type} for {booking.customer.get_full_name() or booking.customer.username} as completed. Earnings credited.",
+        notification_type=Notification.NotificationType.PAYMENT,
+    )
+
+    return JsonResponse({
+        "message": "Performance marked as completed successfully.",
+        "status": booking.status,
+        "booking_id": booking.id,
+    })
+
+
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def artist_portfolio_view(request):
+    """
+    List or add portfolio items for the authenticated artist.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    if request.method == "GET":
+        items = [
+            {
+                "id": p.id,
+                "title": p.title,
+                "description": p.description,
+                "media_url": p.media_url,
+                "uploaded_at": p.uploaded_at.strftime("%b %d, %Y"),
+            }
+            for p in artist.portfolio_items.all().order_by("-uploaded_at")
+        ]
+        return JsonResponse({"portfolio": items})
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid request data."}, status=400)
+
+    title = data.get("title", "").strip()
+    media_url = data.get("media_url", "").strip()
+    description = data.get("description", "").strip()
+
+    if not title:
+        return JsonResponse({"error": "Title is required."}, status=400)
+
+    item = Portfolio.objects.create(
+        artist=artist,
+        title=title,
+        media_url=media_url,
+        description=description,
+    )
+
+    return JsonResponse({
+        "message": "Portfolio item added successfully.",
+        "item": {
+            "id": item.id,
+            "title": item.title,
+            "description": item.description,
+            "media_url": item.media_url,
+            "uploaded_at": item.uploaded_at.strftime("%b %d, %Y"),
+        },
+    }, status=201)
+
+
+@csrf_protect
+@require_http_methods(["POST", "DELETE"])
+def artist_portfolio_delete_view(request, item_id):
+    """Delete a portfolio item belonging to the authenticated artist."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    item = Portfolio.objects.filter(id=item_id, artist=artist).first()
+    if not item:
+        return JsonResponse({"error": "Portfolio item not found."}, status=404)
+
+    item.delete()
+    return JsonResponse({"message": "Portfolio item deleted successfully."})
+
+
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def artist_availability_view(request):
+    """
+    List or add/update availability dates for the authenticated artist.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    if request.method == "GET":
+        records = [
+            {
+                "id": av.id,
+                "date": av.date.isoformat(),
+                "date_formatted": av.date.strftime("%b %d, %Y"),
+                "is_available": av.is_available,
+                "reason": av.reason,
+            }
+            for av in artist.availabilities.all().order_by("date")
+        ]
+        return JsonResponse({"availability": records})
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid request body."}, status=400)
+
+    date_str = data.get("date", "").strip()
+    is_available = data.get("is_available", True)
+    reason = data.get("reason", "").strip()
+
+    if not date_str:
+        return JsonResponse({"error": "Date is required."}, status=400)
+
+    from django.utils.dateparse import parse_date
+    parsed = parse_date(date_str)
+    if not parsed:
+        return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
+
+    avail, created = ArtistAvailability.objects.update_or_create(
+        artist=artist,
+        date=parsed,
+        defaults={
+            "is_available": bool(is_available),
+            "reason": reason,
+        },
+    )
+
+    return JsonResponse({
+        "message": "Availability updated successfully.",
+        "record": {
+            "id": avail.id,
+            "date": avail.date.isoformat(),
+            "date_formatted": avail.date.strftime("%b %d, %Y"),
+            "is_available": avail.is_available,
+            "reason": avail.reason,
+        },
+    })
+
+
+@csrf_protect
+@require_http_methods(["POST", "DELETE"])
+def artist_availability_delete_view(request, avail_id):
+    """Delete an availability override record."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    avail = ArtistAvailability.objects.filter(id=avail_id, artist=artist).first()
+    if not avail:
+        return JsonResponse({"error": "Availability record not found."}, status=404)
+
+    avail.delete()
+    return JsonResponse({"message": "Availability record removed."})
+
 
 

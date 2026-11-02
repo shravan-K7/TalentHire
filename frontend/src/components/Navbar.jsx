@@ -36,11 +36,12 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
     links.push({ label: 'Admin Console', path: '/admin/' });
   }
 
-  if (user?.is_artist || user?.artist_profile) {
-    links.push({ label: 'Artist Dashboard', path: '/artist-register' });
+  const isArtist = Boolean(user?.is_artist || user?.artist_profile || user?.role === 'artist');
+
+  if (isArtist) {
+    links.push({ label: 'Artist Dashboard', path: user?.artist_profile ? '/profile' : '/artist-register' });
   }
 
-  const isArtist = Boolean(user?.is_artist || user?.artist_profile);
   const displayName = user
     ? (user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : (user.username || user.email || 'User'))
     : '';
@@ -105,7 +106,7 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
               <button
                 type="button"
                 className="navbar-bell-btn"
-                onClick={(e) => goTo(e, isArtist ? '/artist-register' : '/profile?tab=notifications')}
+                onClick={(e) => goTo(e, '/profile?tab=notifications')}
                 title="Notifications"
                 aria-label="View notifications"
               >
@@ -120,7 +121,7 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
               <button
                 type="button"
                 className={`navbar-profile-trigger ${currentPath === '/profile' || currentPath === '/artist-register' ? 'active' : ''}`}
-                onClick={(e) => goTo(e, isArtist ? '/artist-register' : '/profile')}
+                onClick={(e) => goTo(e, (isArtist && !user?.artist_profile) ? '/artist-register' : '/profile')}
                 title={`Go to Dashboard (${displayName})`}
                 aria-label="Go to Dashboard"
               >
