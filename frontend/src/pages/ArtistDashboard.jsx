@@ -25,6 +25,29 @@ function formatBookingStatus(status) {
     : 'Pending';
 }
 
+function renderStars(rating = 5) {
+  const rounded = Math.round(Number(rating) || 5);
+  return (
+    <div style={{ display: 'inline-flex', gap: '3px', color: '#FF5722' }}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <svg
+          key={star}
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill={star <= rounded ? '#FF5722' : 'none'}
+          stroke="#FF5722"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+      ))}
+    </div>
+  );
+}
+
 const COMMON_PERFORMANCE_TYPES = [
   'Solo Performance',
   'Live Band',
@@ -750,15 +773,19 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
         {/* =====================================================================
             RIGHT FLUID CONTENT AREA
             ===================================================================== */}
-        <main className="cd-content-area" id="main-content">
+        <main className="cd-main-panel" id="main-content">
           {/* Header Title Bar */}
           <div className="cd-content-topbar">
-            <div className="cd-screen-title-wrap">
+            <div className="cd-screen-heading-wrap">
+              <span className="cd-dashboard-subtitle">PERFORMING ARTIST</span>
               <h1 className="cd-screen-title">{screenTitle}</h1>
-              <p className="cd-screen-subtitle">{screenSubtitle}</p>
+              <p style={{ margin: '4px 0 0', fontSize: '0.98rem', color: '#9E9E9E' }}>{screenSubtitle}</p>
             </div>
             <div className="cd-topbar-actions">
-              <span className={`cd-screen-verified-pill ${artist.is_verified ? 'verified' : 'pending'}`}>
+              <span className={`cd-topbar-badge ${artist.is_verified ? '' : 'pending'}`}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
                 {artist.is_verified ? 'Verified Performing Artist' : 'Verification Under Review'}
               </span>
             </div>
@@ -768,41 +795,41 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 1: ARTIST DASHBOARD OVERVIEW
               ================================================================= */}
           {activeTab === 'dashboard' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {/* Statistics Grid - 6 Key Metrics */}
-              <div className="cd-stats-grid">
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Total Booking Requests</div>
+            <div className="cd-view-container" style={{ gap: '24px' }}>
+              {/* Statistics Grid - 6 Key Metrics in Canonical Grid */}
+              <div className="cd-overview-stats-grid artist-grid">
+                <div className="cd-stat-box" onClick={() => switchTab('requests')}>
+                  <div className="cd-stat-lbl">Total Requests</div>
                   <div className="cd-stat-num">{stats.total_bookings ?? 0}</div>
                   <div className="cd-stat-sub">All-time received</div>
                 </div>
 
-                <div className="cd-stat-card cd-stat-card-accent">
-                  <div className="cd-stat-label">Pending Requests</div>
-                  <div className="cd-stat-num">{stats.pending_requests ?? 0}</div>
+                <div className="cd-stat-box accent-pending" onClick={() => { setRequestFilter('pending'); switchTab('requests'); }}>
+                  <div className="cd-stat-lbl" style={{ color: '#FF9800' }}>Pending Requests</div>
+                  <div className="cd-stat-num pending">{stats.pending_requests ?? 0}</div>
                   <div className="cd-stat-sub">Action required</div>
                 </div>
 
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Accepted Bookings</div>
-                  <div className="cd-stat-num">{stats.accepted_bookings ?? 0}</div>
-                  <div className="cd-stat-sub">Confirmed celebrations</div>
+                <div className="cd-stat-box" onClick={() => switchTab('accepted')}>
+                  <div className="cd-stat-lbl">Accepted Bookings</div>
+                  <div className="cd-stat-num confirmed">{stats.accepted_bookings ?? 0}</div>
+                  <div className="cd-stat-sub">Confirmed shows</div>
                 </div>
 
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Completed Performances</div>
+                <div className="cd-stat-box" onClick={() => switchTab('calendar')}>
+                  <div className="cd-stat-lbl">Completed</div>
                   <div className="cd-stat-num">{stats.completed_performances ?? 0}</div>
-                  <div className="cd-stat-sub">Successfully delivered</div>
+                  <div className="cd-stat-sub">Delivered on stage</div>
                 </div>
 
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Total Earnings</div>
-                  <div className="cd-stat-num">₹{stats.total_earnings ?? '0.00'}</div>
+                <div className="cd-stat-box accent-earnings" onClick={() => switchTab('earnings')}>
+                  <div className="cd-stat-lbl" style={{ color: '#4CAF50' }}>Total Earnings</div>
+                  <div className="cd-stat-num payments">₹{stats.total_earnings ?? '0.00'}</div>
                   <div className="cd-stat-sub">Completed & secured</div>
                 </div>
 
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Upcoming Performances</div>
+                <div className="cd-stat-box" onClick={() => switchTab('calendar')}>
+                  <div className="cd-stat-lbl">Upcoming Shows</div>
                   <div className="cd-stat-num">{stats.upcoming_performances ?? 0}</div>
                   <div className="cd-stat-sub">Scheduled on calendar</div>
                 </div>
@@ -810,7 +837,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
               {/* Section 1: Booking Overview (Recent Booking Requests) */}
               <div className="cd-profile-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
                   <h2 className="cd-card-title" style={{ margin: 0 }}>Booking Overview</h2>
                   <button
                     type="button"
@@ -822,31 +849,34 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 </div>
 
                 {bookings.length === 0 ? (
-                  <div className="cd-empty-state">
-                    <p className="cd-empty-title">No Booking Requests Yet</p>
-                    <p className="cd-empty-text">Incoming inquiries for your performances will appear here.</p>
+                  <div className="cd-empty-card">
+                    <h3>No Booking Requests Yet</h3>
+                    <p>Incoming inquiries for your live performances will appear here as soon as event hosts book you.</p>
                   </div>
                 ) : (
                   <div className="cd-bookings-list">
                     {bookings.slice(0, 4).map((b) => (
                       <div key={b.id} className="cd-booking-row-card">
-                        <div className="cd-booking-row-main">
-                          <div className="cd-booking-code-pill">BK-{b.id}</div>
-                          <div>
-                            <div className="cd-booking-artist-name">{b.event_type}</div>
-                            <div className="cd-booking-meta-text">
-                              Host: <strong style={{ color: '#F7F7F7' }}>{b.customer_name}</strong> · {b.event_date || 'Date TBD'} · {b.event_location}
-                            </div>
-                          </div>
+                        <div className="cd-booking-id-block">
+                          <span className="cd-booking-code">#BK-{b.id}</span>
+                          <span className="cd-booking-artist-sub">{b.event_type} · Host: {b.customer_name}</span>
                         </div>
 
-                        <div className="cd-booking-row-actions">
+                        <div className="cd-booking-date-block">
+                          <span className="cd-booking-date-text">{b.event_date || 'Date TBD'}</span>
+                          <span className="cd-booking-location-text">{b.event_location}</span>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                           <span className={`cd-status-pill status-${b.status}`}>
                             {formatBookingStatus(b.status)}
                           </span>
-                          <span style={{ fontSize: '1rem', fontWeight: 700, color: '#FF5722', padding: '0 8px' }}>
+                          <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FF5722' }}>
                             ₹{b.agreed_price}
                           </span>
+                        </div>
+
+                        <div className="cd-booking-actions-block">
                           <button
                             type="button"
                             className="cd-btn-secondary cd-btn-sm"
@@ -1060,44 +1090,106 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 2: ARTIST PROFILE PAGE
               ================================================================= */}
           {activeTab === 'profile' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div className="cd-profile-hero">
-                <div className="cd-profile-avatar-wrap">
-                  {artist.profile_image ? (
-                    <img src={artist.profile_image} alt={artist.stage_name} className="cd-profile-hero-avatar" />
-                  ) : (
-                    <div className="cd-profile-avatar-placeholder">{initials}</div>
-                  )}
-                </div>
-
-                <div className="cd-profile-hero-info">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <h2 className="cd-profile-fullname">{artist.stage_name || user?.username}</h2>
-                    <span className={`cd-screen-verified-pill ${artist.is_verified ? 'verified' : 'pending'}`}>
-                      {artist.is_verified ? 'Verified Artist' : 'Verification Pending'}
-                    </span>
+            <div className="cd-view-container cd-profile-view" style={{ gap: '20px' }}>
+              <div className="cd-profile-card">
+                <div className="cd-profile-card-header">
+                  <div className="cd-profile-avatar-box">
+                    {artist.profile_image ? (
+                      <img
+                        src={artist.profile_image}
+                        alt={artist.stage_name}
+                        className="cd-profile-avatar-img"
+                      />
+                    ) : (
+                      <span className="cd-avatar-fallback-initials">{initials}</span>
+                    )}
                   </div>
 
-                  <p className="cd-profile-subtext">
-                    {artist.category_name || 'Performing Artist'} · {artist.gender ? artist.gender.toUpperCase() : 'ARTIST'}
-                  </p>
+                  <div className="cd-profile-info-column">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      <h2 className="cd-profile-fullname">{artist.stage_name || user?.username}</h2>
+                      <span className={`cd-topbar-badge ${artist.is_verified ? '' : 'pending'}`}>
+                        {artist.is_verified ? 'Verified Artist' : 'Verification Pending'}
+                      </span>
+                    </div>
 
-                  <div className="cd-profile-contact-list">
-                    <span className="cd-profile-contact-item">Location: {artist.location || 'Location Not Specified'}</span>
-                    <span className="cd-profile-contact-item">Phone: {artist.phone || 'Phone Not Added'}</span>
-                    <span className="cd-profile-contact-item">Experience: {artist.years_of_experience || 0} years</span>
-                    <span className="cd-profile-contact-item">Travel: {artist.travel_availability || 'Within City'}</span>
+                    <p className="cd-profile-subtext">
+                      {artist.category_name || 'Performing Artist'} · {artist.gender ? artist.gender.toUpperCase() : 'ARTIST'}
+                    </p>
+                  </div>
+
+                  <div className="cd-profile-edit-btn-wrap">
+                    <button
+                      type="button"
+                      className="cd-btn-primary"
+                      onClick={() => switchTab('edit-profile')}
+                    >
+                      Edit Profile
+                    </button>
                   </div>
                 </div>
 
-                <div className="cd-profile-edit-btn-wrap">
-                  <button
-                    type="button"
-                    className="cd-btn-primary"
-                    onClick={() => switchTab('edit-profile')}
-                  >
-                    Edit Profile
-                  </button>
+                <div className="cd-profile-card-divider" />
+
+                <div className="cd-profile-details-grid-layout">
+                  <div className="cd-profile-section-block">
+                    <h3 className="cd-profile-section-heading">Contact & Booking Information</h3>
+                    <div className="cd-contact-row">
+                      <span className="cd-contact-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                        </svg>
+                      </span>
+                      <span className="cd-contact-text">{artist.phone || 'Phone Not Added'}</span>
+                    </div>
+
+                    <div className="cd-contact-row">
+                      <span className="cd-contact-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                          <polyline points="22,6 12,13 2,6" />
+                        </svg>
+                      </span>
+                      <span className="cd-contact-text">{user?.email || 'Email Not Specified'}</span>
+                    </div>
+
+                    <div className="cd-contact-row">
+                      <span className="cd-contact-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+                          <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                        </svg>
+                      </span>
+                      <span className="cd-contact-text">{artist.years_of_experience || 0} years experience · Travel: {artist.travel_availability || 'Within City'}</span>
+                    </div>
+                  </div>
+
+                  <div className="cd-profile-section-block">
+                    <h3 className="cd-profile-section-heading">Location & Starting Rate</h3>
+                    <div className="cd-contact-row">
+                      <span className="cd-contact-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                          <circle cx="12" cy="10" r="3" />
+                        </svg>
+                      </span>
+                      <span className="cd-contact-text cd-address-text">
+                        {artist.location || 'Location Not Specified'}
+                      </span>
+                    </div>
+
+                    <div className="cd-contact-row">
+                      <span className="cd-contact-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="12" y1="1" x2="12" y2="23" />
+                          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                        </svg>
+                      </span>
+                      <span className="cd-contact-text">
+                        Starting Fee: <strong style={{ color: '#FF5722', fontSize: '1.15rem' }}>₹{artist.starting_price || '0'}</strong> / performance
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1357,7 +1449,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           className={`cd-tag-item ${active ? 'active' : ''}`}
                           onClick={() => togglePerformanceType(tag)}
                         >
-                          {active ? '✓ ' : '+ '}
+                          {active ? '- ' : '+ '}
                           {tag}
                         </button>
                       );
@@ -1506,7 +1598,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 5: BOOKING REQUESTS PAGE
               ================================================================= */}
           {activeTab === 'requests' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="cd-view-container" style={{ gap: '20px' }}>
               {/* Filter Tabs */}
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                 <button
@@ -1540,45 +1632,44 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               </div>
 
               {filteredBookings.length === 0 ? (
-                <div className="cd-empty-state">
-                  <p className="cd-empty-title">No Booking Requests Found</p>
-                  <p className="cd-empty-text">No booking requests match the current filter selection.</p>
+                <div className="cd-empty-card">
+                  <h3>No Booking Requests Found</h3>
+                  <p>No booking requests match the current filter selection.</p>
                 </div>
               ) : (
                 <div className="cd-bookings-list">
                   {filteredBookings.map((b) => (
                     <div key={b.id} className="cd-booking-row-card">
-                      <div className="cd-booking-row-main">
-                        <div className="cd-booking-code-pill">BK-{b.id}</div>
-                        <div>
-                          <div className="cd-booking-artist-name">{b.event_type}</div>
-                          <div className="cd-booking-meta-text">
-                            Host: <strong style={{ color: '#F7F7F7' }}>{b.customer_name}</strong> ({b.customer_email})
+                      <div className="cd-booking-id-block">
+                        <span className="cd-booking-code">#BK-{b.id}</span>
+                        <span className="cd-booking-artist-sub">{b.event_type} · Host: {b.customer_name}</span>
+                        {b.message && (
+                          <div style={{ fontSize: '0.86rem', color: '#B0B0B0', fontStyle: 'italic', marginTop: '4px' }}>
+                            "{b.message}"
                           </div>
-                          <div className="cd-booking-meta-text">
-                            Schedule: {b.event_date || 'Date TBD'} · {b.event_location}
+                        )}
+                        {b.response_message && (
+                          <div style={{ fontSize: '0.82rem', color: '#FF9800', marginTop: '4px' }}>
+                            Artist Note: {b.response_message}
                           </div>
-                          {b.message && (
-                            <div style={{ fontSize: '0.86rem', color: '#B0B0B0', fontStyle: 'italic', marginTop: '6px' }}>
-                              "{b.message}"
-                            </div>
-                          )}
-                          {b.response_message && (
-                            <div style={{ fontSize: '0.82rem', color: '#FF9800', marginTop: '4px' }}>
-                              Artist Note: {b.response_message}
-                            </div>
-                          )}
-                        </div>
+                        )}
                       </div>
 
-                      <div className="cd-booking-row-actions">
+                      <div className="cd-booking-date-block">
+                        <span className="cd-booking-date-text">{b.event_date || 'Date TBD'}</span>
+                        <span className="cd-booking-location-text">{b.event_location}</span>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                         <span className={`cd-status-pill status-${b.status}`}>
                           {formatBookingStatus(b.status)}
                         </span>
-                        <span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#FF5722', padding: '0 8px' }}>
+                        <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FF5722' }}>
                           ₹{b.agreed_price}
                         </span>
+                      </div>
 
+                      <div className="cd-booking-actions-block">
                         <button
                           type="button"
                           className="cd-btn-secondary cd-btn-sm"
@@ -1587,7 +1678,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                             switchTab('booking-detail');
                           }}
                         >
-                          View Details
+                          Details
                         </button>
 
                         {b.status === 'pending' && (
@@ -1886,38 +1977,38 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 8: ACCEPTED BOOKINGS PAGE
               ================================================================= */}
           {activeTab === 'accepted' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <p style={{ margin: 0, color: '#A0A0A0', fontSize: '0.94rem' }}>
+            <div className="cd-view-container" style={{ gap: '20px' }}>
+              <p style={{ margin: 0, color: '#A0A0A0', fontSize: '0.96rem' }}>
                 All confirmed bookings scheduled with event organizers.
               </p>
 
               {acceptedBookingsList.length === 0 ? (
-                <div className="cd-empty-state">
-                  <p className="cd-empty-title">No Accepted Bookings</p>
-                  <p className="cd-empty-text">When you accept booking requests, they will be listed here for event execution.</p>
+                <div className="cd-empty-card">
+                  <h3>No Accepted Bookings</h3>
+                  <p>When you accept booking requests, they will be listed here for event execution.</p>
                 </div>
               ) : (
                 <div className="cd-bookings-list">
                   {acceptedBookingsList.map((b) => (
                     <div key={b.id} className="cd-booking-row-card">
-                      <div className="cd-booking-row-main">
-                        <div className="cd-booking-code-pill">BK-{b.id}</div>
-                        <div>
-                          <div className="cd-booking-artist-name">{b.event_type}</div>
-                          <div className="cd-booking-meta-text">
-                            Host: <strong style={{ color: '#F7F7F7' }}>{b.customer_name}</strong> ({b.customer_email})
-                          </div>
-                          <div className="cd-booking-meta-text">
-                            Event Date: {b.event_date} · Venue: {b.event_location}
-                          </div>
-                        </div>
+                      <div className="cd-booking-id-block">
+                        <span className="cd-booking-code">#BK-{b.id}</span>
+                        <span className="cd-booking-artist-sub">{b.event_type} · Host: {b.customer_name}</span>
                       </div>
 
-                      <div className="cd-booking-row-actions">
+                      <div className="cd-booking-date-block">
+                        <span className="cd-booking-date-text">{b.event_date || 'Date TBD'}</span>
+                        <span className="cd-booking-location-text">{b.event_location}</span>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
                         <span className="cd-status-pill status-accepted">Confirmed</span>
-                        <span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#FF5722', padding: '0 8px' }}>
+                        <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#FF5722' }}>
                           ₹{b.agreed_price}
                         </span>
+                      </div>
+
+                      <div className="cd-booking-actions-block">
                         <button
                           type="button"
                           className="cd-btn-secondary cd-btn-sm"
@@ -1947,23 +2038,23 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 9: PAYMENT & EARNINGS PAGE
               ================================================================= */}
           {activeTab === 'earnings' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div className="cd-stats-grid">
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Total Earnings</div>
-                  <div className="cd-stat-num">₹{stats.total_earnings ?? '0.00'}</div>
+            <div className="cd-view-container" style={{ gap: '24px' }}>
+              <div className="cd-overview-stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                <div className="cd-stat-box accent-earnings">
+                  <div className="cd-stat-lbl">Total Earnings</div>
+                  <div className="cd-stat-num payments">₹{stats.total_earnings ?? '0.00'}</div>
                   <div className="cd-stat-sub">Across all bookings</div>
                 </div>
 
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Completed Payouts</div>
-                  <div className="cd-stat-num" style={{ color: '#4CAF50' }}>₹{stats.completed_earnings ?? '0.00'}</div>
+                <div className="cd-stat-box">
+                  <div className="cd-stat-lbl" style={{ color: '#4CAF50' }}>Completed Payouts</div>
+                  <div className="cd-stat-num confirmed">₹{stats.completed_earnings ?? '0.00'}</div>
                   <div className="cd-stat-sub">Delivered performances</div>
                 </div>
 
-                <div className="cd-stat-card">
-                  <div className="cd-stat-label">Pending Payouts</div>
-                  <div className="cd-stat-num" style={{ color: '#FF9800' }}>₹{stats.pending_earnings ?? '0.00'}</div>
+                <div className="cd-stat-box accent-pending">
+                  <div className="cd-stat-lbl" style={{ color: '#FF9800' }}>Pending Payouts</div>
+                  <div className="cd-stat-num pending">₹{stats.pending_earnings ?? '0.00'}</div>
                   <div className="cd-stat-sub">In escrow for upcoming shows</div>
                 </div>
               </div>
@@ -2045,8 +2136,8 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   <div style={{ fontSize: '3rem', fontWeight: 800, color: '#FF5722', lineHeight: 1 }}>
                     {stats.average_rating ? stats.average_rating : '5.0'}
                   </div>
-                  <div style={{ color: '#FF5722', fontSize: '1.2rem', marginTop: '4px' }}>★★★★★</div>
-                  <div style={{ fontSize: '0.8rem', color: '#888888', marginTop: '2px' }}>
+                  <div style={{ marginTop: '6px' }}>{renderStars(stats.average_rating || 5)}</div>
+                  <div style={{ fontSize: '0.82rem', color: '#888888', marginTop: '4px' }}>
                     {stats.total_reviews ?? 0} reviews
                   </div>
                 </div>
@@ -2061,9 +2152,9 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
               {/* Reviews List */}
               {reviews.length === 0 ? (
-                <div className="cd-empty-state">
-                  <p className="cd-empty-title">No Reviews Yet</p>
-                  <p className="cd-empty-text">Client feedback and 5-star ratings will appear here following completed performances.</p>
+                <div className="cd-empty-card">
+                  <h3>No Reviews Yet</h3>
+                  <p>Client feedback and ratings will appear here following completed performances.</p>
                 </div>
               ) : (
                 <div className="cd-reviews-grid">
@@ -2072,8 +2163,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                       <div className="cd-review-header">
                         <div className="cd-review-author">{rev.customer_name}</div>
                         <div className="cd-review-stars">
-                          {'★'.repeat(rev.rating)}
-                          {'☆'.repeat(Math.max(0, 5 - rev.rating))}
+                          {renderStars(rev.rating)}
                         </div>
                       </div>
 
@@ -2257,8 +2347,12 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 type="button"
                 className="cd-modal-close"
                 onClick={() => setRespondModal({ open: false, action: 'accept', booking: null, reason: '' })}
+                aria-label="Close"
               >
-                ✕
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
 
@@ -2322,8 +2416,12 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 type="button"
                 className="cd-modal-close"
                 onClick={() => setPortfolioModalOpen(false)}
+                aria-label="Close"
               >
-                ✕
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
 
@@ -2400,8 +2498,12 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 type="button"
                 className="cd-modal-close"
                 onClick={() => setReceiptItem(null)}
+                aria-label="Close"
               >
-                ✕
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
 

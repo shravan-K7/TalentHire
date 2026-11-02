@@ -38,10 +38,6 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
 
   const isArtist = Boolean(user?.is_artist || user?.artist_profile || user?.role === 'artist');
 
-  if (isArtist) {
-    links.push({ label: 'Artist Dashboard', path: user?.artist_profile ? '/profile' : '/artist-register' });
-  }
-
   const displayName = user
     ? (user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : (user.username || user.email || 'User'))
     : '';
