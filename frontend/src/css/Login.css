@@ -381,8 +381,8 @@
 
 .role-radio-card:hover {
   background: #212121;
-  border-color: var(--hover-effect, #FFEB3B);
-  box-shadow: 0 2px 10px rgba(255, 235, 59, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
 .role-radio-card.active {
@@ -420,7 +420,7 @@
 }
 
 .role-radio-card:hover .role-radio-custom {
-  border-color: var(--hover-effect, #FFEB3B);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .role-radio-card.active .role-radio-custom {

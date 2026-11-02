@@ -54,9 +54,9 @@
 }
 
 .hero-badge:hover {
-  border-color: var(--hover-effect);
-  color: var(--hover-effect);
-  box-shadow: 0 0 18px var(--hover-effect-glow);
+  border-color: rgba(255, 87, 34, 0.4);
+  color: #FFFFFF;
+  box-shadow: 0 0 14px rgba(255, 87, 34, 0.2);
 }
 
 .hero-badge-dot {
@@ -121,7 +121,7 @@
 .btn-hero-primary:hover {
   background: #FFFFFF;
   color: #000000;
-  box-shadow: 0 0 24px var(--hover-effect-glow);
+  box-shadow: 0 4px 20px rgba(255, 255, 255, 0.25);
   transform: translateY(-2px);
 }
 
@@ -142,9 +142,9 @@
 }
 
 .btn-hero-secondary:hover {
-  background: #282828;
-  border-color: #555555;
-  color: var(--hover-effect);
+  background: #262626;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #FFFFFF;
   transform: translateY(-2px);
 }
 
@@ -293,7 +293,7 @@
 }
 
 .category-card:hover .category-title {
-  color: var(--hover-effect);
+  color: var(--accent-1);
 }
 
 .category-desc {
@@ -546,7 +546,7 @@
 .artist-rate-highlight {
   font-size: 0.95rem;
   font-weight: 600;
-  color: var(--hover-effect);
+  color: var(--accent-1);
   margin: 2px 0 0;
 }
 

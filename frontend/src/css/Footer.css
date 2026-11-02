@@ -161,9 +161,9 @@
 }
 
 .footer-floating-action:hover {
-  border-color: var(--hover-effect);
-  color: var(--hover-effect);
-  box-shadow: 0 0 20px var(--hover-effect-glow), 0 8px 28px rgba(0, 0, 0, 0.8);
+  border-color: rgba(255, 87, 34, 0.45);
+  color: #FFFFFF;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
   transform: translateY(-2px);
 }
 

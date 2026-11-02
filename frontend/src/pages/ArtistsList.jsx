@@ -204,8 +204,9 @@ function ArtistsList({ user, onLogout, navigate }) {
             type="button"
             className="top-reset-btn"
             onClick={handleResetFilters}
+            title="Reset all filters"
           >
-            RESET
+            Reset
           </button>
         </section>
 
@@ -291,7 +292,7 @@ function ArtistsList({ user, onLogout, navigate }) {
                       if (e.key === 'Enter') handleCardClick(artist.id);
                     }}
                   >
-                    {/* Top Action Bar: PLAY on Left, BOOK NOW on Right */}
+                    {/* Top Action Bar: Play on Left, Book Now on Right */}
                     <div className="artist-card-action-bar">
                       <button
                         type="button"
@@ -302,7 +303,10 @@ function ArtistsList({ user, onLogout, navigate }) {
                         }}
                         title={`Preview showreel for ${artist.stage_name}`}
                       >
-                        PLAY
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                        <span>Play</span>
                       </button>
                       <button
                         type="button"
@@ -313,7 +317,7 @@ function ArtistsList({ user, onLogout, navigate }) {
                         }}
                         title={`Book ${artist.stage_name}`}
                       >
-                        BOOK NOW
+                        Book Now
                       </button>
                     </div>
 

@@ -51,9 +51,9 @@
 }
 
 .artist-back-btn:hover {
-  color: #FFEB3B;
-  border-color: #FFEB3B;
-  background: rgba(255, 235, 59, 0.05);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .artist-form-header {

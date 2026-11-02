@@ -187,8 +187,8 @@
 
 .cd-sidebar-item:hover {
   background: rgba(255, 255, 255, 0.04);
-  color: #FFEB3B;
-  border-color: rgba(255, 235, 59, 0.15);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .cd-sidebar-item.active {
@@ -209,7 +209,7 @@
 }
 
 .cd-sidebar-item:hover .cd-sidebar-icon {
-  color: #FFEB3B;
+  color: #FFFFFF;
 }
 
 .cd-sidebar-badge {
