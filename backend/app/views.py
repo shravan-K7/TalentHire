@@ -12,6 +12,7 @@ from django.core.validators import validate_email
 from django.db import IntegrityError, models
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from google.auth.exceptions import GoogleAuthError
@@ -313,10 +314,10 @@ def login_view(request):
         redirect_to = "/admin/"
     elif hasattr(user, "artist_profile") and user.artist_profile is not None:
         detected_role = "artist"
-        redirect_to = "/artist-register"
+        redirect_to = "/profile"
     else:
         detected_role = "customer"
-        redirect_to = "/customer-dashboard"
+        redirect_to = "/profile"
 
     user_data = serialize_user(user)
 
@@ -468,13 +469,13 @@ def google_login_view(request):
         redirect_to = "/admin/"
     elif hasattr(user, "artist_profile") and user.artist_profile is not None:
         detected_role = "artist"
-        redirect_to = "/artist-register"
+        redirect_to = "/profile"
     elif role == "artist":
         detected_role = "artist"
         redirect_to = "/artist-register"
     else:
         detected_role = "customer"
-        redirect_to = "/customer-dashboard"
+        redirect_to = "/profile"
 
     user_data = serialize_user(user)
     user_data["role"] = detected_role

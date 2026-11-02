@@ -161,6 +161,8 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       setError('');
     } catch (err) {
       setError(err.message || 'Unable to load artist dashboard data.');
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -472,7 +474,15 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             <h2>Unable to Load Artist Dashboard</h2>
             <p>{error}</p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-              <button type="button" className="cd-btn-primary" onClick={loadDashboard}>
+              <button
+                type="button"
+                className="cd-btn-primary"
+                onClick={() => {
+                  setError('');
+                  setLoading(true);
+                  loadDashboard().finally(() => setLoading(false));
+                }}
+              >
                 Retry Loading
               </button>
               <button

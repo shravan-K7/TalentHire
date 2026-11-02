@@ -89,11 +89,12 @@ function App() {
       window.location.href = "/admin/";
       return;
     }
-    if (redirectTo) {
+    if (redirectTo && redirectTo !== "/artist-register") {
       navigate(redirectTo);
       return;
     }
-    if (isArtist || (loggedInUser?.role === "artist" && !loggedInUser?.artist_profile)) {
+    const hasProfile = Boolean(loggedInUser?.artist_profile || loggedInUser?.is_artist);
+    if ((isArtist || loggedInUser?.role === "artist") && !hasProfile) {
       navigate("/artist-register");
     } else {
       navigate("/profile");
@@ -109,6 +110,7 @@ function App() {
         artist_profile: artistData,
       };
     });
+    navigate("/profile");
   }
 
   async function handleLogout() {

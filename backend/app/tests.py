@@ -2,6 +2,7 @@ import json
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
+from app.models import Category, ArtistProfile, Booking
 
 
 class AuthViewTests(TestCase):
@@ -180,3 +181,42 @@ class AuthViewTests(TestCase):
         response = self.client.post("/api/auth/logout/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["message"], "Logout successful.")
+
+    def test_artist_login_redirect_and_dashboard(self):
+        artist_user = User.objects.create_user(
+            username="stageartist",
+            email="artist@example.com",
+            password="securepassword123",
+        )
+        cat, _ = Category.objects.get_or_create(name="Singers & Vocalists")
+        ArtistProfile.objects.create(
+            user=artist_user,
+            category=cat,
+            stage_name="Singer Star",
+            location="Mumbai",
+            starting_price=10000,
+        )
+
+        # Login
+        res_login = self.client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "username_or_email": "stageartist",
+                "password": "securepassword123",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res_login.status_code, 200)
+        data_login = res_login.json()
+        self.assertEqual(data_login["role"], "artist")
+        self.assertEqual(data_login["redirect_to"], "/profile")
+
+        # Dashboard GET
+        res_dash = self.client.get("/api/artist/dashboard/")
+        self.assertEqual(res_dash.status_code, 200)
+        dash_data = res_dash.json()
+        self.assertIn("artist", dash_data)
+        self.assertEqual(dash_data["artist"]["stage_name"], "Singer Star")
+        self.assertIn("stats", dash_data)
+        self.assertEqual(dash_data["stats"]["total_bookings"], 0)
+

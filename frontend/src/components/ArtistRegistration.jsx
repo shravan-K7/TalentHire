@@ -218,8 +218,8 @@ export default function ArtistRegistration({
       setSuccess(
         result.message ||
           (isExistingProfile
-            ? "Artist profile updated successfully."
-            : "Artist profile created successfully.")
+            ? "Artist profile updated successfully. Redirecting to your dashboard..."
+            : "Artist profile created successfully. Redirecting to your dashboard...")
       );
       setIsExistingProfile(true);
 
@@ -230,6 +230,14 @@ export default function ArtistRegistration({
       if (onProfileSaved && result.artist) {
         onProfileSaved(result.artist);
       }
+
+      setTimeout(() => {
+        if (navigate) {
+          navigate("/profile");
+        } else {
+          window.location.href = "/profile";
+        }
+      }, 700);
     } catch (err) {
       setError(err.message || "Failed to save artist profile.");
     } finally {
@@ -295,7 +303,7 @@ export default function ArtistRegistration({
         <button
           type="button"
           className="artist-back-btn"
-          onClick={() => (onCancel ? onCancel() : navigate ? navigate("/") : (window.location.href = "/"))}
+          onClick={() => (onCancel ? onCancel() : navigate ? navigate("/profile") : (window.location.href = "/profile"))}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="19" y1="12" x2="5" y2="12" />
@@ -544,7 +552,7 @@ export default function ArtistRegistration({
           <button
             type="button"
             className="artist-cancel-btn"
-            onClick={() => (onCancel ? onCancel() : navigate ? navigate("/") : (window.location.href = "/"))}
+            onClick={() => (onCancel ? onCancel() : navigate ? navigate("/profile") : (window.location.href = "/profile"))}
           >
             Cancel
           </button>
