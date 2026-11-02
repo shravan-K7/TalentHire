@@ -434,6 +434,21 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
             <span className="cd-sidebar-brand-label">Profile Menu</span>
           </div>
 
+          {/* User mini-card */}
+          <div className="cd-sidebar-user-mini">
+            <div className="cd-sidebar-user-avatar">
+              {profile.profile_image ? (
+                <img src={profile.profile_image} alt={profile.full_name || profile.username} />
+              ) : (
+                <span>{initials}</span>
+              )}
+            </div>
+            <div className="cd-sidebar-user-info">
+              <div className="cd-sidebar-user-name">{profile.full_name || profile.username || user?.username}</div>
+              <div className="cd-sidebar-user-role">Customer</div>
+            </div>
+          </div>
+
           <nav className="cd-sidebar-nav">
             {/* 1. Dashboard (Customer Profile Page) */}
             <button
@@ -546,7 +561,6 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
           {/* Top Bar inside content view */}
           <div className="cd-content-topbar">
             <div className="cd-screen-heading-wrap">
-              <span className="cd-dashboard-subtitle">Customer Profile Dashboard</span>
               <h1 className="cd-screen-title">{screenTitle}</h1>
             </div>
 
@@ -898,7 +912,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                                   switchTab('booking-detail');
                                 }}
                               >
-                                Quick act
+                                View Details
                               </button>
 
                               {/* Receipt Icon */}
@@ -972,7 +986,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                                   switchTab('booking-detail');
                                 }}
                               >
-                                Quick act
+                                View Details
                               </button>
 
                               <button
