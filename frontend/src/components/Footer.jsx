@@ -1,7 +1,5 @@
 import '../css/Footer.css';
 
-const CURRENT_YEAR = new Date().getFullYear();
-
 function Footer() {
   return (
     <footer className="site-footer">
@@ -10,52 +8,35 @@ function Footer() {
           {/* Brand section */}
           <div className="footer-brand-section">
             <a href="/" className="footer-brand">
-              <span className="footer-brand-text">TalentHire</span>
+              <span className="footer-brand-white">Talent</span>
+              <span className="footer-brand-orange">Hire</span>
             </a>
-
             <p className="footer-brand-tagline">
-              The fastest way to discover, preview, and book extraordinary live performers for unforgettable events.
+              Book performing artists for every celebration.
             </p>
-
-            <div className="footer-status-pill">
-              <span className="status-indicator"></span>
-              All artist verification systems operational
-            </div>
           </div>
 
           {/* Navigation Links Columns */}
           <div className="footer-columns">
             <div className="footer-col">
-              <h4>Categories</h4>
-              <a href="/#categories">Singers & Vocalists</a>
-              <a href="/#categories">Dance Groups</a>
-              <a href="/#categories">Live DJs & Producers</a>
-              <a href="/#categories">Orchestra & Fusion</a>
-              <a href="/#categories">Anchors & Emcees</a>
-            </div>
-
-            <div className="footer-col">
-              <h4>Platform</h4>
-              <a href="/#categories">Browse Talent</a>
-              <a href="/#categories">Featured Artists</a>
-              <a href="/#about">Verified Guarantee</a>
-              <a href="/login">Direct Booking</a>
+              <h4>Explore</h4>
+              <a href="/artists">Artists</a>
+              <a href="/artists">Categories</a>
+              <a href="/#about">How It Works</a>
             </div>
 
             <div className="footer-col">
               <h4>Company</h4>
               <a href="/#about">About Us</a>
-              <a href="/#about">Our Story</a>
-              <a href="/#about">Careers</a>
-              <a href="/#about">Press & Media</a>
+              <a href="/profile?tab=support">Contact</a>
+              <a href="/register?role=artist">Join as an Artist</a>
             </div>
 
             <div className="footer-col">
-              <h4>Resources</h4>
-              <a href="/#about">Documentation</a>
-              <a href="/#about">Support Center</a>
-              <a href="/#about">Terms of Service</a>
-              <a href="/#about">Privacy Policy</a>
+              <h4>Follow Us</h4>
+              <a href="https://instagram.com" target="_blank" rel="noopener noreferrer">Instagram</a>
+              <a href="https://facebook.com" target="_blank" rel="noopener noreferrer">Facebook</a>
+              <a href="https://youtube.com" target="_blank" rel="noopener noreferrer">YouTube</a>
             </div>
           </div>
         </div>
@@ -63,11 +44,7 @@ function Footer() {
         {/* Footer bottom bar */}
         <div className="footer-bottom">
           <div className="footer-copyright">
-            © {CURRENT_YEAR} TalentHire Technologies Inc. All rights reserved.
-          </div>
-
-          <div className="footer-tagline-small">
-            Crafted for world-class celebrations & creative agencies.
+            © TalentHire. Terms · Privacy
           </div>
         </div>
       </div>

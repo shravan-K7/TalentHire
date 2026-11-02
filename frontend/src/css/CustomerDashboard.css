@@ -68,8 +68,8 @@
    LEFT SIDEBAR (Sticky edge-to-edge docking)
    -------------------------------------------------------------------------- */
 .cd-sidebar {
-  width: 230px;
-  min-width: 230px;
+  width: 240px;
+  min-width: 240px;
   flex-shrink: 0;
   background: #1A1A1A;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
@@ -99,19 +99,19 @@
 }
 
 .cd-sidebar-brand-label {
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: #666666;
+  color: #777777;
 }
 
 /* Compact user mini-card at top of sidebar */
 .cd-sidebar-user-mini {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 10px;
+  gap: 12px;
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
@@ -119,15 +119,15 @@
 }
 
 .cd-sidebar-user-avatar {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   background: rgba(255, 87, 34, 0.2);
   border: 2px solid rgba(255, 87, 34, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.78rem;
+  font-size: 0.86rem;
   font-weight: 800;
   color: #FF5722;
   overflow: hidden;
@@ -146,7 +146,7 @@
 }
 
 .cd-sidebar-user-name {
-  font-size: 0.86rem;
+  font-size: 0.96rem;
   font-weight: 700;
   color: #F0F0F0;
   white-space: nowrap;
@@ -155,7 +155,7 @@
 }
 
 .cd-sidebar-user-role {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: #888888;
   margin-top: 1px;
 }
@@ -163,7 +163,7 @@
 .cd-sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   flex: 1;
 }
 
@@ -171,14 +171,14 @@
   width: 100%;
   background: transparent;
   border: 1px solid transparent;
-  color: #909090;
-  font-size: 0.88rem;
+  color: #9E9E9E;
+  font-size: 0.96rem;
   font-weight: 500;
-  padding: 9px 12px;
+  padding: 10px 14px;
   border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   cursor: pointer;
   text-align: left;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -214,11 +214,11 @@
 
 .cd-sidebar-badge {
   margin-left: auto;
-  font-size: 0.68rem;
+  font-size: 0.74rem;
   font-weight: 700;
   background: rgba(255, 87, 34, 0.2);
   color: #FF5722;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: 10px;
 }
 
@@ -238,13 +238,13 @@
   background: transparent;
   border: 1px solid rgba(244, 67, 54, 0.2);
   color: #EF5350;
-  font-size: 0.86rem;
+  font-size: 0.94rem;
   font-weight: 600;
-  padding: 9px 12px;
+  padding: 10px 14px;
   border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;
 }
@@ -286,16 +286,16 @@
 }
 
 .cd-dashboard-subtitle {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: #666666;
+  color: #777777;
   text-transform: uppercase;
 }
 
 .cd-screen-title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.6rem;
   font-weight: 800;
   color: #F7F7F7;
   letter-spacing: -0.02em;
@@ -314,9 +314,9 @@
   background: rgba(76, 175, 80, 0.15);
   border: 1px solid rgba(76, 175, 80, 0.35);
   color: #4CAF50;
-  font-size: 0.8rem;
+  font-size: 0.86rem;
   font-weight: 700;
-  padding: 4px 12px;
+  padding: 5px 14px;
   border-radius: 20px;
   letter-spacing: 0.02em;
 }
@@ -325,6 +325,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  font-size: 0.92rem;
 }
 
 /* View Container - expands to fit the entire right-side panel width */
@@ -344,7 +345,7 @@
   background: #212121;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 24px 28px;
+  padding: 26px 30px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   width: 100%;
   max-width: 100%;
@@ -366,8 +367,8 @@
 }
 
 .cd-profile-avatar-box {
-  width: 72px;
-  height: 72px;
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
   background: #2D2D2D;
   display: flex;
@@ -398,7 +399,7 @@
 
 .cd-profile-fullname {
   margin: 0 0 4px 0;
-  font-size: 1.4rem;
+  font-size: 1.65rem;
   font-weight: 800;
   color: #F7F7F7;
   letter-spacing: -0.02em;
@@ -407,7 +408,7 @@
 
 .cd-profile-subtext {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: 0.98rem;
   color: #A0A0A0;
 }
 
@@ -420,9 +421,9 @@
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #F7F7F7;
-  padding: 8px 18px;
+  padding: 8px 20px;
   border-radius: 8px;
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -441,7 +442,7 @@
 .cd-profile-card-divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
-  margin: 18px 0;
+  margin: 20px 0;
 }
 
 .cd-profile-section-block {
@@ -452,7 +453,7 @@
 
 .cd-profile-section-heading {
   margin: 0 0 4px 0;
-  font-size: 0.96rem;
+  font-size: 1.08rem;
   font-weight: 700;
   color: #E0E0E0;
   letter-spacing: -0.01em;
@@ -474,14 +475,14 @@
 }
 
 .cd-contact-text {
-  font-size: 0.94rem;
-  color: #C0C0C0;
+  font-size: 1.02rem;
+  color: #C8C8C8;
   word-break: break-word;
 }
 
 .cd-address-text {
-  line-height: 1.5;
-  color: #B5B5B5;
+  line-height: 1.55;
+  color: #BCBCBC;
 }
 
 /* Quick Overview Stats Grid - fills 100% width with 5 equal columns on desktop */
@@ -489,7 +490,7 @@
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 20px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -499,7 +500,7 @@
   background: #212121;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   text-align: center;
   cursor: pointer;
   transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
@@ -512,7 +513,7 @@
 }
 
 .cd-stat-num {
-  font-size: 1.5rem;
+  font-size: 1.7rem;
   font-weight: 800;
   color: #F7F7F7;
   margin-bottom: 3px;
@@ -524,9 +525,9 @@
 .cd-stat-num.payments { color: #FF5722; }
 
 .cd-stat-lbl {
-  font-size: 0.73rem;
+  font-size: 0.82rem;
   font-weight: 600;
-  color: #888888;
+  color: #9E9E9E;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -551,7 +552,7 @@
 
 .cd-form-title {
   margin: 0 0 6px 0;
-  font-size: 1.35rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: #F7F7F7;
 }
@@ -559,21 +560,21 @@
 .cd-form-subtext {
   margin: 0 0 20px 0;
   color: #A0A0A0;
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 .cd-form-group {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .cd-form-label {
-  font-size: 0.86rem;
+  font-size: 0.96rem;
   font-weight: 600;
-  color: #B0B0B0;
+  color: #C0C0C0;
 }
 
 .cd-form-input,
@@ -582,9 +583,9 @@
   background: #181818;
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #F7F7F7;
-  padding: 11px 15px;
+  padding: 12px 16px;
   border-radius: 8px;
-  font-size: 0.92rem;
+  font-size: 1rem;
   box-sizing: border-box;
   outline: none;
   transition: all 0.18s ease;
@@ -616,8 +617,8 @@
 }
 
 .cd-avatar-picker-preview {
-  width: 58px;
-  height: 58px;
+  width: 62px;
+  height: 62px;
   border-radius: 50%;
   background: #2D2D2D;
   display: flex;
@@ -626,6 +627,7 @@
   overflow: hidden;
   border: 2px solid #FF5722;
   font-weight: 700;
+  font-size: 1rem;
   color: #FFFFFF;
 }
 
@@ -640,8 +642,8 @@
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 20px;
-  padding-top: 16px;
+  margin-top: 22px;
+  padding-top: 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -649,9 +651,9 @@
   background: #FF5722;
   color: #FFFFFF;
   border: none;
-  font-size: 0.92rem;
+  font-size: 1rem;
   font-weight: 700;
-  padding: 10px 22px;
+  padding: 11px 24px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -668,17 +670,17 @@
 }
 
 .cd-btn-primary.small {
-  padding: 6px 14px;
-  font-size: 0.82rem;
+  padding: 7px 16px;
+  font-size: 0.9rem;
 }
 
 .cd-btn-secondary {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #D0D0D0;
-  font-size: 0.92rem;
+  color: #D8D8D8;
+  font-size: 0.98rem;
   font-weight: 600;
-  padding: 10px 20px;
+  padding: 11px 22px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -693,9 +695,9 @@
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.16);
   color: #F7F7F7;
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  padding: 8px 16px;
+  padding: 9px 18px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -708,8 +710,8 @@
 }
 
 .cd-btn-outline.small {
-  padding: 5px 12px;
-  font-size: 0.8rem;
+  padding: 6px 14px;
+  font-size: 0.88rem;
 }
 
 .cd-btn-outline.danger:hover {
@@ -722,9 +724,9 @@
   background: #EF5350;
   color: #FFFFFF;
   border: none;
-  font-size: 0.9rem;
+  font-size: 0.96rem;
   font-weight: 600;
-  padding: 9px 18px;
+  padding: 10px 20px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -746,7 +748,7 @@
 
 .cd-bookings-main-title {
   margin: 0;
-  font-size: 1.45rem;
+  font-size: 1.6rem;
   font-weight: 800;
   color: #F7F7F7;
 }
@@ -756,7 +758,7 @@
 }
 
 .cd-bookings-group-heading {
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #E0E0E0;
   margin: 0 0 14px 0;
@@ -765,7 +767,7 @@
 
 .cd-no-items-text {
   color: #707070;
-  font-size: 0.9rem;
+  font-size: 0.98rem;
   margin: 0;
   padding: 12px 0;
 }
@@ -780,7 +782,7 @@
   background: #212121;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
-  padding: 14px 18px;
+  padding: 16px 20px;
   display: grid;
   grid-template-columns: 2fr 1.6fr 1fr auto;
   align-items: center;
@@ -806,14 +808,14 @@
 }
 
 .cd-booking-code {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: #F7F7F7;
   font-family: monospace;
 }
 
 .cd-booking-artist-sub {
-  font-size: 0.82rem;
+  font-size: 0.92rem;
   color: #A0A0A0;
   white-space: nowrap;
   overflow: hidden;
@@ -828,13 +830,13 @@
 }
 
 .cd-booking-date-text {
-  font-size: 0.92rem;
+  font-size: 1.02rem;
   font-weight: 600;
   color: #D8D8D8;
 }
 
 .cd-booking-location-text {
-  font-size: 0.78rem;
+  font-size: 0.88rem;
   color: #888888;
   white-space: nowrap;
   overflow: hidden;
@@ -844,9 +846,9 @@
 /* Status Badges */
 .cd-status-pill {
   display: inline-block;
-  padding: 4px 12px;
+  padding: 5px 14px;
   border-radius: 20px;
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   font-weight: 700;
   text-align: center;
   letter-spacing: 0.03em;
@@ -882,15 +884,15 @@
 }
 
 .cd-status-pill.large {
-  padding: 6px 16px;
-  font-size: 0.86rem;
+  padding: 7px 18px;
+  font-size: 0.92rem;
 }
 
 /* Actions Block in Bookings Row */
 .cd-booking-actions-block {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
@@ -898,9 +900,9 @@
   background: #FF5722;
   color: #FFFFFF;
   border: none;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-weight: 700;
-  padding: 6px 16px;
+  padding: 7px 18px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.18s ease;
@@ -990,7 +992,7 @@
 
 .cd-detail-title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.55rem;
   font-weight: 800;
   color: #F7F7F7;
 }
@@ -1025,7 +1027,7 @@
 }
 
 .cd-time-label {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: #888888;
   text-transform: uppercase;
@@ -1033,7 +1035,7 @@
 }
 
 .cd-time-value {
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #F7F7F7;
 }
@@ -1057,7 +1059,7 @@
 }
 
 .cd-summary-label {
-  font-size: 0.76rem;
+  font-size: 0.86rem;
   font-weight: 600;
   color: #888888;
   text-transform: uppercase;
@@ -1065,7 +1067,7 @@
 }
 
 .cd-summary-value {
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: #E0E0E0;
 }
@@ -1081,9 +1083,9 @@
 }
 
 .cd-map-section-label {
-  font-size: 0.86rem;
+  font-size: 0.95rem;
   font-weight: 700;
-  color: #B0B0B0;
+  color: #C0C0C0;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   display: block;
@@ -1127,7 +1129,7 @@
 }
 
 .cd-map-location-badge {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: #FF5722;
   background: rgba(255, 87, 34, 0.15);
@@ -1151,13 +1153,13 @@
 }
 
 .cd-map-status-label {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: #888888;
 }
 
 .cd-map-status-val {
-  font-size: 0.85rem;
+  font-size: 0.92rem;
   font-weight: 700;
   color: #4CAF50;
   background: rgba(76, 175, 80, 0.15);
@@ -1178,9 +1180,9 @@
 }
 
 .cd-map-address-text {
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   color: #C0C0C0;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .cd-detail-actions-row {
@@ -1198,7 +1200,7 @@
   background: #212121;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 22px 26px;
+  padding: 24px 28px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   width: 100%;
   box-sizing: border-box;
@@ -1213,13 +1215,13 @@
 
 .cd-table-title {
   margin: 0;
-  font-size: 1.4rem;
+  font-size: 1.55rem;
   font-weight: 800;
   color: #F7F7F7;
 }
 
 .cd-table-count {
-  font-size: 0.82rem;
+  font-size: 0.92rem;
   color: #888888;
   font-weight: 600;
 }
@@ -1237,7 +1239,7 @@
 
 .cd-data-table th {
   padding: 14px 18px;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #888888;
   text-transform: uppercase;
@@ -1252,7 +1254,7 @@
 
 .cd-data-table td {
   padding: 16px 18px;
-  font-size: 0.92rem;
+  font-size: 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: #D8D8D8;
   white-space: nowrap;
@@ -1269,7 +1271,7 @@
 
 .cd-txn-id {
   font-family: monospace;
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   color: #FF5722;
 }
 
@@ -1286,8 +1288,8 @@
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #A0A0A0;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 6px;
   display: inline-flex;
   align-items: center;
@@ -1326,17 +1328,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .cd-meta-label {
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   color: #A0A0A0;
 }
 
 .cd-meta-value {
-  font-size: 0.92rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #F7F7F7;
 }
@@ -1356,16 +1358,16 @@
 
 .cd-danger-heading {
   margin: 0 0 6px 0;
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 700;
   color: #EF5350;
 }
 
 .cd-danger-text {
-  font-size: 0.84rem;
+  font-size: 0.92rem;
   color: #B0B0B0;
   margin: 0 0 16px 0;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 /* ==========================================================================
@@ -1373,7 +1375,7 @@
    ========================================================================== */
 .cd-view-title {
   margin: 0 0 20px 0;
-  font-size: 1.4rem;
+  font-size: 1.55rem;
   font-weight: 800;
   color: #F7F7F7;
 }
@@ -1433,19 +1435,19 @@
 
 .cd-fav-name {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #F7F7F7;
 }
 
 .cd-fav-category {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #FF5722;
   font-weight: 600;
 }
 
 .cd-fav-price {
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: #D0D0D0;
   margin-top: 4px;
@@ -1507,21 +1509,21 @@
 
 .cd-notif-title {
   display: block;
-  font-size: 0.94rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: #F7F7F7;
   margin-bottom: 4px;
 }
 
 .cd-notif-msg {
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   color: #A0A0A0;
   margin: 0 0 8px 0;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .cd-notif-time {
-  font-size: 0.74rem;
+  font-size: 0.82rem;
   color: #707070;
 }
 
