@@ -54,8 +54,6 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
 
   if (user?.is_artist || user?.artist_profile) {
     links.push({ label: 'Artist Dashboard', path: '/artist-register' });
-  } else if (!user) {
-    links.push({ label: 'For Artists', path: '/register?role=artist' });
   }
 
   const isArtist = Boolean(user?.is_artist || user?.artist_profile);
