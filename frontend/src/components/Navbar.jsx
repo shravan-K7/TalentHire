@@ -44,7 +44,6 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
   const links = [
     { label: 'Home', path: '/' },
     { label: 'Explore Artists', path: '/artists' },
-    { label: 'Categories', path: '/#categories' },
     { label: 'About', path: '/#about' },
   ];
 
