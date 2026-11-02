@@ -348,6 +348,23 @@
   color: #FF5252;
 }
 
+.navbar-logout {
+  background: rgba(244, 67, 54, 0.08);
+  border: 1px solid rgba(244, 67, 54, 0.25);
+  color: #EF5350;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.navbar-logout:hover {
+  background: rgba(244, 67, 54, 0.16);
+  color: #FF5252;
+}
+
 .navbar-login {
   color: var(--text-primary);
   font-size: 0.88rem;
