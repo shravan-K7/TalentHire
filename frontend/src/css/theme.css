@@ -43,6 +43,9 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
   --radius-full: 9999px;
+
+  /* Layout Dimensions */
+  --navbar-height: 68px;
 }
 
 * {
@@ -62,7 +65,7 @@ body,
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Custom Scrollbar */

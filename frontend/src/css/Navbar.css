@@ -7,17 +7,20 @@
   top: 0;
   z-index: 1000;
   width: 100%;
+  height: var(--navbar-height, 68px);
   background: rgba(24, 24, 24, 0.94);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   transition: all 0.2s ease;
+  box-sizing: border-box;
 }
 
 .site-navbar {
   width: 100%;
   max-width: 100%;
-  padding: 18px clamp(20px, 3.5vw, 60px);
+  height: 100%;
+  padding: 0 clamp(20px, 3.5vw, 60px);
   display: flex;
   align-items: center;
   justify-content: space-between;
