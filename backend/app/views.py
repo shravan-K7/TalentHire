@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 
 from django.conf import settings
@@ -8,25 +9,143 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.db import IntegrityError
+from django.db import IntegrityError, models
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests
 from google.oauth2 import id_token
+from django.contrib.auth.decorators import login_required
 
-from .forms import LoginForm
+from .forms import LoginForm, ArtistProfileForm
+from .models import (
+    ArtistProfile,
+    Category,
+    Booking,
+    Portfolio,
+    Review,
+    Payment,
+    CustomerProfile,
+    FavoriteArtist,
+    Notification,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def serialize_user(user):
+    artist_profile = getattr(user, "artist_profile", None)
+    artist_data = None
+    if artist_profile:
+        artist_data = {
+            "id": artist_profile.id,
+            "stage_name": artist_profile.stage_name,
+            "category_id": artist_profile.category_id,
+            "category_name": artist_profile.category.name if artist_profile.category else "",
+            "gender": artist_profile.gender,
+            "starting_price": str(artist_profile.starting_price),
+            "location": artist_profile.location,
+            "phone": artist_profile.phone,
+            "bio": artist_profile.bio,
+            "is_verified": artist_profile.is_verified,
+        }
+
+    customer_profile = getattr(user, "customer_profile", None)
+    customer_data = None
+    if customer_profile:
+        customer_data = {
+            "phone": customer_profile.phone,
+            "location": customer_profile.location,
+            "profile_image": customer_profile.profile_image.url if customer_profile.profile_image else "",
+            "is_verified": customer_profile.is_verified,
+        }
+
+    # Dynamically determine role
+    if user.is_staff or user.is_superuser:
+        role = "admin"
+    elif artist_profile is not None:
+        role = "artist"
+    else:
+        role = "customer"
+
+    full_name = f"{user.first_name} {user.last_name}".strip()
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "full_name": full_name or user.username,
+        "phone": customer_profile.phone if customer_profile else "",
+        "location": customer_profile.location if customer_profile else "",
+        "profile_image": (customer_profile.profile_image.url if (customer_profile and customer_profile.profile_image) else ""),
+        "date_joined": user.date_joined.isoformat() if user.date_joined else None,
+        "is_staff": user.is_staff,
+        "is_artist": artist_profile is not None,
+        "artist_profile": artist_data,
+        "customer_profile": customer_data,
+        "is_verified": customer_profile.is_verified if customer_profile else True,
+        "role": role,
+    }
 
 
 @ensure_csrf_cookie
 @require_GET
 def csrf_token_view(request):
-    return JsonResponse({
-        "csrfToken": get_token(request)
-    })
+    return JsonResponse({"csrfToken": get_token(request)})
 
+@require_GET
+def check_username_view(request):
+    username = request.GET.get("username", "").strip()
+
+    if not username:
+        return JsonResponse({
+            "available": False,
+            "message": "Username is required."
+        })
+    
+    # Validate username format
+    username_validator = UnicodeUsernameValidator()
+
+    try:
+        username_validator(username)
+    except ValidationError:
+        return JsonResponse({
+            "available": False,
+            "message": "Enter a valid username."
+        })
+    # Check username availability (case-insensitive)
+    exists = User.objects.filter(username__iexact = username).exists()
+
+    if exists:
+        import random
+        base = username[:20]
+        candidates = [
+            f"{base}{random.randint(10, 99)}",
+            f"{base}_live",
+            f"{base}{random.randint(100, 999)}",
+            f"{base}_pro",
+        ]
+        suggestions = []
+        for cand in candidates:
+            if not User.objects.filter(username__iexact=cand).exists():
+                suggestions.append(cand)
+                if len(suggestions) >= 3:
+                    break
+
+        return JsonResponse({
+            "available": False,
+            "message": "This username is already taken.",
+            "suggestions": suggestions,
+        })
+
+    return JsonResponse({
+        "available": True,
+        "message": "Username is available."
+    })
 
 @csrf_protect
 @require_POST
@@ -42,6 +161,17 @@ def register_view(request):
     username = data.get("username", "").strip()
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
+    role = data.get("role", "")
+    if isinstance(role, str):
+        role = role.strip().lower()
+    else:
+        role = ""
+
+    if not role or role not in ("customer", "artist"):
+        return JsonResponse(
+            {"error": "Please select whether you want to join as a Customer or Performing Artist."},
+            status=400,
+        )
 
     if not username or not email or not password:
         return JsonResponse(
@@ -109,15 +239,13 @@ def register_view(request):
     # Automatically log the user in after registration
     login(request, user, backend="django.contrib.auth.backends.ModelBackend")
 
+    user_data = serialize_user(user)
+    user_data["role"] = role
+
     return JsonResponse(
         {
-            "message": "Registration successful. You can log in.",
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "is_staff": user.is_staff,
-            },
+            "message": "Registration successful.",
+            "user": user_data,
         },
         status=201,
     )
@@ -178,15 +306,27 @@ def login_view(request):
 
     login(request, user)
 
-    return JsonResponse({
-        "message": "Login successful.",
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "is_staff": user.is_staff,
-        },
-    })
+    # Dynamic role detection for unified single-entry login
+    if user.is_staff or user.is_superuser:
+        detected_role = "admin"
+        redirect_to = "/admin/"
+    elif hasattr(user, "artist_profile") and user.artist_profile is not None:
+        detected_role = "artist"
+        redirect_to = "/artist-register"
+    else:
+        detected_role = "customer"
+        redirect_to = "/customer-dashboard"
+
+    user_data = serialize_user(user)
+
+    return JsonResponse(
+        {
+            "message": "Login successful.",
+            "user": user_data,
+            "role": detected_role,
+            "redirect_to": redirect_to,
+        }
+    )
 
 
 @require_GET
@@ -197,14 +337,7 @@ def current_user_view(request):
             status=401,
         )
 
-    user = request.user
-
-    return JsonResponse({
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "is_staff": user.is_staff,
-    })
+    return JsonResponse(serialize_user(request.user))
 
 
 @csrf_protect
@@ -212,9 +345,7 @@ def current_user_view(request):
 def logout_view(request):
     logout(request)
 
-    return JsonResponse({
-        "message": "Logout successful."
-    })
+    return JsonResponse({"message": "Logout successful."})
 
 
 @csrf_protect
@@ -235,6 +366,10 @@ def google_login_view(request):
             status=400,
         )
 
+    role = data.get("role", "customer")
+    if role not in ("customer", "artist"):
+        role = "customer"
+
     google_client_id = getattr(settings, "GOOGLE_CLIENT_ID", "")
     if not google_client_id:
         return JsonResponse(
@@ -246,12 +381,29 @@ def google_login_view(request):
         idinfo = id_token.verify_oauth2_token(
             token,
             requests.Request(),
-            google_client_id,
+            google_client_id.strip(),
+            clock_skew_in_seconds=60,
         )
     except (ValueError, GoogleAuthError) as error:
-        print("Google verification error:", repr(error))
+        logger.warning("Google verification error: %s", repr(error))
+        error_detail = (
+            f"Invalid or expired Google credential ({error})."
+            if settings.DEBUG
+            else "Invalid or expired Google credential."
+        )
         return JsonResponse(
-            {"error": "Invalid or expired Google credential."},
+            {"error": error_detail},
+            status=400,
+        )
+    except Exception as error:
+        logger.exception("Unexpected error verifying Google credential: %s", repr(error))
+        error_detail = (
+            f"Google Sign-In failed: {error}"
+            if settings.DEBUG
+            else "Google Sign-In failed."
+        )
+        return JsonResponse(
+            {"error": error_detail},
             status=400,
         )
 
@@ -287,7 +439,19 @@ def google_login_view(request):
             username=username,
             email=email,
             password=None,
+            first_name=idinfo.get("given_name", "")[:150],
+            last_name=idinfo.get("family_name", "")[:150],
         )
+    else:
+        updated = False
+        if not user.first_name and idinfo.get("given_name"):
+            user.first_name = idinfo.get("given_name", "")[:150]
+            updated = True
+        if not user.last_name and idinfo.get("family_name"):
+            user.last_name = idinfo.get("family_name", "")[:150]
+            updated = True
+        if updated:
+            user.save(update_fields=["first_name", "last_name"])
 
     if not user.is_active:
         return JsonResponse(
@@ -297,12 +461,745 @@ def google_login_view(request):
 
     login(request, user, backend="django.contrib.auth.backends.ModelBackend")
 
+    # Dynamic role detection for unified single-entry login
+    if user.is_staff or user.is_superuser:
+        detected_role = "admin"
+        redirect_to = "/admin/"
+    elif hasattr(user, "artist_profile") and user.artist_profile is not None:
+        detected_role = "artist"
+        redirect_to = "/artist-register"
+    elif role == "artist":
+        detected_role = "artist"
+        redirect_to = "/artist-register"
+    else:
+        detected_role = "customer"
+        redirect_to = "/customer-dashboard"
+
+    user_data = serialize_user(user)
+    user_data["role"] = detected_role
+
+    return JsonResponse(
+        {
+            "message": "Google login successful.",
+            "user": user_data,
+            "role": detected_role,
+            "redirect_to": redirect_to,
+        }
+    )
+
+
+@require_GET
+def artist_categories(request):
+    categories = (
+        Category.objects.annotate(
+            artist_count=models.Count(
+                "artists",
+                filter=models.Q(artists__is_active=True),
+            )
+        )
+        .order_by("name")
+        .values("id", "name", "artist_count")
+    )
+    total_artists = ArtistProfile.objects.filter(is_active=True).count()
     return JsonResponse({
-        "message": "Google login successful.",
-        "user": {
-            "id": user.id,
-            "username": user.username,
+        "categories": list(categories),
+        "total_artists": total_artists,
+    })
+
+
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def artist_profile_view(request):
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "Authentication required.", "exists": False},
+            status=401,
+        )
+
+    # Reuse existing profile if the logged-in user already has one.
+    instance = ArtistProfile.objects.filter(user=request.user).first()
+
+    if request.method == "GET":
+        if instance:
+            return JsonResponse({
+                "exists": True,
+                "artist": {
+                    "id": instance.id,
+                    "stage_name": instance.stage_name,
+                    "gender": instance.gender,
+                    "bio": instance.bio,
+                    "location": instance.location,
+                    "phone": instance.phone,
+                    "starting_price": str(instance.starting_price),
+                    "years_of_experience": instance.years_of_experience,
+                    "performance_types": instance.performance_types,
+                    "travel_availability": instance.travel_availability,
+                    "portfolio_url": instance.portfolio_url,
+                    "additional_information": instance.additional_information,
+                    "category": instance.category_id,
+                    "category_name": instance.category.name if instance.category else "",
+                    "profile_image": instance.profile_image.url if instance.profile_image else None,
+                    "is_verified": instance.is_verified,
+                },
+            })
+        return JsonResponse({"exists": False})
+
+    form = ArtistProfileForm(request.POST, request.FILES, instance=instance)
+    if form.is_valid():
+        try:
+            artist = form.save(commit=False)
+            artist.user = request.user
+            artist.save()
+
+            return JsonResponse({
+                "message": "Artist profile saved successfully.",
+                "artist_id": artist.id,
+                "exists": True,
+                "artist": {
+                    "id": artist.id,
+                    "stage_name": artist.stage_name,
+                    "gender": artist.gender,
+                    "bio": artist.bio,
+                    "location": artist.location,
+                    "phone": artist.phone,
+                    "starting_price": str(artist.starting_price),
+                    "years_of_experience": artist.years_of_experience,
+                    "performance_types": artist.performance_types,
+                    "travel_availability": artist.travel_availability,
+                    "portfolio_url": artist.portfolio_url,
+                    "additional_information": artist.additional_information,
+                    "category": artist.category_id,
+                    "category_name": artist.category.name if artist.category else "",
+                    "profile_image": artist.profile_image.url if artist.profile_image else None,
+                    "is_verified": artist.is_verified,
+                },
+            }, status=200 if instance else 201)
+        except IntegrityError:
+            return JsonResponse(
+                {"error": "A profile for this artist already exists."},
+                status=400,
+            )
+
+    return JsonResponse({"errors": form.errors.get_json_data()}, status=400)
+
+
+def serialize_artist_summary(artist):
+    travel_map = {
+        "city": "Within my city",
+        "state": "Across my state",
+        "india": "Across India",
+        "international": "International",
+    }
+    return {
+        "id": artist.id,
+        "stage_name": artist.stage_name,
+        "category_id": artist.category_id,
+        "category_name": artist.category.name if artist.category else "",
+        "gender": artist.gender,
+        "starting_price": str(artist.starting_price),
+        "location": artist.location,
+        "bio": artist.bio,
+        "years_of_experience": artist.years_of_experience,
+        "performance_types": artist.performance_types if isinstance(artist.performance_types, list) else [],
+        "travel_availability": artist.travel_availability,
+        "travel_availability_display": travel_map.get(artist.travel_availability, artist.travel_availability),
+        "portfolio_url": artist.portfolio_url,
+        "additional_information": artist.additional_information,
+        "profile_image": artist.profile_image.url if artist.profile_image else None,
+        "is_verified": artist.is_verified,
+    }
+
+
+@require_GET
+def artists_list_view(request):
+    qs = ArtistProfile.objects.filter(is_active=True).select_related("category")
+
+    search = request.GET.get("search", "").strip()
+    if search:
+        qs = qs.filter(
+            models.Q(stage_name__icontains=search)
+            | models.Q(bio__icontains=search)
+            | models.Q(location__icontains=search)
+            | models.Q(category__name__icontains=search)
+            | models.Q(additional_information__icontains=search)
+        )
+
+    category = request.GET.get("category", "").strip()
+    if category and category.lower() != "all":
+        if category.isdigit():
+            qs = qs.filter(category_id=int(category))
+        else:
+            qs = qs.filter(category__name__iexact=category)
+
+    gender = request.GET.get("gender", "").strip().lower()
+    if gender and gender != "all":
+        if gender in ("male", "female", "other"):
+            qs = qs.filter(gender__iexact=gender)
+        elif gender in ("group", "troupe"):
+            qs = qs.filter(
+                models.Q(performance_types__icontains="Group")
+                | models.Q(stage_name__icontains="Band")
+                | models.Q(stage_name__icontains="Troupe")
+                | models.Q(stage_name__icontains="Ensemble")
+                | models.Q(stage_name__icontains="Symphony")
+                | models.Q(gender="other")
+            )
+
+    artist_type = request.GET.get("artist_type", "").strip()
+    if artist_type and artist_type.lower() != "all":
+        qs = qs.filter(
+            models.Q(category__name__icontains=artist_type)
+            | models.Q(stage_name__icontains=artist_type)
+            | models.Q(bio__icontains=artist_type)
+            | models.Q(additional_information__icontains=artist_type)
+        )
+
+    travel = request.GET.get("travel", "").strip()
+    if travel and travel.lower() != "all":
+        qs = qs.filter(travel_availability__iexact=travel)
+
+    min_price = request.GET.get("min_price", "").strip()
+    if min_price:
+        try:
+            qs = qs.filter(starting_price__gte=float(min_price))
+        except ValueError:
+            pass
+
+    max_price = request.GET.get("max_price", "").strip()
+    if max_price:
+        try:
+            qs = qs.filter(starting_price__lte=float(max_price))
+        except ValueError:
+            pass
+
+    verified = request.GET.get("verified", "").strip().lower()
+    if verified in ("true", "1"):
+        qs = qs.filter(is_verified=True)
+
+    sort = request.GET.get("sort", "").strip()
+    if sort == "price_asc":
+        qs = qs.order_by("starting_price")
+    elif sort == "price_desc":
+        qs = qs.order_by("-starting_price")
+    elif sort == "experience":
+        qs = qs.order_by("-years_of_experience", "-starting_price")
+    elif sort == "newest":
+        qs = qs.order_by("-created_at")
+    else:
+        qs = qs.order_by("-is_verified", "-created_at")
+
+    artists = [serialize_artist_summary(a) for a in qs]
+    return JsonResponse({"artists": artists, "count": len(artists)})
+
+
+@require_GET
+def artist_detail_view(request, artist_id):
+    artist = ArtistProfile.objects.filter(id=artist_id, is_active=True).select_related("category").first()
+    if not artist:
+        return JsonResponse({"error": "Artist profile not found."}, status=404)
+
+    portfolio_items = [
+        {
+            "id": item.id,
+            "title": item.title,
+            "description": item.description,
+            "media_url": item.media_url,
+        }
+        for item in artist.portfolio_items.all()
+    ]
+
+    reviews_qs = artist.reviews.select_related("customer").order_by("-created_at")
+    reviews_data = [
+        {
+            "id": r.id,
+            "customer_name": r.customer.username if r.customer else "Event Host",
+            "rating": r.rating,
+            "comment": r.comment,
+            "created_at": r.created_at.strftime("%b %d, %Y") if r.created_at else "",
+        }
+        for r in reviews_qs[:20]
+    ]
+
+    avg_rating = 0.0
+    if reviews_data:
+        avg_rating = round(sum(r["rating"] for r in reviews_data) / len(reviews_data), 1)
+
+    data = serialize_artist_summary(artist)
+    data["phone"] = artist.phone
+    data["additional_information"] = artist.additional_information
+    data["created_at"] = artist.created_at.strftime("%b %Y") if artist.created_at else ""
+    data["portfolio_items"] = portfolio_items
+    data["reviews"] = reviews_data
+    data["average_rating"] = avg_rating
+    data["total_reviews"] = len(reviews_data)
+
+    return JsonResponse({"artist": data})
+
+
+@csrf_protect
+@require_POST
+def create_booking_view(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in to book an artist."}, status=401)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid request data."}, status=400)
+
+    artist_id = data.get("artist_id")
+    event_type = data.get("event_type", "").strip()
+    event_date_str = data.get("event_date", "").strip()
+    event_location = data.get("event_location", "").strip()
+    message_text = data.get("message", "").strip()
+    agreed_price = data.get("agreed_price")
+
+    if not artist_id or not event_type or not event_date_str or not event_location:
+        return JsonResponse(
+            {"error": "Event type, event date, and location are required."},
+            status=400,
+        )
+
+    artist = ArtistProfile.objects.filter(id=artist_id, is_active=True).first()
+    if not artist:
+        return JsonResponse({"error": "Artist profile not found."}, status=404)
+
+    if artist.user_id == request.user.id:
+        return JsonResponse({"error": "You cannot book your own artist profile."}, status=400)
+
+    from django.utils.dateparse import parse_datetime, parse_date
+    from django.utils import timezone
+    import datetime
+
+    parsed_dt = parse_datetime(event_date_str)
+    if not parsed_dt:
+        parsed_d = parse_date(event_date_str)
+        if parsed_d:
+            parsed_dt = timezone.make_aware(datetime.datetime.combine(parsed_d, datetime.time(18, 0)))
+        else:
+            parsed_dt = timezone.now() + datetime.timedelta(days=7)
+
+    price_val = None
+    if agreed_price:
+        try:
+            price_val = float(agreed_price)
+        except ValueError:
+            price_val = float(artist.starting_price)
+    else:
+        price_val = float(artist.starting_price)
+
+    booking = Booking.objects.create(
+        customer=request.user,
+        artist=artist,
+        event_type=event_type,
+        event_date=parsed_dt,
+        event_location=event_location,
+        message=message_text,
+        agreed_price=price_val,
+        status=Booking.Status.PENDING,
+    )
+
+    # Automatically create pending payment record
+    Payment.objects.create(
+        booking=booking,
+        amount=price_val,
+        transaction_id=f"TXN-{booking.id}-{int(timezone.now().timestamp())}",
+        status=Payment.Status.PENDING,
+    )
+
+    # Create notification for customer
+    Notification.objects.create(
+        user=request.user,
+        title="Booking Request Submitted",
+        message=f"Your booking request for {artist.stage_name} ({event_type}) on {parsed_dt.strftime('%b %d, %Y')} has been sent.",
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    return JsonResponse(
+        {
+            "message": "Booking request submitted successfully! The artist will review your event details.",
+            "booking_id": booking.id,
+            "status": booking.status,
+        },
+        status=201,
+    )
+
+
+# ============================================================================
+# CUSTOMER DASHBOARD ENDPOINTS
+# ============================================================================
+
+@require_GET
+def customer_dashboard_view(request):
+    """
+    Returns aggregated customer dashboard data:
+    1. Profile Information
+    2. Booking Overview (stats)
+    3. My Bookings
+    4. Recent Activity
+    5. Favourite Artists
+    6. Payment History
+    7. Notifications & Security
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required. Please sign in."}, status=401)
+
+    user = request.user
+    customer_profile, _ = CustomerProfile.objects.get_or_create(user=user)
+
+    # Bookings & Stats
+    bookings_qs = (
+        Booking.objects.filter(customer=user)
+        .select_related("artist", "artist__category", "payment")
+        .order_by("-created_at")
+    )
+
+    total_bookings = bookings_qs.count()
+    pending_bookings = bookings_qs.filter(status=Booking.Status.PENDING).count()
+    confirmed_bookings = bookings_qs.filter(status=Booking.Status.ACCEPTED).count()
+    completed_bookings = bookings_qs.filter(status=Booking.Status.COMPLETED).count()
+    cancelled_bookings = bookings_qs.filter(
+        status__in=[Booking.Status.CANCELLED, Booking.Status.REJECTED]
+    ).count()
+
+    serialized_bookings = []
+    payments_list = []
+    recent_activity = []
+
+    for b in bookings_qs:
+        payment = getattr(b, "payment", None)
+        payment_data = None
+        if payment:
+            payment_data = {
+                "id": payment.id,
+                "amount": str(payment.amount),
+                "status": payment.status,
+                "transaction_id": payment.transaction_id or f"TXN-{payment.id}",
+                "date": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
+                "artist_name": b.artist.stage_name,
+            }
+            payments_list.append(payment_data)
+            recent_activity.append({
+                "id": f"pay-{payment.id}",
+                "type": "payment",
+                "title": f"Payment {payment.status.title()}",
+                "description": f"₹{payment.amount} for {b.artist.stage_name}",
+                "timestamp": payment.created_at.isoformat(),
+                "formatted_time": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
+                "status": payment.status,
+            })
+
+        booking_item = {
+            "id": b.id,
+            "artist_id": b.artist.id,
+            "artist_name": b.artist.stage_name,
+            "category_name": b.artist.category.name if b.artist.category else "Performer",
+            "artist_location": b.artist.location,
+            "artist_image": b.artist.profile_image.url if b.artist.profile_image else "",
+            "event_type": b.event_type,
+            "event_date": b.event_date.strftime("%b %d, %Y %I:%M %p") if b.event_date else "",
+            "event_date_iso": b.event_date.isoformat() if b.event_date else "",
+            "event_location": b.event_location,
+            "agreed_price": str(b.agreed_price) if b.agreed_price else "0.00",
+            "status": b.status,
+            "message": b.message,
+            "created_at": b.created_at.strftime("%b %d, %Y"),
+            "payment": payment_data,
+        }
+        serialized_bookings.append(booking_item)
+
+        recent_activity.append({
+            "id": f"book-{b.id}",
+            "type": "booking_request",
+            "title": f"Booking {b.status.replace('_', ' ').title()}",
+            "description": f"{b.event_type} with {b.artist.stage_name} in {b.event_location}",
+            "timestamp": b.created_at.isoformat(),
+            "formatted_time": b.created_at.strftime("%b %d, %Y %I:%M %p"),
+            "status": b.status,
+        })
+
+    # Sort recent activity descending
+    recent_activity.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    # Favorite artists
+    favorites_qs = (
+        FavoriteArtist.objects.filter(customer=user)
+        .select_related("artist", "artist__category")
+        .order_by("-created_at")
+    )
+    favorites_list = [
+        {
+            "id": fav.artist.id,
+            "stage_name": fav.artist.stage_name,
+            "category_name": fav.artist.category.name if fav.artist.category else "Performer",
+            "location": fav.artist.location,
+            "starting_price": str(fav.artist.starting_price),
+            "is_verified": fav.artist.is_verified,
+            "profile_image": fav.artist.profile_image.url if fav.artist.profile_image else "",
+            "favorited_at": fav.created_at.strftime("%b %d, %Y"),
+        }
+        for fav in favorites_qs
+    ]
+
+    # Notifications
+    notifications_qs = Notification.objects.filter(user=user).order_by("-created_at")
+    unread_notifications_count = notifications_qs.filter(is_read=False).count()
+    notifications_list = [
+        {
+            "id": n.id,
+            "title": n.title,
+            "message": n.message,
+            "notification_type": n.notification_type,
+            "is_read": n.is_read,
+            "created_at": n.created_at.strftime("%b %d, %Y %I:%M %p"),
+        }
+        for n in notifications_qs[:25]
+    ]
+
+    return JsonResponse({
+        "profile": serialize_user(user),
+        "stats": {
+            "total_bookings": total_bookings,
+            "pending_bookings": pending_bookings,
+            "confirmed_bookings": confirmed_bookings,
+            "completed_bookings": completed_bookings,
+            "cancelled_bookings": cancelled_bookings,
+        },
+        "bookings": serialized_bookings,
+        "recent_activity": recent_activity[:15],
+        "favorites": favorites_list,
+        "payments": payments_list[:20],
+        "notifications": notifications_list,
+        "unread_notifications_count": unread_notifications_count,
+        "security": {
+            "account_verification_status": "Verified Account" if customer_profile.is_verified else "Pending Verification",
             "email": user.email,
-            "is_staff": user.is_staff,
+            "date_joined": user.date_joined.strftime("%B %d, %Y") if user.date_joined else "",
+            "has_usable_password": user.has_usable_password(),
         },
     })
+
+
+@csrf_protect
+@require_POST
+def customer_update_profile_view(request):
+    """Update customer profile info (first name, last name, phone, location, profile picture)."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    user = request.user
+    customer_profile, _ = CustomerProfile.objects.get_or_create(user=user)
+
+    if request.content_type and "multipart/form-data" in request.content_type:
+        first_name = request.POST.get("first_name", "").strip()
+        last_name = request.POST.get("last_name", "").strip()
+        phone = request.POST.get("phone", "").strip()
+        location = request.POST.get("location", "").strip()
+        if "profile_image" in request.FILES:
+            customer_profile.profile_image = request.FILES["profile_image"]
+    else:
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            data = {}
+        first_name = data.get("first_name", "").strip()
+        last_name = data.get("last_name", "").strip()
+        phone = data.get("phone", "").strip()
+        location = data.get("location", "").strip()
+
+    user.first_name = first_name[:150]
+    user.last_name = last_name[:150]
+    user.save(update_fields=["first_name", "last_name"])
+
+    customer_profile.phone = phone[:20]
+    customer_profile.location = location[:150]
+    customer_profile.save()
+
+    user.customer_profile = customer_profile
+
+    return JsonResponse({
+        "message": "Profile updated successfully.",
+        "user": serialize_user(user),
+    })
+
+
+@csrf_protect
+@require_POST
+def customer_change_password_view(request):
+    """Securely change customer account password."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid request body."}, status=400)
+
+    current_password = data.get("current_password", "")
+    new_password = data.get("new_password", "")
+    confirm_password = data.get("confirm_password", "")
+
+    user = request.user
+
+    if user.has_usable_password():
+        if not user.check_password(current_password):
+            return JsonResponse({"error": "Current password is incorrect."}, status=400)
+
+    if not new_password or len(new_password) < 8:
+        return JsonResponse({"error": "New password must be at least 8 characters long."}, status=400)
+
+    if new_password != confirm_password:
+        return JsonResponse({"error": "New passwords do not match."}, status=400)
+
+    try:
+        validate_password(new_password, user=user)
+    except ValidationError as err:
+        return JsonResponse({"error": " ".join(err.messages)}, status=400)
+
+    user.set_password(new_password)
+    user.save()
+
+    from django.contrib.auth import update_session_auth_hash
+    update_session_auth_hash(request, user)
+
+    Notification.objects.create(
+        user=user,
+        title="Password Changed",
+        message="Your account password was updated successfully.",
+        notification_type=Notification.NotificationType.SECURITY,
+    )
+
+    return JsonResponse({"message": "Password changed successfully."})
+
+
+@csrf_protect
+@require_POST
+def customer_deactivate_account_view(request):
+    """Deactivate customer account and terminate session."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = {}
+
+    confirm = data.get("confirm", False)
+    password = data.get("password", "")
+
+    user = request.user
+    if user.has_usable_password() and password:
+        if not user.check_password(password):
+            return JsonResponse({"error": "Incorrect password. Cannot deactivate account."}, status=400)
+
+    if not confirm:
+        return JsonResponse({"error": "Please confirm account deactivation."}, status=400)
+
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    logout(request)
+
+    return JsonResponse({"message": "Account has been deactivated. You have been logged out."})
+
+
+@csrf_protect
+@require_POST
+def customer_toggle_favorite_view(request, artist_id):
+    """Add or remove an artist from customer's saved favorites."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = ArtistProfile.objects.filter(id=artist_id, is_active=True).first()
+    if not artist:
+        return JsonResponse({"error": "Artist profile not found."}, status=404)
+
+    fav = FavoriteArtist.objects.filter(customer=request.user, artist=artist).first()
+    if fav:
+        fav.delete()
+        is_fav = False
+        msg = f"Removed {artist.stage_name} from your favourites."
+    else:
+        FavoriteArtist.objects.create(customer=request.user, artist=artist)
+        is_fav = True
+        msg = f"Added {artist.stage_name} to your favourites."
+
+    count = FavoriteArtist.objects.filter(customer=request.user).count()
+    return JsonResponse({
+        "message": msg,
+        "is_favorite": is_fav,
+        "total_favorites": count,
+    })
+
+
+@csrf_protect
+@require_POST
+def customer_cancel_booking_view(request, booking_id):
+    """Cancel a pending or accepted booking."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    booking = Booking.objects.filter(id=booking_id, customer=request.user).first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if booking.status in [Booking.Status.COMPLETED, Booking.Status.CANCELLED]:
+        return JsonResponse({"error": f"Cannot cancel a booking that is already {booking.status}."}, status=400)
+
+    booking.status = Booking.Status.CANCELLED
+    booking.save(update_fields=["status"])
+
+    Notification.objects.create(
+        user=request.user,
+        title="Booking Cancelled",
+        message=f"Booking for {booking.artist.stage_name} ({booking.event_type}) was cancelled.",
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    return JsonResponse({
+        "message": "Booking has been cancelled.",
+        "booking_id": booking.id,
+        "status": booking.status,
+    })
+
+
+@csrf_protect
+@require_POST
+def customer_notifications_read_view(request):
+    """Mark all unread notifications as read."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    return JsonResponse({"message": "All notifications marked as read."})
+
+
+@csrf_protect
+@require_POST
+def customer_support_inquiry_view(request):
+    """Submit a support or help ticket from Customer Dashboard."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid request body."}, status=400)
+
+    subject = data.get("subject", "").strip()
+    message = data.get("message", "").strip()
+
+    if not subject or not message:
+        return JsonResponse({"error": "Subject and message are required."}, status=400)
+
+    Notification.objects.create(
+        user=request.user,
+        title=f"Support Request: {subject[:60]}",
+        message="Your help request has been received. Our team will review and reply within 24 hours.",
+        notification_type=Notification.NotificationType.GENERAL,
+    )
+
+    return JsonResponse({
+        "message": "Support request submitted successfully. Our team will get back to you shortly.",
+    })
+
+

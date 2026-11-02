@@ -1,0 +1,115 @@
+/* ==========================================================================
+   Colorffy Design Theme System
+   Palette:
+     - Background: #181818 (dark gray)
+     - Primary Text: #F7F7F7 (off-white)
+     - Accent 1: #FF5722 (vibrant orange)
+     - Accent 2: #673AB7 (deep purple)
+     - Hover Effects: #FFEB3B (bright yellow)
+   ========================================================================== */
+
+:root {
+  /* Core Theme Colors */
+  --bg-primary: #181818;
+  --bg-surface: #202020;
+  --bg-surface-elevated: #262626;
+  --bg-card: #222222;
+  --bg-card-hover: #292929;
+  
+  --text-primary: #F7F7F7;
+  --text-secondary: #A0A0A0;
+  --text-muted: #727272;
+
+  --accent-1: #FF5722;
+  --accent-1-hover: #f4511e;
+  --accent-1-subtle: rgba(255, 87, 34, 0.15);
+  --accent-1-glow: rgba(255, 87, 34, 0.35);
+
+  --accent-2: #673AB7;
+  --accent-2-hover: #5e35b1;
+  --accent-2-subtle: rgba(103, 58, 183, 0.18);
+  --accent-2-glow: rgba(103, 58, 183, 0.35);
+
+  --hover-effect: #FFEB3B;
+  --hover-effect-glow: rgba(255, 235, 59, 0.4);
+
+  --border-subtle: #2a2a2a;
+  --border-card: #303030;
+  --border-focus: #FF5722;
+
+  /* Spacing & Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2e2e2e;
+  border-radius: 5px;
+  border: 2px solid var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-1);
+}
+
+/* Selection Highlight */
+::selection {
+  background: var(--accent-1);
+  color: #FFFFFF;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+a:hover {
+  color: var(--hover-effect);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+input, textarea, select {
+  font-family: inherit;
+}
+

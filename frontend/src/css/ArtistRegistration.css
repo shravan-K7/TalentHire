@@ -1,0 +1,349 @@
+/* ==========================================================================
+   TalentHire Artist Registration - Clean Dark Theme (No Emojis)
+   Palette:
+     - Background: #181818
+     - Card / Surface: #212121
+     - Text Primary: #F7F7F7
+     - Text Secondary: #B0B0B0
+     - Accent 1: #FF5722 (vibrant orange)
+     - Accent 2: #673AB7 (deep purple)
+     - Hover: #FFEB3B (bright yellow)
+   ========================================================================== */
+
+.artist-page {
+  max-width: 960px;
+  width: 100%;
+  margin: 40px auto 80px;
+  padding: 0 24px;
+  box-sizing: border-box;
+  color: #F7F7F7;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.artist-form {
+  padding: 44px clamp(24px, 4vw, 52px);
+  background: #212121;
+  border: 1px solid #333333;
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.artist-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.artist-back-btn {
+  background: transparent;
+  color: #A0A0A0;
+  border: 1px solid #363636;
+  border-radius: 9999px;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.artist-back-btn:hover {
+  color: #FFEB3B;
+  border-color: #FFEB3B;
+  background: rgba(255, 235, 59, 0.05);
+}
+
+.artist-form-header {
+  margin-bottom: 32px;
+}
+
+.artist-form-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background: rgba(255, 87, 34, 0.15);
+  color: #FF5722;
+  border: 1px solid rgba(255, 87, 34, 0.4);
+  padding: 4px 14px;
+  border-radius: 9999px;
+  margin-bottom: 14px;
+}
+
+.artist-form-header h1 {
+  margin: 0 0 12px;
+  font-size: clamp(1.8rem, 3vw, 2.3rem);
+  font-weight: 800;
+  color: #F7F7F7;
+  letter-spacing: -0.02em;
+}
+
+.artist-form-header p {
+  color: #A0A0A0;
+  line-height: 1.6;
+  font-size: 1.02rem;
+  margin: 0;
+  max-width: 700px;
+}
+
+.artist-form h2 {
+  margin: 36px 0 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #303030;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #F7F7F7;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.artist-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.artist-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #E0E0E0;
+}
+
+.artist-grid .full-width {
+  grid-column: 1 / -1;
+}
+
+.artist-grid input,
+.artist-grid select,
+.artist-grid textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid #363636;
+  border-radius: 10px;
+  background: #181818;
+  color: #F7F7F7;
+  font: inherit;
+  font-size: 0.98rem;
+  font-weight: 400;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.artist-grid input::placeholder,
+.artist-grid textarea::placeholder {
+  color: #6E6E6E;
+}
+
+.artist-grid input:focus,
+.artist-grid select:focus,
+.artist-grid textarea:focus {
+  border-color: #FF5722;
+  box-shadow: 0 0 0 3px rgba(255, 87, 34, 0.2);
+}
+
+.artist-grid select option {
+  background: #212121;
+  color: #F7F7F7;
+}
+
+.performance-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.performance-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #181818;
+  border: 1px solid #333333;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  color: #E0E0E0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.performance-option:hover {
+  border-color: #4A4A4A;
+  background: #1c1c1c;
+}
+
+.performance-option input {
+  width: 18px;
+  height: 18px;
+  accent-color: #FF5722;
+  cursor: pointer;
+}
+
+.artist-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 36px;
+}
+
+.artist-submit {
+  flex: 1;
+  padding: 16px 24px;
+  border: none;
+  border-radius: 10px;
+  background: #FF5722;
+  color: #FFFFFF;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.35);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.artist-submit:hover:not(:disabled) {
+  background: #ff7043;
+  box-shadow: 0 0 24px rgba(255, 87, 34, 0.5);
+  transform: translateY(-2px);
+}
+
+.artist-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.artist-cancel-btn {
+  padding: 16px 24px;
+  border: 1px solid #383838;
+  border-radius: 10px;
+  background: transparent;
+  color: #A0A0A0;
+  font-size: 0.96rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.artist-cancel-btn:hover {
+  color: #F7F7F7;
+  border-color: #555555;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.artist-alert {
+  padding: 14px 18px;
+  margin: 20px 0;
+  border-radius: 10px;
+  font-size: 0.94rem;
+}
+
+.artist-alert.error {
+  background: rgba(255, 87, 34, 0.12);
+  border: 1px solid #FF5722;
+  color: #ff8a65;
+}
+
+.artist-alert.success {
+  background: rgba(0, 230, 118, 0.12);
+  border: 1px solid #00E676;
+  color: #69f0ae;
+}
+
+.field-error {
+  color: #ff8a65;
+  font-size: 0.82rem;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.artist-loading {
+  padding: 60px 20px;
+  text-align: center;
+  color: #A0A0A0;
+  font-size: 1.05rem;
+}
+
+.artist-auth-required {
+  padding: 48px clamp(20px, 4vw, 40px);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.artist-auth-required h2 {
+  font-size: 1.8rem;
+  margin: 0;
+  color: #F7F7F7;
+}
+
+.artist-auth-required p {
+  color: #A0A0A0;
+  max-width: 520px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.artist-auth-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.current-photo-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: #181818;
+  border: 1px solid #333333;
+  border-radius: 10px;
+}
+
+.current-photo-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid #444;
+}
+
+.current-photo-info {
+  font-size: 0.85rem;
+  color: #A0A0A0;
+}
+
+@media (max-width: 640px) {
+  .artist-page {
+    margin: 20px auto;
+    padding: 0 16px;
+  }
+
+  .artist-form {
+    padding: 24px 18px;
+  }
+
+  .artist-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-form-actions {
+    flex-direction: column;
+  }
+
+  .artist-submit,
+  .artist-cancel-btn {
+    width: 100%;
+  }
+}

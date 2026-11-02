@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { googleLogin } from '../js/auth';
 
-function GoogleSignIn({ onLogin, onError }) {
+function GoogleSignIn({ onLogin, onError, role }) {
   const buttonRef = useRef(null);
 
   useEffect(() => {
@@ -28,8 +28,8 @@ function GoogleSignIn({ onLogin, onError }) {
           client_id: clientId,
           callback: async (response) => {
             try {
-              const data = await googleLogin(response.credential);
-              onLogin(data.user);
+              const data = await googleLogin(response.credential, role);
+              onLogin(data.user, data);
             } catch (error) {
               onError?.(error.message || 'Google sign-in failed.');
             }
@@ -43,7 +43,7 @@ function GoogleSignIn({ onLogin, onError }) {
           size: 'large',
           text: 'continue_with',
           shape: 'rectangular',
-          width: 280,
+          width: 400,
         });
       } catch (err) {
         console.error('Failed to initialize Google Sign-In:', err);
@@ -75,9 +75,9 @@ function GoogleSignIn({ onLogin, onError }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [onLogin, onError]);
+  }, [onLogin, onError, role]);
 
-  return <div ref={buttonRef}></div>;
+  return <div ref={buttonRef} className="google-signin-btn-wrapper"></div>;
 }
 
 export default GoogleSignIn;

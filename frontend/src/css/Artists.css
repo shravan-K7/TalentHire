@@ -1,0 +1,1026 @@
+/* ==========================================================================
+   TalentHire Artists Listing & Details - Colorffy Design Theme System (No Emojis)
+   Palette:
+     - Background: #181818 (dark gray)
+     - Primary Text: #F7F7F7 (off-white)
+     - Accent 1: #FF5722 (vibrant orange)
+     - Accent 2: #673AB7 (deep purple)
+     - Hover Effects: #FFEB3B (bright yellow)
+   ========================================================================== */
+
+.artists-container {
+  min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  background-color: var(--bg-primary, #181818);
+  color: var(--text-primary, #F7F7F7);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Main Container - Full Screen Width Fit */
+.artists-main-v2 {
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 16px clamp(14px, 2vw, 32px) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ==========================================================================
+   Top Search & Filter Bar (Layout from Image 2, Colorffy Theme)
+   ========================================================================== */
+.top-search-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-surface, #202020);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* Search input */
+.top-search-wrap {
+  flex: 2;
+  min-width: 200px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.top-search-input {
+  width: 100%;
+  background: var(--bg-primary, #181818);
+  color: var(--text-primary, #F7F7F7);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 6px;
+  padding: 8px 32px 8px 12px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.top-search-input::placeholder {
+  color: var(--text-secondary, #A0A0A0);
+  font-weight: 400;
+}
+
+.top-search-input:focus {
+  border-color: var(--accent-1, #FF5722);
+  box-shadow: 0 0 0 2px var(--accent-1-glow, rgba(255, 87, 34, 0.3));
+}
+
+.top-search-clear-btn {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #A0A0A0);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.top-search-clear-btn:hover {
+  color: var(--hover-effect, #FFEB3B);
+}
+
+/* Select dropdowns */
+.top-select-wrap {
+  flex: 1;
+  min-width: 120px;
+}
+
+.top-select {
+  width: 100%;
+  background-color: var(--bg-primary, #181818);
+  color: var(--text-primary, #F7F7F7);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.top-select:focus {
+  border-color: var(--accent-1, #FF5722);
+}
+
+.top-select:hover {
+  border-color: #444444;
+}
+
+.top-select option {
+  background: var(--bg-surface, #202020);
+  color: var(--text-primary, #F7F7F7);
+}
+
+/* RESET Button - Vibrant Orange with Yellow Hover */
+.top-reset-btn {
+  background: var(--accent-1, #FF5722);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 20px;
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+.top-reset-btn:hover {
+  background: var(--accent-1-hover, #f4511e);
+  color: var(--hover-effect, #FFEB3B);
+  box-shadow: 0 0 12px var(--accent-1-glow, rgba(255, 87, 34, 0.4));
+  transform: translateY(-1px);
+}
+
+.top-reset-btn:active {
+  transform: translateY(0);
+}
+
+/* ==========================================================================
+   Two-Column Marketplace Layout (Sidebar + Catalog Grid)
+   ========================================================================== */
+.artists-layout-wrapper {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Left Sidebar */
+.categories-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 76px;
+  width: 240px;
+  flex-shrink: 0;
+}
+
+.categories-card {
+  background: var(--bg-card, #222222);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 10px;
+  padding: 16px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.categories-card-title {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--accent-1, #FF5722);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 12px 6px;
+}
+
+.categories-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.category-item-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #A0A0A0);
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.category-item-btn:hover {
+  background: var(--bg-surface-elevated, #262626);
+  color: var(--hover-effect, #FFEB3B);
+}
+
+.category-item-btn.active {
+  background: var(--accent-1, #FF5722);
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+.category-item-count {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: inherit;
+  min-width: 20px;
+  text-align: right;
+}
+
+/* Total Artists Card */
+.total-artists-card {
+  background: var(--bg-card, #222222);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.total-artists-label {
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: var(--accent-1, #FF5722);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.total-artists-value {
+  font-size: 2.1rem;
+  font-weight: 800;
+  color: var(--text-primary, #F7F7F7);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+/* Right Column: Catalog Area */
+.artists-catalog-area {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Grid of Artist Cards: Exactly 4 per row on desktop & bigger */
+.artists-grid-v2 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
+  width: 100%;
+}
+
+@media (max-width: 1300px) {
+  .artists-grid-v2 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+}
+
+@media (max-width: 920px) {
+  .artists-grid-v2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+@media (max-width: 540px) {
+  .artists-grid-v2 {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+/* Artist Card - Bigger with prominent showcase proportions */
+.artist-card-v2 {
+  background: var(--bg-card, #222222);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.artist-card-v2:hover {
+  transform: translateY(-5px);
+  border-color: var(--accent-1, #FF5722);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.7), 0 0 18px var(--accent-1-glow, rgba(255, 87, 34, 0.3));
+}
+
+.artist-card-v2:hover .artist-meta-title {
+  color: var(--hover-effect, #FFEB3B);
+}
+
+.artist-card-v2:focus-visible {
+  border-color: var(--accent-1, #FF5722);
+  box-shadow: 0 0 0 2px var(--accent-1-glow, rgba(255, 87, 34, 0.4));
+}
+
+/* Action Bar above photo */
+.artist-card-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #191919;
+  border-bottom: 1px solid #282828;
+}
+
+/* PLAY Button - Deep Purple Accent 2 with Yellow Hover */
+.card-btn-play {
+  background: rgba(103, 58, 183, 0.18);
+  border: 1px solid rgba(103, 58, 183, 0.55);
+  color: #d1c4e9;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.15s ease;
+}
+
+.card-btn-play:hover {
+  background: rgba(103, 58, 183, 0.35);
+  border-color: var(--hover-effect, #FFEB3B);
+  color: var(--hover-effect, #FFEB3B);
+  box-shadow: 0 0 12px rgba(103, 58, 183, 0.4);
+}
+
+/* BOOK NOW Button - Vibrant Orange Accent 1 */
+.card-btn-book {
+  background: var(--accent-1, #FF5722);
+  border: none;
+  color: #FFFFFF;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 6px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-btn-book:hover {
+  background: var(--accent-1-hover, #f4511e);
+  color: #FFFFFF;
+  box-shadow: 0 0 14px var(--accent-1-glow, rgba(255, 87, 34, 0.45));
+}
+
+/* Portrait Image - Bigger height for clear, prominent portrait view */
+.artist-card-image-box {
+  width: 100%;
+  height: 260px;
+  background: #111111;
+  overflow: hidden;
+  position: relative;
+}
+
+.artist-card-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.artist-card-v2:hover .artist-card-photo {
+  transform: scale(1.03);
+}
+
+/* Fallback when no image uploaded - Deep Purple and Vibrant Orange gradient */
+.artist-card-fallback-photo {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(255, 87, 34, 0.15) 0%, rgba(103, 58, 183, 0.25) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.fallback-initial {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  background: rgba(255, 87, 34, 0.16);
+  border: 2px solid var(--accent-1, #FF5722);
+  color: var(--accent-1, #FF5722);
+  font-size: 1.95rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fallback-tag {
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary, #A0A0A0);
+}
+
+/* Info Section Below Image - Spacious padding and bolder typography */
+.artist-card-info-box {
+  padding: 16px 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: var(--bg-card, #222222);
+}
+
+.artist-card-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.artist-meta-category {
+  color: var(--accent-1, #FF5722);
+}
+
+.artist-meta-location {
+  color: var(--text-secondary, #A0A0A0);
+}
+
+.artist-meta-title {
+  font-size: 1.22rem;
+  font-weight: 800;
+  color: var(--text-primary, #F7F7F7);
+  margin: 3px 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.artist-meta-subtitle {
+  font-size: 0.9rem;
+  color: var(--text-secondary, #A0A0A0);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artist-meta-notes {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-muted, #858585);
+  margin: 3px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Loading & Empty States
+   ========================================================================== */
+.artists-loading-state {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-secondary, #A0A0A0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.artists-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #333333;
+  border-top-color: var(--accent-1, #FF5722);
+  border-radius: 50%;
+  animation: artistSpin 0.7s linear infinite;
+}
+
+@keyframes artistSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.artists-empty-state {
+  text-align: center;
+  padding: 50px 20px;
+  background: var(--bg-card, #222222);
+  border: 1px dashed var(--border-card, #303030);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary, #A0A0A0);
+}
+
+.artists-empty-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary, #F7F7F7);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Play Showreel Modal
+   ========================================================================== */
+.play-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(5px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.play-modal-card {
+  background: var(--bg-card, #222222);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  padding: 22px 26px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+}
+
+.play-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.play-modal-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--text-primary, #F7F7F7);
+  margin: 4px 0 0;
+}
+
+.play-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #A0A0A0);
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.play-modal-close:hover {
+  color: var(--hover-effect, #FFEB3B);
+}
+
+.play-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.play-modal-desc {
+  font-size: 0.9rem;
+  color: #CCCCCC;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.play-modal-quote {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--bg-primary, #181818);
+  border-left: 3px solid var(--accent-1, #FF5722);
+  border-radius: 4px;
+  font-size: 0.86rem;
+  color: #D6D6D6;
+  font-style: italic;
+}
+
+.play-modal-video-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.play-external-link {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
+  padding: 10px 18px;
+  font-size: 0.85rem;
+}
+
+.play-modal-footer {
+  margin-top: 6px;
+}
+
+/* ==========================================================================
+   Responsive Adaptations
+   ========================================================================== */
+@media (max-width: 900px) {
+  .top-search-filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .top-search-wrap,
+  .top-select-wrap,
+  .top-reset-btn {
+    width: 100%;
+    min-width: unset;
+  }
+
+  .artists-layout-wrapper {
+    grid-template-columns: 1fr;
+  }
+
+  .categories-sidebar {
+    position: static;
+  }
+
+  .categories-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .category-item-btn {
+    width: auto;
+    gap: 8px;
+  }
+
+  .total-artists-card {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   Artist Details Page & Booking Modal (Preserved Functionality)
+   ========================================================================== */
+.artist-detail-page {
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.detail-back-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.detail-back-btn {
+  background: transparent;
+  color: var(--text-secondary, #A0A0A0);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 9999px;
+  padding: 8px 18px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.detail-back-btn:hover {
+  color: var(--hover-effect, #FFEB3B);
+  border-color: var(--hover-effect, #FFEB3B);
+  background: rgba(255, 235, 59, 0.05);
+}
+
+/* Detail Hero Header */
+.artist-detail-hero {
+  background: linear-gradient(135deg, rgba(33, 33, 33, 0.98) 0%, rgba(24, 24, 24, 0.95) 100%);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 18px;
+  padding: 36px clamp(18px, 4vw, 44px);
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.6);
+}
+
+.artist-detail-hero::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  right: -80px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, var(--accent-1-subtle, rgba(255, 87, 34, 0.18)) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.detail-hero-avatar {
+  width: 130px;
+  height: 130px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 3px solid #3a3a3a;
+  background: #181818;
+  flex-shrink: 0;
+}
+
+.detail-avatar-fallback {
+  width: 130px;
+  height: 130px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 87, 34, 0.2) 0%, rgba(103, 58, 183, 0.25) 100%);
+  border: 3px solid #3a3a3a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.6rem;
+  font-weight: 800;
+  color: var(--accent-1, #FF5722);
+  flex-shrink: 0;
+}
+
+.detail-hero-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.detail-hero-name {
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+  font-weight: 800;
+  color: var(--text-primary, #F7F7F7);
+  letter-spacing: -0.025em;
+  margin: 0;
+  line-height: 1.15;
+}
+
+.detail-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  font-size: 0.92rem;
+  color: #C0C0C0;
+}
+
+.detail-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Detail 2-Column Layout */
+.detail-layout-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+.detail-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.detail-section-card {
+  background: var(--bg-card, #222222);
+  border: 1px solid var(--border-card, #303030);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.detail-section-title {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-primary, #F7F7F7);
+  margin: 0 0 14px;
+  letter-spacing: -0.015em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-bio-text {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #D0D0D0;
+  margin: 0;
+}
+
+/* Sidebar Booking / Pricing Card */
+.detail-booking-card {
+  background: var(--bg-card, #222222);
+  border: 1px solid rgba(255, 87, 34, 0.4);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: sticky;
+  top: 90px;
+}
+
+.pricing-highlight {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pricing-highlight-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary, #888888);
+}
+
+.pricing-highlight-val {
+  font-size: 2.1rem;
+  font-weight: 800;
+  color: var(--hover-effect, #FFEB3B);
+  letter-spacing: -0.03em;
+}
+
+.pricing-highlight-note {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #A0A0A0);
+}
+
+.booking-perks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #333333;
+  border-bottom: 1px solid #333333;
+  padding: 14px 0;
+}
+
+.booking-perk-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.86rem;
+  color: #D0D0D0;
+}
+
+.btn-book-artist {
+  width: 100%;
+  padding: 14px;
+  background: var(--accent-1, #FF5722);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.96rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px var(--accent-1-glow, rgba(255, 87, 34, 0.35));
+  transition: all 0.2s ease;
+}
+
+.btn-book-artist:hover {
+  background: var(--accent-1-hover, #f4511e);
+  color: var(--hover-effect, #FFEB3B);
+  box-shadow: 0 0 24px var(--accent-1-glow, rgba(255, 87, 34, 0.5));
+  transform: translateY(-2px);
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(6px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.booking-modal {
+  background: var(--bg-card, #222222);
+  border: 1px solid var(--border-card, #383838);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 560px;
+  padding: 32px clamp(18px, 4vw, 36px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: relative;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.modal-title {
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: var(--text-primary, #F7F7F7);
+  margin: 0 0 4px;
+}
+
+.modal-subtitle {
+  font-size: 0.9rem;
+  color: var(--text-secondary, #A0A0A0);
+  margin: 0;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #A0A0A0);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+  color: var(--hover-effect, #FFEB3B);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 860px) {
+  .detail-layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-detail-hero {
+    flex-direction: column;
+    text-align: center;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .detail-meta-row {
+    justify-content: center;
+  }
+
+  .detail-booking-card {
+    position: static;
+  }
+}

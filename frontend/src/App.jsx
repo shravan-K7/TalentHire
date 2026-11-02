@@ -1,14 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Home from './pages/Home';
-import { getCurrentUser, logoutUser } from './js/auth';
+import Login from "./pages/Login";
+import Register from "./pages/Register";
+import Home from "./pages/Home";
+import ArtistsList from "./pages/ArtistsList";
+import ArtistDetails from "./pages/ArtistDetails";
+import Navbar from "./components/Navbar";
+import { getCurrentUser, logoutUser } from "./js/auth";
+import Chatbot from "./components/Chatbot";
+import ArtistRegistration from "./components/ArtistRegistration";
+import CustomerDashboard from "./pages/CustomerDashboard";
 
 function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
-  const [sessionError, setSessionError] = useState('');
+  const [sessionError, setSessionError] = useState("");
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
 
   // Sync client-side navigation with browser history
@@ -17,30 +23,30 @@ function App() {
       setCurrentPath(window.location.pathname);
     }
 
-    window.addEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
     return () => {
-      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener("popstate", handlePopState);
     };
   }, []);
 
   const navigate = useCallback((path) => {
     if (window.location.pathname !== path) {
-      window.history.pushState(null, '', path);
+      window.history.pushState(null, "", path);
       setCurrentPath(path);
     }
   }, []);
 
   async function checkSession() {
     setChecking(true);
-    setSessionError('');
+    setSessionError("");
 
     try {
       const currentUser = await getCurrentUser();
       setUser(currentUser);
     } catch (err) {
-      console.warn('Session check failed:', err);
+      console.warn("Session check failed:", err);
       setUser(null);
-      setSessionError('Could not verify existing session. Please sign in.');
+      setSessionError("Could not verify existing session. Please sign in.");
     } finally {
       setChecking(false);
     }
@@ -56,10 +62,10 @@ function App() {
           setUser(currentUser);
         }
       } catch (err) {
-        console.warn('Session check failed:', err);
+        console.warn("Session check failed:", err);
         if (!ignore) {
           setUser(null);
-          setSessionError('Could not verify existing session. Please sign in.');
+          setSessionError("Could not verify existing session. Please sign in.");
         }
       } finally {
         if (!ignore) {
@@ -75,50 +81,203 @@ function App() {
     };
   }, []);
 
-
-  function handleLoginSuccess(loggedInUser) {
+  function handleLoginSuccess(loggedInUser, isArtist = false, redirectTo = null) {
     setUser(loggedInUser);
-    setSessionError('');
-    navigate('/');
+    setSessionError("");
+    if (redirectTo === "/admin/" || loggedInUser?.role === "admin") {
+      window.location.href = "/admin/";
+      return;
+    }
+    if (redirectTo) {
+      navigate(redirectTo);
+      return;
+    }
+    if (isArtist || (loggedInUser?.role === "artist" && !loggedInUser?.artist_profile)) {
+      navigate("/artist-register");
+    } else {
+      navigate("/profile");
+    }
+  }
+
+  function handleArtistProfileSaved(artistData) {
+    setUser((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        is_artist: true,
+        artist_profile: artistData,
+      };
+    });
   }
 
   async function handleLogout() {
     try {
       await logoutUser();
     } catch (err) {
-      console.error('Logout error:', err);
+      console.error("Logout error:", err);
     } finally {
       setUser(null);
-      setSessionError('');
-      navigate('/login');
+      setSessionError("");
+      navigate("/login");
     }
   }
 
+  // Check if navigating to customer dashboard views
+  const isCustomerDashboard =
+    currentPath === "/profile" ||
+    currentPath === "/profile/" ||
+    currentPath.startsWith("/profile?") ||
+    currentPath === "/customer-profile" ||
+    currentPath === "/customer-profile/" ||
+    currentPath.startsWith("/customer-profile?") ||
+    currentPath === "/customer-dashboard" ||
+    currentPath === "/customer-dashboard/" ||
+    currentPath.startsWith("/customer-dashboard?") ||
+    currentPath === "/dashboard" ||
+    currentPath === "/dashboard/" ||
+    currentPath.startsWith("/dashboard?");
+
+  // Automatically redirect unauthenticated users visiting protected dashboard views to /login
+  useEffect(() => {
+    if (!checking && !user && isCustomerDashboard) {
+      queueMicrotask(() => navigate("/login"));
+    }
+  }, [checking, user, isCustomerDashboard, navigate]);
+
   if (checking) {
     return (
-      <main>
-        <p>Loading TalentHire...</p>
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#181818",
+          color: "#F7F7F7",
+          gap: "16px",
+          fontFamily: "Inter, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            width: "36px",
+            height: "36px",
+            borderRadius: "50%",
+            border: "3px solid rgba(255, 87, 34, 0.2)",
+            borderTopColor: "#FF5722",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p style={{ margin: 0, fontSize: "0.95rem", color: "#A0A0A0" }}>
+          Loading TalentHire...
+        </p>
       </main>
     );
   }
 
+  // Extract artist detail ID if path is /artists/123 or /artists?id=123
+  let artistDetailId = null;
+  const matchArtist = currentPath.match(/^\/artists\/(\d+)\/?$/);
+  if (matchArtist) {
+    artistDetailId = matchArtist[1];
+  } else {
+    const params = new URLSearchParams(window.location.search);
+    if ((currentPath === "/artists" || currentPath === "/artist") && params.get("id")) {
+      artistDetailId = params.get("id");
+    }
+  }
+
+  const isArtistsList =
+    currentPath === "/artists" ||
+    currentPath === "/artists/" ||
+    currentPath.startsWith("/artists?");
+
   return (
     <>
       {sessionError && (
-        <aside role="status">
-          <small>{sessionError}</small>{' '}
-          <button type="button" onClick={checkSession}>
+        <aside
+          role="status"
+          style={{
+            background: "rgba(255, 87, 34, 0.15)",
+            borderBottom: "1px solid #FF5722",
+            color: "#F7F7F7",
+            padding: "10px 20px",
+            fontSize: "0.85rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "12px",
+            zIndex: 1000,
+          }}
+        >
+          <small>{sessionError}</small>
+          <button
+            type="button"
+            onClick={checkSession}
+            style={{
+              background: "#FF5722",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              fontSize: "0.78rem",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
             Retry
           </button>
         </aside>
       )}
 
-      {user ? (
-        <Home user={user} onLogout={handleLogout} />
-      ) : currentPath === '/register' ? (
-        <Register onLogin={handleLoginSuccess} navigate={navigate} />
-      ) : (
+      {currentPath === "/login" ? (
         <Login onLogin={handleLoginSuccess} navigate={navigate} />
+      ) : currentPath === "/register" ? (
+        <Register onLogin={handleLoginSuccess} navigate={navigate} />
+      ) : isCustomerDashboard ? (
+        <CustomerDashboard
+          user={user}
+          onLogout={handleLogout}
+          navigate={navigate}
+          onUserUpdate={(updatedUser) => setUser(updatedUser)}
+        />
+      ) : currentPath === "/artist-register" || currentPath === "/artist-registration" ? (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
+          <Navbar user={user} onLogout={handleLogout} currentPath="/artist-register" navigate={navigate} />
+          <ArtistRegistration
+            user={user}
+            onProfileSaved={handleArtistProfileSaved}
+            onCancel={() => navigate("/")}
+            navigate={navigate}
+          />
+          <Chatbot />
+        </div>
+      ) : artistDetailId ? (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
+          <ArtistDetails
+            artistId={artistDetailId}
+            user={user}
+            onLogout={handleLogout}
+            navigate={navigate}
+          />
+          <Chatbot />
+        </div>
+      ) : isArtistsList ? (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
+          <ArtistsList
+            user={user}
+            onLogout={handleLogout}
+            navigate={navigate}
+          />
+          <Chatbot />
+        </div>
+      ) : (
+        <>
+          <Home user={user} onLogout={handleLogout} navigate={navigate} />
+          <Chatbot />
+        </>
       )}
     </>
   );

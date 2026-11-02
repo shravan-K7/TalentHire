@@ -27,6 +27,7 @@ class AuthViewTests(TestCase):
                 "username": "newuser",
                 "email": "newuser@example.com",
                 "password": "strongPassword123!",
+                "role": "customer",
             }),
             content_type="application/json",
         )
@@ -35,6 +36,22 @@ class AuthViewTests(TestCase):
         self.assertIn("user", data)
         self.assertEqual(data["user"]["username"], "newuser")
 
+    def test_register_missing_role(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            data=json.dumps({
+                "username": "noroleuser",
+                "email": "norole@example.com",
+                "password": "strongPassword123!",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "Please select whether you want to join as a Customer or Performing Artist.",
+        )
+
     def test_register_invalid_email(self):
         response = self.client.post(
             "/api/auth/register/",
@@ -42,6 +59,7 @@ class AuthViewTests(TestCase):
                 "username": "invalidemailuser",
                 "email": "not-a-valid-email",
                 "password": "strongPassword123!",
+                "role": "customer",
             }),
             content_type="application/json",
         )
@@ -55,6 +73,7 @@ class AuthViewTests(TestCase):
                 "username": "TESTUSER",
                 "email": "another@example.com",
                 "password": "strongPassword123!",
+                "role": "customer",
             }),
             content_type="application/json",
         )
@@ -68,6 +87,7 @@ class AuthViewTests(TestCase):
                 "username": "uniqueuser",
                 "email": "TEST@example.com",
                 "password": "strongPassword123!",
+                "role": "customer",
             }),
             content_type="application/json",
         )
@@ -81,6 +101,7 @@ class AuthViewTests(TestCase):
                 "username": "shortpassuser",
                 "email": "short@example.com",
                 "password": "short",
+                "role": "customer",
             }),
             content_type="application/json",
         )
