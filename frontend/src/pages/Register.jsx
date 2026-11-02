@@ -23,6 +23,7 @@ function Register({ onLogin, navigate }) {
   const [loading, setLoading] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState('idle');
   const [usernameMessage, setUsernameMessage] = useState('');
+  const [usernameSuggestions, setUsernameSuggestions] = useState([]);
 
   const handleGoogleLogin = useCallback((googleUser, meta) => {
     const chosenRole = meta?.role || googleUser?.role || formData.role;
@@ -60,10 +61,38 @@ function Register({ onLogin, navigate }) {
     if (name === 'role') {
       setError('');
     }
-    if (name === 'username' && value.trim().length < 3) {
-      setUsernameStatus('idle');
-      setUsernameMessage('');
+    if (name === 'username') {
+      setError('');
+      const trimmed = value.trim();
+      if (!trimmed) {
+        setUsernameStatus('idle');
+        setUsernameMessage('');
+        setUsernameSuggestions([]);
+      } else if (trimmed.length < 3) {
+        setUsernameStatus('too_short');
+        setUsernameMessage('Username must be at least 3 characters.');
+        setUsernameSuggestions([]);
+      } else if (!/^[\w.@+-]+$/.test(trimmed)) {
+        setUsernameStatus('invalid');
+        setUsernameMessage('Only letters, numbers, and @/./+/-/_ are allowed.');
+        setUsernameSuggestions([]);
+      } else {
+        setUsernameStatus('checking');
+        setUsernameMessage('Checking availability...');
+        setUsernameSuggestions([]);
+      }
     }
+  }
+
+  function handlePickSuggestion(suggestedUsername) {
+    setFormData((prev) => ({
+      ...prev,
+      username: suggestedUsername,
+    }));
+    setUsernameStatus('available');
+    setUsernameMessage('Username is available!');
+    setUsernameSuggestions([]);
+    setError('');
   }
 
   function handleRoleChange(selectedRole) {
@@ -81,6 +110,26 @@ function Register({ onLogin, navigate }) {
 
     if (!formData.role) {
       setError('Please select whether you want to join as a Customer or Performing Artist.');
+      return;
+    }
+
+    if (formData.username.trim().length < 3) {
+      setError('Username must be at least 3 characters.');
+      return;
+    }
+
+    if (usernameStatus === 'invalid') {
+      setError('Username can only contain letters, numbers, and @/./+/-/_.');
+      return;
+    }
+
+    if (usernameStatus === 'taken') {
+      setError('The username you entered is already taken. Please pick an available username.');
+      return;
+    }
+
+    if (usernameStatus === 'checking') {
+      setError('Please wait while we verify your username availability.');
       return;
     }
 
@@ -125,33 +174,34 @@ function Register({ onLogin, navigate }) {
   }
 
   useEffect(() => {
-    const username = formData.username.trim();
-    if (!username || username.length < 3) {
+    const rawUsername = formData.username.trim();
+    if (!rawUsername || rawUsername.length < 3 || !/^[\w.@+-]+$/.test(rawUsername)) {
       return;
     }
 
-    let isMounted = true;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const res = await checkUsernameAvailability(username);
-        if (isMounted) {
-          if (res.available) {
-            setUsernameStatus('available');
-            setUsernameMessage('Username is available');
-          } else {
-            setUsernameStatus('taken');
-            setUsernameMessage(res.message || 'Username is already taken');
-          }
+        const res = await checkUsernameAvailability(rawUsername, controller.signal);
+        if (res.available) {
+          setUsernameStatus('available');
+          setUsernameMessage('Username is available!');
+          setUsernameSuggestions([]);
+        } else {
+          setUsernameStatus('taken');
+          setUsernameMessage(res.message || 'This username is already taken.');
+          setUsernameSuggestions(res.suggestions || []);
         }
-      } catch {
-        if (isMounted) {
+      } catch (err) {
+        if (err.name !== 'AbortError') {
           setUsernameStatus('idle');
+          setUsernameMessage('');
         }
       }
-    }, 400);
+    }, 350);
 
     return () => {
-      isMounted = false;
+      controller.abort();
       clearTimeout(timer);
     };
   }, [formData.username]);
@@ -256,21 +306,61 @@ function Register({ onLogin, navigate }) {
             <div className="form-grid-2col">
               <div className="form-field">
                 <label htmlFor="username">Username</label>
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  value={formData.username}
-                  onChange={handleChange}
-                  required
-                  disabled={loading}
-                  autoComplete="username"
-                  placeholder="Choose a username"
-                />
+                <div className={`username-input-wrapper is-${usernameStatus}`}>
+                  <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    value={formData.username}
+                    onChange={handleChange}
+                    required
+                    disabled={loading}
+                    autoComplete="username"
+                    placeholder="Choose a username"
+                  />
+                  {usernameStatus === 'checking' && (
+                    <span className="username-status-icon" title="Checking availability...">
+                      <span className="username-status-spinner" />
+                    </span>
+                  )}
+                  {usernameStatus === 'available' && (
+                    <span className="username-status-icon" title="Username available" style={{ color: '#4CAF50' }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                  )}
+                  {(usernameStatus === 'taken' || usernameStatus === 'invalid') && (
+                    <span className="username-status-icon" title="Username unavailable" style={{ color: '#FF5722' }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                      </svg>
+                    </span>
+                  )}
+                </div>
+
                 {usernameMessage && (
-                  <small style={{ color: usernameStatus === 'available' ? '#4CAF50' : '#FF5722', fontSize: '0.78rem', marginTop: '4px', display: 'block' }}>
-                    {usernameMessage}
-                  </small>
+                  <div className={`username-status-msg ${usernameStatus}`}>
+                    <span>{usernameMessage}</span>
+                  </div>
+                )}
+
+                {usernameSuggestions.length > 0 && (
+                  <div className="username-suggestions-wrap">
+                    <span className="username-suggestions-label">Suggestions:</span>
+                    {usernameSuggestions.map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        className="username-suggestion-btn"
+                        onClick={() => handlePickSuggestion(sug)}
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 
