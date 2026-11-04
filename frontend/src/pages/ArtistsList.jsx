@@ -12,7 +12,10 @@ function ArtistsList({ user, onLogout, navigate }) {
   const [error, setError] = useState('');
 
   // Top Search and Filter Controls
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('search') || '';
+  });
   const [selectedCategory, setSelectedCategory] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('category') || 'all';
@@ -31,9 +34,35 @@ function ArtistsList({ user, onLogout, navigate }) {
         const res = await fetch('/api/auth/artist/categories/', { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
-          setCategories(data.categories || []);
+          const cats = data.categories || [];
+          setCategories(cats);
           if (typeof data.total_artists === 'number') {
             setTotalCount(data.total_artists);
+          }
+
+          // Resolve URL category parameter to database category name
+          const params = new URLSearchParams(window.location.search);
+          const rawCat = params.get('category');
+          if (rawCat && rawCat.toLowerCase() !== 'all') {
+            const rawLower = rawCat.toLowerCase().trim();
+            const matched = cats.find((c) => {
+              const nameLower = c.name.toLowerCase();
+              return (
+                nameLower === rawLower ||
+                nameLower.includes(rawLower) ||
+                rawLower.includes(nameLower) ||
+                (rawLower.includes('sing') && nameLower.includes('sing')) ||
+                (rawLower.includes('dj') && nameLower.includes('dj')) ||
+                (rawLower.includes('dance') && nameLower.includes('dance')) ||
+                (rawLower.includes('band') && nameLower.includes('band')) ||
+                (rawLower.includes('orchestra') && nameLower.includes('orchestra')) ||
+                (rawLower.includes('anchor') && nameLower.includes('anchor')) ||
+                (rawLower.includes('music') && nameLower.includes('instrumental'))
+              );
+            });
+            if (matched) {
+              setSelectedCategory(matched.name);
+            }
           }
         }
       } catch (err) {
@@ -86,12 +115,29 @@ function ArtistsList({ user, onLogout, navigate }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activePlayArtist]);
 
+  function handleCategorySelect(catName) {
+    setSelectedCategory(catName);
+    if (window.history.replaceState) {
+      const p = new URLSearchParams(window.location.search);
+      if (catName === 'all') {
+        p.delete('category');
+      } else {
+        p.set('category', catName);
+      }
+      const newQuery = p.toString() ? `?${p.toString()}` : '';
+      window.history.replaceState(null, '', `${window.location.pathname}${newQuery}`);
+    }
+  }
+
   function handleResetFilters() {
     setSearch('');
     setSelectedCategory('all');
     setGender('all');
     setArtistType('all');
     setSort('featured');
+    if (window.history.replaceState) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
   }
 
   function handleCardClick(artistId) {
@@ -138,7 +184,7 @@ function ArtistsList({ user, onLogout, navigate }) {
             <select
               className="top-select"
               value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
+              onChange={(e) => handleCategorySelect(e.target.value)}
               aria-label="Filter by Category"
             >
               <option value="all">All Categories</option>
@@ -221,7 +267,7 @@ function ArtistsList({ user, onLogout, navigate }) {
                 <button
                   type="button"
                   className={`category-item-btn ${selectedCategory === 'all' ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory('all')}
+                  onClick={() => handleCategorySelect('all')}
                   role="tab"
                   aria-selected={selectedCategory === 'all'}
                 >
@@ -235,7 +281,7 @@ function ArtistsList({ user, onLogout, navigate }) {
                     key={cat.id}
                     type="button"
                     className={`category-item-btn ${selectedCategory === cat.name ? 'active' : ''}`}
-                    onClick={() => setSelectedCategory(cat.name)}
+                    onClick={() => handleCategorySelect(cat.name)}
                     role="tab"
                     aria-selected={selectedCategory === cat.name}
                   >

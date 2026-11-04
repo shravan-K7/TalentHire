@@ -220,3 +220,106 @@ class AuthViewTests(TestCase):
         self.assertIn("stats", dash_data)
         self.assertEqual(dash_data["stats"]["total_bookings"], 0)
 
+
+class BookingViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.customer = User.objects.create_user(
+            username="bookingcustomer",
+            email="cust@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="performingartist",
+            email="artist2@example.com",
+            password="securepassword123",
+        )
+        cat, _ = Category.objects.get_or_create(name="Dancers & Troupes")
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=cat,
+            stage_name="Dance Troupe Alpha",
+            location="Pune",
+            starting_price=25000,
+        )
+
+    def test_create_booking_unauthenticated(self):
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({"artist_id": self.artist.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 401)
+
+    def test_create_booking_self_booking_prevented(self):
+        self.client.login(username="performingartist", password="securepassword123")
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Wedding",
+                "event_date": "2027-12-01",
+                "event_time": "19:00",
+                "event_location": "Pune",
+                "performance_duration": "2 hours",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("cannot book your own", res.json()["error"])
+
+    def test_create_booking_past_date_rejected(self):
+        self.client.login(username="bookingcustomer", password="securepassword123")
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Wedding",
+                "event_date": "2020-01-01",
+                "event_time": "19:00",
+                "event_location": "Grand Hyatt",
+                "performance_duration": "2 hours",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("must be in the future", res.json()["error"])
+
+    def test_create_booking_success(self):
+        self.client.login(username="bookingcustomer", password="securepassword123")
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Corporate Event",
+                "event_date": "2028-06-15",
+                "event_time": "18:30",
+                "event_location": "JW Marriott, Mumbai",
+                "performance_duration": "3 hours",
+                "expected_audience_size": 350,
+                "agreed_price": 30000,
+                "message": "Need state-of-the-art stage lighting and PA system.",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertEqual(data["status"], "pending")
+        self.assertEqual(data["performance_duration"], "3 hours")
+        self.assertEqual(data["expected_audience_size"], 350)
+
+        # Check DB records
+        booking = Booking.objects.get(id=data["booking_id"])
+        self.assertEqual(booking.performance_duration, "3 hours")
+        self.assertEqual(booking.expected_audience_size, 350)
+        self.assertEqual(booking.status, "pending")
+        self.assertTrue(hasattr(booking, "payment"))
+        self.assertEqual(booking.payment.status, "pending")
+
+        # Verify customer dashboard serializer
+        cust_res = self.client.get("/api/customer/dashboard/")
+        self.assertEqual(cust_res.status_code, 200)
+        cust_bookings = cust_res.json()["bookings"]
+        self.assertTrue(any(b["id"] == booking.id and b["performance_duration"] == "3 hours" for b in cust_bookings))
+
+

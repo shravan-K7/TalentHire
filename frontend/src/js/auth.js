@@ -574,6 +574,17 @@ export async function deleteArtistAvailability(availId) {
   return data
 }
 
+export async function fetchArtistCategories() {
+  const response = await fetch('/api/artist/categories/', {
+    credentials: 'include',
+  })
+  const data = await readResponse(response)
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load artist categories.')
+  }
+  return data.categories || []
+}
+
 export async function updateArtistProfileData(formData) {
   const token = await getCsrfToken()
 

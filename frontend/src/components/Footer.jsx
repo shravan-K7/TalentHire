@@ -1,13 +1,36 @@
 import '../css/Footer.css';
 
-function Footer() {
+function Footer({ navigate }) {
+  function handleLink(e, href) {
+    if (href.startsWith('/#')) {
+      const hash = href.substring(2);
+      if (window.location.pathname === '/' || window.location.pathname === '') {
+        e.preventDefault();
+        const el = document.getElementById(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      } else if (navigate) {
+        e.preventDefault();
+        navigate('/');
+        setTimeout(() => {
+          const el = document.getElementById(hash);
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 150);
+      }
+    } else if (href.startsWith('/') && navigate) {
+      e.preventDefault();
+      navigate(href);
+    }
+  }
+
   return (
-    <footer className="site-footer">
+    <footer className="site-footer" id="contact">
       <div className="footer-container">
         <div className="footer-content">
           {/* Brand section */}
           <div className="footer-brand-section">
-            <a href="/" className="footer-brand">
+            <a href="/" className="footer-brand" onClick={(e) => handleLink(e, '/')}>
               <span className="footer-brand-white">Talent</span>
               <span className="footer-brand-orange">Hire</span>
             </a>
@@ -20,16 +43,16 @@ function Footer() {
           <div className="footer-columns">
             <div className="footer-col">
               <h4>Explore</h4>
-              <a href="/artists">Artists</a>
-              <a href="/artists">Categories</a>
-              <a href="/#about">How It Works</a>
+              <a href="/artists" onClick={(e) => handleLink(e, '/artists')}>Artists</a>
+              <a href="/#categories" onClick={(e) => handleLink(e, '/#categories')}>Categories</a>
+              <a href="/#how-it-works" onClick={(e) => handleLink(e, '/#how-it-works')}>How It Works</a>
             </div>
 
             <div className="footer-col">
               <h4>Company</h4>
-              <a href="/#about">About Us</a>
-              <a href="/profile?tab=support">Contact</a>
-              <a href="/register?role=artist">Join as an Artist</a>
+              <a href="/#about" onClick={(e) => handleLink(e, '/#about')}>About Us</a>
+              <a href="/#faq" onClick={(e) => handleLink(e, '/#faq')}>Contact</a>
+              <a href="/register?role=artist" onClick={(e) => handleLink(e, '/register?role=artist')}>Join as an Artist</a>
             </div>
 
             <div className="footer-col">

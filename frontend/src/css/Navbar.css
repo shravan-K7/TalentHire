@@ -59,6 +59,16 @@
   font-weight: 800;
 }
 
+.navbar-brand-white {
+  color: #FFFFFF;
+  font-weight: 800;
+}
+
+.navbar-brand-orange {
+  color: var(--accent-1, #FF5722);
+  font-weight: 800;
+}
+
 /* Nav Links & Desktop Layout */
 .navbar-links {
   display: flex;
@@ -368,36 +378,40 @@
 .navbar-login {
   color: var(--text-primary);
   font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-weight: 500;
+  letter-spacing: normal;
   text-decoration: none;
-  transition: color 0.2s ease;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm, 6px);
+  transition: all 0.2s ease;
 }
 
 .navbar-login:hover {
-  color: var(--hover-effect);
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .navbar-register {
-  background: var(--text-primary);
-  color: var(--bg-primary);
+  background: var(--accent-1, #FF5722);
+  color: #FFFFFF;
   font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 10px 24px;
-  border-radius: var(--radius-full);
+  font-weight: 600;
+  letter-spacing: normal;
+  padding: 8px 22px;
+  border-radius: 8px;
   text-decoration: none;
   border: 1px solid transparent;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 14px rgba(255, 87, 34, 0.35);
 }
 
 .navbar-register:hover {
-  background: #FFFFFF;
-  color: #000000;
-  box-shadow: 0 0 18px var(--hover-effect-glow);
+  background: var(--accent-1-hover, #F4511E);
+  color: #FFFFFF;
+  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.5);
   transform: translateY(-1px);
 }
 

@@ -8,15 +8,15 @@
   box-sizing: border-box;
   background: #2b2b2b;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 56px clamp(20px, 5vw, 90px) 36px;
+  padding: 56px clamp(20px, 3.5vw, 60px) 36px;
   position: relative;
   margin-top: 60px;
 }
 
 .footer-container {
   width: 100%;
-  max-width: 1300px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

@@ -523,44 +523,6 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     );
   }
 
-  // Dynamic Screen Title
-  let screenTitle = 'Artist Dashboard';
-  let screenSubtitle = 'Overview of your bookings, earnings, calendar schedule and activity';
-  if (activeTab === 'profile') {
-    screenTitle = 'Artist Profile';
-    screenSubtitle = 'Public performing artist credentials and stage details';
-  } else if (activeTab === 'edit-profile') {
-    screenTitle = 'Edit Artist Profile';
-    screenSubtitle = 'Update your stage credentials, category, rates, and biography';
-  } else if (activeTab === 'portfolio') {
-    screenTitle = 'Portfolio Management';
-    screenSubtitle = 'Showcase your stage videos, showreels, and performance media';
-  } else if (activeTab === 'requests') {
-    screenTitle = 'Booking Requests';
-    screenSubtitle = 'Review and respond to incoming event booking inquiries';
-  } else if (activeTab === 'booking-detail') {
-    screenTitle = 'Booking Details';
-    screenSubtitle = 'Complete event specifications, host message, and contact information';
-  } else if (activeTab === 'calendar') {
-    screenTitle = 'Booking Calendar';
-    screenSubtitle = 'Timeline schedule of confirmed upcoming performances';
-  } else if (activeTab === 'accepted') {
-    screenTitle = 'Accepted Bookings';
-    screenSubtitle = 'Confirmed performances scheduled for upcoming celebrations';
-  } else if (activeTab === 'earnings') {
-    screenTitle = 'Payment & Earnings';
-    screenSubtitle = 'Financial breakdown, performance payouts, and transaction history';
-  } else if (activeTab === 'reviews') {
-    screenTitle = 'Reviews & Ratings';
-    screenSubtitle = 'Performance ratings and feedback received from event hosts';
-  } else if (activeTab === 'notifications') {
-    screenTitle = 'Artist Notifications';
-    screenSubtitle = 'Booking requests, confirmation updates, and platform alerts';
-  } else if (activeTab === 'availability') {
-    screenTitle = 'Availability Management';
-    screenSubtitle = 'Manage your available and unavailable dates for event bookings';
-  }
-
   return (
     <div className="cd-page">
       <Navbar user={user} onLogout={onLogout} currentPath="/profile" navigate={navigate} />
@@ -789,13 +751,8 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             RIGHT FLUID CONTENT AREA
             ===================================================================== */}
         <main className="cd-main-panel" id="main-content">
-          {/* Header Title Bar */}
+          {/* Top Bar with actions / verification badge */}
           <div className="cd-content-topbar">
-            <div className="cd-screen-heading-wrap">
-              <span className="cd-dashboard-subtitle">PERFORMING ARTIST</span>
-              <h1 className="cd-screen-title">{screenTitle}</h1>
-              <p style={{ margin: '4px 0 0', fontSize: '0.98rem', color: '#9E9E9E' }}>{screenSubtitle}</p>
-            </div>
             <div className="cd-topbar-actions">
               <span className={`cd-topbar-badge ${artist.is_verified ? '' : 'pending'}`}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -1361,7 +1318,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   </div>
 
                   <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="gender">Gender</label>
+                    <label className="cd-label" htmlFor="gender">Gender *</label>
                     <select
                       id="gender"
                       className="cd-select"
@@ -1388,7 +1345,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   </div>
 
                   <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="experience">Years of Experience</label>
+                    <label className="cd-label" htmlFor="experience">Years of Experience *</label>
                     <input
                       id="experience"
                       type="number"
@@ -1401,7 +1358,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   </div>
 
                   <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="phone">Phone Number</label>
+                    <label className="cd-label" htmlFor="phone">Phone Number *</label>
                     <input
                       id="phone"
                       type="tel"
@@ -1424,7 +1381,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   </div>
 
                   <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="travel">Travel Availability</label>
+                    <label className="cd-label" htmlFor="travel">Travel Availability *</label>
                     <select
                       id="travel"
                       className="cd-select"
@@ -1440,7 +1397,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 </div>
 
                 <div className="cd-form-group">
-                  <label className="cd-label" htmlFor="bio">Biography & Stage Description</label>
+                  <label className="cd-label" htmlFor="bio">Biography & Stage Description *</label>
                   <textarea
                     id="bio"
                     rows="4"
@@ -1453,7 +1410,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                 {/* Performance Types Tags Selector */}
                 <div className="cd-form-group">
-                  <label className="cd-label">Performance Types & Sets</label>
+                  <label className="cd-label">Performance Types & Sets *</label>
                   <div className="cd-tag-cloud">
                     {COMMON_PERFORMANCE_TYPES.map((tag) => {
                       const active = editForm.performance_types.includes(tag);
@@ -2456,7 +2413,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 </div>
 
                 <div className="cd-form-group">
-                  <label className="cd-label" htmlFor="port_url">Media / Showreel URL (YouTube / Vimeo / SoundCloud)</label>
+                  <label className="cd-label" htmlFor="port_url">Media / Showreel URL (YouTube / Vimeo / SoundCloud) *</label>
                   <input
                     id="port_url"
                     type="url"

@@ -113,7 +113,7 @@ function Login({ onLogin, navigate }) {
 
           <form className="auth-form" onSubmit={handleLogin}>
             <div className="form-field">
-              <label htmlFor="usernameOrEmail">Username or Email</label>
+              <label htmlFor="usernameOrEmail">Username or Email *</label>
               <input
                 id="usernameOrEmail"
                 type="text"
@@ -127,7 +127,7 @@ function Login({ onLogin, navigate }) {
             </div>
 
             <div className="form-field">
-              <label htmlFor="password">Password</label>
+              <label htmlFor="password">Password *</label>
               <input
                 id="password"
                 type="password"

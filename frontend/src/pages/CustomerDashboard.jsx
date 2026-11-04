@@ -10,6 +10,9 @@ import {
   cancelCustomerBooking,
   markNotificationsRead,
   submitSupportInquiry,
+  fetchArtistCategories,
+  updateArtistProfileData,
+  getCurrentUser,
 } from '../js/auth';
 import '../css/CustomerDashboard.css';
 
@@ -24,16 +27,22 @@ function formatBookingStatus(status) {
     : 'Pending';
 }
 
-function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
+const ARTIST_PERF_OPTIONS = [
+  'Solo performance',
+  'Group performance',
+  'Live events',
+  'Weddings',
+  'Corporate events',
+  'Private parties',
+  'Festivals',
+];
+
+function CustomerDashboard({ user, onLogout, navigate, onUserUpdate, currentPath }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(() => Boolean(user));
   const [error, setError] = useState('');
 
-  // Active tab matches the 5 screens in the user reference image:
-  // 'profile' (Customer Profile Page), 'edit-profile' (Edit Profile Page),
-  // 'bookings' (My Bookings Page), 'booking-detail' (Booking Details Page),
-  // 'payments' (Payment History Page), 'settings' (Settings Page),
-  // and secondary tabs: 'favorites', 'activity', 'notifications', 'support'
+  // Active tab matches the screens in Customer Dashboard
   const [activeTab, setActiveTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('tab') || 'profile';
@@ -57,6 +66,32 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
   const [profileErrorMsg, setProfileErrorMsg] = useState('');
   const fileInputRef = useRef(null);
+
+  // Register as Performing Artist Form State
+  const [artistCategories, setArtistCategories] = useState([]);
+  const [artistCategoriesLoading, setArtistCategoriesLoading] = useState(false);
+  const [artistForm, setArtistForm] = useState({
+    stage_name: '',
+    category: '',
+    gender: 'male',
+    years_of_experience: '1',
+    starting_price: '15000',
+    location: '',
+    phone: '',
+    travel_availability: 'city',
+    performance_types: ['Live events', 'Weddings'],
+    bio: '',
+    portfolio_url: '',
+    additional_information: '',
+  });
+  const [artistImageFile, setArtistImageFile] = useState(null);
+  const [artistImagePreview, setArtistImagePreview] = useState('');
+  const [artistRegisterLoading, setArtistRegisterLoading] = useState(false);
+  const [artistSuccessMsg, setArtistSuccessMsg] = useState('');
+  const [artistCreatedId, setArtistCreatedId] = useState(null);
+  const [artistErrorMsg, setArtistErrorMsg] = useState('');
+  const [artistFieldErrors, setArtistFieldErrors] = useState({});
+  const artistFileInputRef = useRef(null);
 
   // Password Change Form State
   const [passwordForm, setPasswordForm] = useState({
@@ -86,7 +121,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
   // Action status toast
   const [toastMsg, setToastMsg] = useState('');
 
-  // Listen to browser back/forward history navigation
+  // Listen to browser back/forward history navigation & currentPath updates
   useEffect(() => {
     function handlePop() {
       const params = new URLSearchParams(window.location.search);
@@ -98,6 +133,135 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
       window.removeEventListener('popstate', handlePop);
     };
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabFromUrl = params.get('tab');
+    if (tabFromUrl && tabFromUrl !== activeTab) {
+      setActiveTab(tabFromUrl);
+    }
+  }, [currentPath]);
+
+  // Load Categories & Pre-populate when entering artist registration tab
+  useEffect(() => {
+    if (activeTab === 'artist-register' || activeTab === 'register-artist') {
+      if (artistCategories.length === 0 && !artistCategoriesLoading) {
+        setArtistCategoriesLoading(true);
+        fetchArtistCategories()
+          .then((cats) => {
+            setArtistCategories(cats);
+            if (cats.length > 0) {
+              setArtistForm((prev) => ({
+                ...prev,
+                category: prev.category || String(cats[0].id),
+              }));
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to load artist categories:', err);
+          })
+          .finally(() => {
+            setArtistCategoriesLoading(false);
+          });
+      }
+      if (data?.profile) {
+        setArtistForm((prev) => ({
+          ...prev,
+          location: prev.location || data.profile.location || '',
+          phone: prev.phone || data.profile.phone || '',
+        }));
+      }
+    }
+  }, [activeTab, data]);
+
+  function handleArtistFormChange(e) {
+    const { name, value } = e.target;
+    setArtistForm((prev) => ({ ...prev, [name]: value }));
+    if (artistFieldErrors[name]) {
+      setArtistFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
+  }
+
+  function handleArtistPerformanceToggle(type) {
+    setArtistForm((prev) => {
+      const exists = prev.performance_types.includes(type);
+      const updated = exists
+        ? prev.performance_types.filter((t) => t !== type)
+        : [...prev.performance_types, type];
+      return { ...prev, performance_types: updated };
+    });
+  }
+
+  function handleArtistImageChange(e) {
+    const file = e.target.files?.[0];
+    if (file) {
+      setArtistImageFile(file);
+      const url = URL.createObjectURL(file);
+      setArtistImagePreview(url);
+    }
+  }
+
+  async function handleArtistSubmit(e) {
+    e.preventDefault();
+    setArtistRegisterLoading(true);
+    setArtistErrorMsg('');
+    setArtistSuccessMsg('');
+    setArtistFieldErrors({});
+
+    const errors = {};
+    if (!artistForm.stage_name.trim()) errors.stage_name = 'Stage name is required.';
+    if (!artistForm.category) errors.category = 'Primary category is required.';
+    if (!artistForm.location.trim()) errors.location = 'Base location is required.';
+    if (!artistForm.bio.trim()) errors.bio = 'Stage bio is required.';
+    if (!artistForm.starting_price || Number(artistForm.starting_price) <= 0) {
+      errors.starting_price = 'Please enter a valid starting fee.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setArtistFieldErrors(errors);
+      setArtistErrorMsg('Please fill in all required fields.');
+      setArtistRegisterLoading(false);
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      Object.entries(artistForm).forEach(([key, val]) => {
+        if (key === 'performance_types') {
+          formData.append(key, JSON.stringify(val));
+        } else {
+          formData.append(key, val ?? '');
+        }
+      });
+      if (artistImageFile) {
+        formData.append('profile_image', artistImageFile);
+      }
+
+      const res = await updateArtistProfileData(formData);
+      setArtistSuccessMsg(res.message || 'Congratulations! Your Performing Artist Profile is now active.');
+      if (res.artist_id || res.artist?.id) {
+        setArtistCreatedId(res.artist_id || res.artist?.id);
+      }
+      showToast('Artist profile registered successfully!');
+
+      try {
+        const updatedUser = await getCurrentUser();
+        if (onUserUpdate && updatedUser) {
+          onUserUpdate(updatedUser);
+        }
+      } catch (userErr) {
+        console.warn('Could not refresh user session:', userErr);
+      }
+    } catch (err) {
+      setArtistErrorMsg(err.message || 'Failed to complete artist registration. Please try again.');
+    } finally {
+      setArtistRegisterLoading(false);
+    }
+  }
 
   function switchTab(tabName) {
     setActiveTab(tabName);
@@ -412,6 +576,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
   else if (activeTab === 'favorites') screenTitle = 'Favourite Artists';
   else if (activeTab === 'notifications') screenTitle = 'Notifications';
   else if (activeTab === 'support') screenTitle = 'Help & Support';
+  else if (activeTab === 'artist-register' || activeTab === 'register-artist') screenTitle = 'Register as Performing Artist';
 
   return (
     <div className="cd-page">
@@ -510,6 +675,18 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
             </button>
 
             <div className="cd-sidebar-divider" />
+
+            {/* Register as Performing Artist Button */}
+            <button
+              type="button"
+              className={`cd-sidebar-item ${activeTab === 'artist-register' || activeTab === 'register-artist' ? 'active' : ''}`}
+              onClick={() => switchTab('artist-register')}
+            >
+              <svg className="cd-sidebar-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              <span>Register as Artist</span>
+            </button>
 
             {/* Quick Secondary Links */}
             <button
@@ -701,6 +878,24 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   <div className="cd-stat-lbl">Payments</div>
                 </div>
               </div>
+
+              {/* Ready to Perform? Register as Artist Banner */}
+              <div className="cd-artist-join-card">
+                <div className="cd-artist-join-text">
+                  <div className="cd-artist-join-badge">WANT TO PERFORM ON TALENTHIRE?</div>
+                  <h3 className="cd-artist-join-title">Register as a Performing Artist</h3>
+                  <p className="cd-artist-join-desc">
+                    Are you a singer, dancer, DJ, anchor, or musician? Register your stage profile to showcase your live performance reel, set your pricing, and receive direct event bookings.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="cd-artist-join-btn"
+                  onClick={() => switchTab('artist-register')}
+                >
+                  Register as Performing Artist →
+                </button>
+              </div>
             </div>
           )}
 
@@ -752,7 +947,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                   {/* Full Name */}
                   <div className="cd-form-group">
-                    <label className="cd-form-label" htmlFor="first_name">Full Name</label>
+                    <label className="cd-form-label" htmlFor="first_name">Full Name *</label>
                     <div className="cd-fullname-inputs">
                       <input
                         id="first_name"
@@ -779,7 +974,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                   {/* Email */}
                   <div className="cd-form-group">
-                    <label className="cd-form-label" htmlFor="email">Email</label>
+                    <label className="cd-form-label" htmlFor="email">Email *</label>
                     <input
                       id="email"
                       type="email"
@@ -792,7 +987,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                   {/* Phone */}
                   <div className="cd-form-group">
-                    <label className="cd-form-label" htmlFor="phone">Phone</label>
+                    <label className="cd-form-label" htmlFor="phone">Phone *</label>
                     <input
                       id="phone"
                       type="text"
@@ -807,7 +1002,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                   {/* Address / Location */}
                   <div className="cd-form-group">
-                    <label className="cd-form-label" htmlFor="location">Address / Location</label>
+                    <label className="cd-form-label" htmlFor="location">Address / Location *</label>
                     <input
                       id="location"
                       type="text"
@@ -1245,7 +1440,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                   <form onSubmit={handlePasswordSubmit} className="cd-password-form">
                     <div className="cd-form-group">
-                      <label className="cd-form-label" htmlFor="current_password">Current Password</label>
+                      <label className="cd-form-label" htmlFor="current_password">Current Password *</label>
                       <input
                         id="current_password"
                         type="password"
@@ -1260,7 +1455,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     </div>
 
                     <div className="cd-form-group">
-                      <label className="cd-form-label" htmlFor="new_password">New Password</label>
+                      <label className="cd-form-label" htmlFor="new_password">New Password *</label>
                       <input
                         id="new_password"
                         type="password"
@@ -1275,7 +1470,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     </div>
 
                     <div className="cd-form-group">
-                      <label className="cd-form-label" htmlFor="confirm_password">Confirm New Password</label>
+                      <label className="cd-form-label" htmlFor="confirm_password">Confirm New Password *</label>
                       <input
                         id="confirm_password"
                         type="password"
@@ -1454,7 +1649,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                 <form onSubmit={handleSupportSubmit} className="cd-support-form">
                   <div className="cd-form-group">
-                    <label className="cd-form-label" htmlFor="support_subject">Subject</label>
+                    <label className="cd-form-label" htmlFor="support_subject">Subject *</label>
                     <input
                       id="support_subject"
                       type="text"
@@ -1466,7 +1661,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     />
                   </div>
                   <div className="cd-form-group">
-                    <label className="cd-form-label" htmlFor="support_message">Message</label>
+                    <label className="cd-form-label" htmlFor="support_message">Message *</label>
                     <textarea
                       id="support_message"
                       className="cd-form-textarea"
@@ -1481,6 +1676,386 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     {supportSending ? 'Submitting...' : 'Submit Inquiry'}
                   </button>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {/* =======================================================================
+              SCREEN: REGISTER AS PERFORMING ARTIST (Right side in Customer Dashboard)
+              ======================================================================= */}
+          {(activeTab === 'artist-register' || activeTab === 'register-artist') && (
+            <div className="cd-view-container cd-artist-register-view">
+              <div className="cd-form-card cd-artist-register-card">
+                <div className="cd-form-card-header">
+                  <div className="cd-artist-register-header-badge">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                    <span>ARTIST REGISTRATION</span>
+                  </div>
+                  <h2 className="cd-form-title">Register as a Performing Artist</h2>
+                  <p className="cd-form-subtext">
+                    Create your official artist stage profile on TalentHire to showcase your performance reel, set your rates, and receive verified booking inquiries directly from celebration hosts and corporate organizers.
+                  </p>
+                </div>
+
+                {artistSuccessMsg ? (
+                  <div className="cd-artist-success-card">
+                    <div className="cd-artist-success-icon-wrap">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#00E676" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                    </div>
+                    <h3 className="cd-artist-success-title">Welcome to the TalentHire Performer Roster!</h3>
+                    <p className="cd-artist-success-desc">{artistSuccessMsg}</p>
+                    <div className="cd-artist-success-actions">
+                      <button
+                        type="button"
+                        className="cd-btn-primary"
+                        onClick={() => {
+                          if (navigate) navigate('/artist-dashboard');
+                          else window.location.href = '/artist-dashboard';
+                        }}
+                      >
+                        Go to Artist Dashboard →
+                      </button>
+                      {artistCreatedId && (
+                        <button
+                          type="button"
+                          className="cd-btn-outline"
+                          onClick={() => {
+                            if (navigate) navigate(`/artists/${artistCreatedId}`);
+                            else window.location.href = `/artists/${artistCreatedId}`;
+                          }}
+                        >
+                          View Public Artist Page
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleArtistSubmit} className="cd-artist-register-form">
+                    {artistErrorMsg && (
+                      <div className="cd-alert cd-alert-error" role="alert">
+                        {artistErrorMsg}
+                      </div>
+                    )}
+
+                    {/* Section 1: Stage Identity */}
+                    <div className="cd-form-section-title">1. Stage Identity & Category</div>
+
+                    <div className="cd-form-grid">
+                      {/* Stage Name */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_stage_name">
+                          Stage Name / Act Name *
+                        </label>
+                        <input
+                          id="reg_stage_name"
+                          type="text"
+                          name="stage_name"
+                          className={`cd-form-input ${artistFieldErrors.stage_name ? 'cd-input-error' : ''}`}
+                          value={artistForm.stage_name}
+                          onChange={handleArtistFormChange}
+                          placeholder="e.g. Neha Kapoor (Celebrity Emcee)"
+                          required
+                        />
+                        {artistFieldErrors.stage_name && (
+                          <span className="cd-field-error-text">{artistFieldErrors.stage_name}</span>
+                        )}
+                      </div>
+
+                      {/* Primary Category */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_category">
+                          Primary Performing Category *
+                        </label>
+                        <select
+                          id="reg_category"
+                          name="category"
+                          className={`cd-form-input cd-form-select ${artistFieldErrors.category ? 'cd-input-error' : ''}`}
+                          value={artistForm.category}
+                          onChange={handleArtistFormChange}
+                          required
+                          disabled={artistCategoriesLoading}
+                        >
+                          <option value="">
+                            {artistCategoriesLoading ? 'Loading categories...' : 'Select Category'}
+                          </option>
+                          {artistCategories.map((cat) => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.name}
+                            </option>
+                          ))}
+                        </select>
+                        {artistFieldErrors.category && (
+                          <span className="cd-field-error-text">{artistFieldErrors.category}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="cd-form-grid">
+                      {/* Gender */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_gender">
+                          Performer Gender / Composition *
+                        </label>
+                        <select
+                          id="reg_gender"
+                          name="gender"
+                          className="cd-form-input cd-form-select"
+                          value={artistForm.gender}
+                          onChange={handleArtistFormChange}
+                        >
+                          <option value="male">Male Performer</option>
+                          <option value="female">Female Performer</option>
+                          <option value="other">Other / Mixed Ensemble</option>
+                        </select>
+                      </div>
+
+                      {/* Stage Experience */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_years">
+                          Years of Stage Experience *
+                        </label>
+                        <input
+                          id="reg_years"
+                          type="number"
+                          name="years_of_experience"
+                          min="0"
+                          max="60"
+                          className="cd-form-input"
+                          value={artistForm.years_of_experience}
+                          onChange={handleArtistFormChange}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    {/* Section 2: Pricing & Location */}
+                    <div className="cd-form-section-title" style={{ marginTop: 24 }}>2. Performance Rates & Travel</div>
+
+                    <div className="cd-form-grid">
+                      {/* Starting Price */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_price">
+                          Starting Fee per Event (₹) *
+                        </label>
+                        <input
+                          id="reg_price"
+                          type="number"
+                          name="starting_price"
+                          min="500"
+                          step="500"
+                          className={`cd-form-input ${artistFieldErrors.starting_price ? 'cd-input-error' : ''}`}
+                          value={artistForm.starting_price}
+                          onChange={handleArtistFormChange}
+                          placeholder="e.g. 18000"
+                          required
+                        />
+                        <span className="cd-form-helper-text">Base fee per show. Final quotes depend on duration.</span>
+                        {artistFieldErrors.starting_price && (
+                          <span className="cd-field-error-text">{artistFieldErrors.starting_price}</span>
+                        )}
+                      </div>
+
+                      {/* Base Location */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_location">
+                          Base City / Region *
+                        </label>
+                        <input
+                          id="reg_location"
+                          type="text"
+                          name="location"
+                          className={`cd-form-input ${artistFieldErrors.location ? 'cd-input-error' : ''}`}
+                          value={artistForm.location}
+                          onChange={handleArtistFormChange}
+                          placeholder="e.g. Pune, Maharashtra"
+                          required
+                        />
+                        {artistFieldErrors.location && (
+                          <span className="cd-field-error-text">{artistFieldErrors.location}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="cd-form-grid">
+                      {/* Phone */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_phone">
+                          Booking Contact Phone *
+                        </label>
+                        <input
+                          id="reg_phone"
+                          type="tel"
+                          name="phone"
+                          className="cd-form-input"
+                          value={artistForm.phone}
+                          onChange={handleArtistFormChange}
+                          placeholder="e.g. +91 98765 43210"
+                        />
+                      </div>
+
+                      {/* Travel Radius */}
+                      <div className="cd-form-group">
+                        <label className="cd-form-label" htmlFor="reg_travel">
+                          Travel Availability *
+                        </label>
+                        <select
+                          id="reg_travel"
+                          name="travel_availability"
+                          className="cd-form-input cd-form-select"
+                          value={artistForm.travel_availability}
+                          onChange={handleArtistFormChange}
+                        >
+                          <option value="city">Within my city</option>
+                          <option value="state">Across my state</option>
+                          <option value="india">Across India</option>
+                          <option value="international">International</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Performance Formats (Pills) */}
+                    <div className="cd-form-group" style={{ marginTop: 6 }}>
+                      <label className="cd-form-label">
+                        Performance Formats & Event Types *
+                      </label>
+                      <div className="cd-perf-types-grid">
+                        {ARTIST_PERF_OPTIONS.map((opt) => {
+                          const isSel = artistForm.performance_types.includes(opt);
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              className={`cd-perf-type-pill ${isSel ? 'selected' : ''}`}
+                              onClick={() => handleArtistPerformanceToggle(opt)}
+                            >
+                              <span>{isSel ? '✓' : '+'}</span>
+                              <span>{opt}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Section 3: Stage Bio & Reel */}
+                    <div className="cd-form-section-title" style={{ marginTop: 28 }}>3. Bio, Media & Stage Photo</div>
+
+                    {/* Stage Bio */}
+                    <div className="cd-form-group">
+                      <label className="cd-form-label" htmlFor="reg_bio">
+                        Stage Bio & Description *
+                      </label>
+                      <textarea
+                        id="reg_bio"
+                        name="bio"
+                        rows={4}
+                        className={`cd-form-textarea ${artistFieldErrors.bio ? 'cd-input-error' : ''}`}
+                        value={artistForm.bio}
+                        onChange={handleArtistFormChange}
+                        placeholder="Highlight your stage expertise, signature style, awards, and audience engagement approach..."
+                        required
+                      />
+                      {artistFieldErrors.bio && (
+                        <span className="cd-field-error-text">{artistFieldErrors.bio}</span>
+                      )}
+                    </div>
+
+                    {/* Video Reel Link */}
+                    <div className="cd-form-group">
+                      <label className="cd-form-label" htmlFor="reg_portfolio">
+                        Performance Reel / Video URL (YouTube / Vimeo)
+                      </label>
+                      <input
+                        id="reg_portfolio"
+                        type="url"
+                        name="portfolio_url"
+                        className="cd-form-input"
+                        value={artistForm.portfolio_url}
+                        onChange={handleArtistFormChange}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                      />
+                      <span className="cd-form-helper-text">
+                        Clients will be able to watch this video reel directly on your detail page.
+                      </span>
+                    </div>
+
+                    {/* Additional Information / Tech Rider */}
+                    <div className="cd-form-group">
+                      <label className="cd-form-label" htmlFor="reg_additional">
+                        Equipment & Technical Requirements (Optional)
+                      </label>
+                      <textarea
+                        id="reg_additional"
+                        name="additional_information"
+                        rows={2}
+                        className="cd-form-textarea"
+                        value={artistForm.additional_information}
+                        onChange={handleArtistFormChange}
+                        placeholder="e.g. Wireless microphones, stage monitors, specific sound console requirements..."
+                      />
+                    </div>
+
+                    {/* Stage Photo Upload */}
+                    <div className="cd-form-group">
+                      <label className="cd-form-label">
+                        Primary Stage / Profile Photo
+                      </label>
+                      <div className="cd-artist-photo-picker-row">
+                        <div className="cd-artist-photo-preview-box">
+                          {artistImagePreview ? (
+                            <img src={artistImagePreview} alt="Stage Preview" />
+                          ) : (
+                            <div className="cd-artist-photo-placeholder">
+                              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#777" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                <polyline points="21 15 16 10 5 21"/>
+                              </svg>
+                              <span>Stage Photo</span>
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          type="file"
+                          ref={artistFileInputRef}
+                          accept="image/*"
+                          onChange={handleArtistImageChange}
+                          style={{ display: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          className="cd-btn-outline"
+                          onClick={() => artistFileInputRef.current?.click()}
+                        >
+                          Choose Photo
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Submit Actions */}
+                    <div className="cd-form-actions-row" style={{ marginTop: 32 }}>
+                      <button
+                        type="button"
+                        className="cd-btn-outline"
+                        onClick={() => switchTab('profile')}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="cd-btn-primary"
+                        disabled={artistRegisterLoading}
+                        style={{ minWidth: 220 }}
+                      >
+                        {artistRegisterLoading ? 'Registering Artist...' : 'Complete Artist Registration'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             </div>
           )}
@@ -1567,7 +2142,7 @@ function CustomerDashboard({ user, onLogout, navigate, onUserUpdate }) {
             {deactivateError && <div className="cd-alert cd-alert-error">{deactivateError}</div>}
 
             <div className="cd-form-group">
-              <label className="cd-form-label" htmlFor="deactivate_pwd">Password Confirmation</label>
+              <label className="cd-form-label" htmlFor="deactivate_pwd">Password Confirmation *</label>
               <input
                 id="deactivate_pwd"
                 type="password"

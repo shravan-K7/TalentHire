@@ -305,7 +305,7 @@ function Register({ onLogin, navigate }) {
 
             <div className="form-grid-2col">
               <div className="form-field">
-                <label htmlFor="username">Username</label>
+                <label htmlFor="username">Username *</label>
                 <div className={`username-input-wrapper is-${usernameStatus}`}>
                   <input
                     id="username"
@@ -365,7 +365,7 @@ function Register({ onLogin, navigate }) {
               </div>
 
               <div className="form-field">
-                <label htmlFor="email">Email</label>
+                <label htmlFor="email">Email *</label>
                 <input
                   id="email"
                   name="email"
@@ -380,7 +380,7 @@ function Register({ onLogin, navigate }) {
               </div>
 
               <div className="form-field">
-                <label htmlFor="password">Password</label>
+                <label htmlFor="password">Password *</label>
                 <input
                   id="password"
                   name="password"
@@ -397,7 +397,7 @@ function Register({ onLogin, navigate }) {
               </div>
 
               <div className="form-field">
-                <label htmlFor="confirmPassword">Confirm Password</label>
+                <label htmlFor="confirmPassword">Confirm Password *</label>
                 <input
                   id="confirmPassword"
                   name="confirmPassword"

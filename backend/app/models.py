@@ -85,6 +85,8 @@ class Booking(models.Model):
     event_location = models.CharField(max_length=200)
     message = models.TextField(blank=True)
     response_message = models.TextField(blank=True, default="")
+    performance_duration = models.CharField(max_length=50, blank=True, default="")
+    expected_audience_size = models.PositiveIntegerField(null=True, blank=True)
     agreed_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,

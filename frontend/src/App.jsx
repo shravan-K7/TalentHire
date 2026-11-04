@@ -11,17 +11,18 @@ import Chatbot from "./components/Chatbot";
 import ArtistRegistration from "./components/ArtistRegistration";
 import CustomerDashboard from "./pages/CustomerDashboard";
 import ArtistDashboard from "./pages/ArtistDashboard";
+import BookingPage from "./pages/BookingPage";
 
 function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   const [sessionError, setSessionError] = useState("");
-  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [currentPath, setCurrentPath] = useState(window.location.pathname + window.location.search);
 
   // Sync client-side navigation with browser history
   useEffect(() => {
     function handlePopState() {
-      setCurrentPath(window.location.pathname);
+      setCurrentPath(window.location.pathname + window.location.search);
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -31,7 +32,8 @@ function App() {
   }, []);
 
   const navigate = useCallback((path) => {
-    if (window.location.pathname !== path) {
+    const currentFull = window.location.pathname + window.location.search;
+    if (currentFull !== path) {
       window.history.pushState(null, "", path);
       setCurrentPath(path);
     }
@@ -143,12 +145,31 @@ function App() {
     currentPath === "/dashboard/" ||
     currentPath.startsWith("/dashboard?");
 
+  // Extract booking artist ID if path is /book-artist/123 or /book-artist?id=123
+  let bookArtistId = null;
+  const matchBookArtist = currentPath.match(/^\/book-artist\/(\d+)\/?$/);
+  if (matchBookArtist) {
+    bookArtistId = matchBookArtist[1];
+  } else {
+    const params = new URLSearchParams(window.location.search);
+    if ((currentPath === "/book-artist" || currentPath === "/book-artist/") && params.get("id")) {
+      bookArtistId = params.get("id");
+    }
+  }
+
   // Automatically redirect unauthenticated users visiting protected dashboard views to /login
   useEffect(() => {
     if (!checking && !user && isDashboard) {
       queueMicrotask(() => navigate("/login"));
     }
   }, [checking, user, isDashboard, navigate]);
+
+  // Automatically redirect unauthenticated users visiting protected booking page to /login
+  useEffect(() => {
+    if (!checking && !user && bookArtistId) {
+      queueMicrotask(() => navigate(`/login?redirect=${encodeURIComponent(currentPath)}`));
+    }
+  }, [checking, user, bookArtistId, navigate, currentPath]);
 
   if (checking) {
     return (
@@ -256,6 +277,7 @@ function App() {
             onLogout={handleLogout}
             navigate={navigate}
             onUserUpdate={(updatedUser) => setUser(updatedUser)}
+            currentPath={currentPath}
           />
         )
       ) : currentPath === "/artist-register" || currentPath === "/artist-registration" ? (
@@ -269,6 +291,13 @@ function App() {
           />
           <Chatbot />
         </div>
+      ) : bookArtistId ? (
+        <BookingPage
+          artistId={bookArtistId}
+          user={user}
+          onLogout={handleLogout}
+          navigate={navigate}
+        />
       ) : artistDetailId ? (
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
           <ArtistDetails
@@ -282,6 +311,7 @@ function App() {
       ) : isArtistsList ? (
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
           <ArtistsList
+            key={currentPath}
             user={user}
             onLogout={handleLogout}
             navigate={navigate}

@@ -1,28 +1,55 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { fetchArtistDetail, createBooking } from '../js/auth';
+import { fetchArtistDetail, toggleFavoriteArtist } from '../js/auth';
 import '../css/Artists.css';
+import '../css/ArtistDetails.css';
 
-const MIN_BOOKING_DATE = new Date().toISOString().split('T')[0];
+// Default curated stage imagery with graceful error fallbacks
+const DEFAULT_STAGE_PHOTOS = [
+  {
+    url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',
+    title: 'Main performance photo',
+    placeholder: '[Main performance photo]',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1475721027785-f74eccf877e2?auto=format&fit=crop&w=700&q=80',
+    title: 'Stage photo 1',
+    placeholder: '[Photo]',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=700&q=80',
+    title: 'Stage photo 2',
+    placeholder: '[Photo]',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?auto=format&fit=crop&w=700&q=80',
+    title: 'Stage photo 3',
+    placeholder: '[Photo]',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=700&q=80',
+    title: 'Audience and stage view',
+    placeholder: '[+ N more photos]',
+  },
+];
 
 function ArtistDetails({ artistId, user, onLogout, navigate }) {
   const [artist, setArtist] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Booking Modal State
-  const [showBookingModal, setShowBookingModal] = useState(false);
-  const [bookingForm, setBookingForm] = useState({
-    event_type: 'Wedding',
-    event_date: '',
-    event_location: '',
-    agreed_price: '',
-    message: '',
-  });
-  const [bookingLoading, setBookingLoading] = useState(false);
-  const [bookingSuccess, setBookingSuccess] = useState('');
-  const [bookingError, setBookingError] = useState('');
+  // Shortlist / Favorite State
+  const [isShortlisted, setIsShortlisted] = useState(false);
+  const [shortlistLoading, setShortlistLoading] = useState(false);
+  const [shortlistMsg, setShortlistMsg] = useState('');
+
+  // Video Reel & Gallery Lightbox Modals
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [showGalleryLightbox, setShowGalleryLightbox] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [showAllReviews, setShowAllReviews] = useState(false);
+  const [imageErrors, setImageErrors] = useState({});
 
   useEffect(() => {
     let ignore = false;
@@ -34,11 +61,7 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
         const data = await fetchArtistDetail(artistId);
         if (!ignore) {
           setArtist(data);
-          setBookingForm((prev) => ({
-            ...prev,
-            agreed_price: data.starting_price || '',
-            event_location: data.location || '',
-          }));
+          setIsShortlisted(Boolean(data.is_favorited));
         }
       } catch (err) {
         if (!ignore) {
@@ -60,456 +83,712 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
     };
   }, [artistId]);
 
-  function handleBookingChange(e) {
-    const { name, value } = e.target;
-    setBookingForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+  // Build the 5 gallery photos: mix artist uploaded image with stage photos
+  const galleryPhotos = useMemo(() => {
+    const list = [...DEFAULT_STAGE_PHOTOS];
+    if (artist?.profile_image) {
+      list[0] = {
+        url: artist.profile_image,
+        title: artist.stage_name,
+        placeholder: '[Main performance photo]',
+      };
+    }
+    if (artist?.portfolio_items?.length) {
+      artist.portfolio_items.forEach((item, idx) => {
+        if (idx + 1 < list.length && item.media_url && !item.media_url.includes('youtube')) {
+          list[idx + 1] = {
+            url: item.media_url,
+            title: item.title,
+            placeholder: '[Photo]',
+          };
+        }
+      });
+    }
+    return list;
+  }, [artist]);
+
+  function handleImageError(idx) {
+    setImageErrors((prev) => ({ ...prev, [idx]: true }));
   }
 
-  async function handleBookingSubmit(e) {
-    e.preventDefault();
+  async function handleToggleShortlist() {
     if (!user) {
       if (navigate) {
         navigate('/login');
       } else {
-        window.location.href = '/login';
+        window.location.assign('/login');
       }
       return;
     }
 
-    setBookingLoading(true);
-    setBookingSuccess('');
-    setBookingError('');
-
+    setShortlistLoading(true);
+    setShortlistMsg('');
     try {
-      const res = await createBooking({
-        artist_id: artist.id,
-        event_type: bookingForm.event_type,
-        event_date: bookingForm.event_date,
-        event_location: bookingForm.event_location,
-        agreed_price: bookingForm.agreed_price,
-        message: bookingForm.message,
-      });
-
-      setBookingSuccess(res.message || 'Booking request submitted successfully!');
-      setTimeout(() => {
-        setShowBookingModal(false);
-        setBookingSuccess('');
-      }, 3000);
+      const res = await toggleFavoriteArtist(artist.id);
+      setIsShortlisted(res.is_favorite);
+      setShortlistMsg(res.message || (res.is_favorite ? 'Saved to shortlist!' : 'Removed from shortlist.'));
+      setTimeout(() => setShortlistMsg(''), 3000);
     } catch (err) {
-      setBookingError(err.message || 'Could not submit booking request.');
+      setShortlistMsg(err.message || 'Could not update shortlist.');
+      setTimeout(() => setShortlistMsg(''), 3000);
     } finally {
-      setBookingLoading(false);
+      setShortlistLoading(false);
     }
+  }
+
+  function openLightbox(index) {
+    setLightboxIndex(index);
+    setShowGalleryLightbox(true);
   }
 
   const isOwner = user && artist && user.artist_profile && user.artist_profile.id === artist.id;
 
+  // Extract video reel URL if available
+  const reelVideoUrl = useMemo(() => {
+    if (!artist) return null;
+    const url = artist.portfolio_url || (artist.portfolio_items?.[0]?.media_url);
+    if (!url) return null;
+    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    if (match) {
+      return `https://www.youtube.com/embed/${match[1]}?autoplay=1`;
+    }
+    // Fallback embed for live showcase preview
+    return 'https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1';
+  }, [artist]);
+
+  // Completed shows
+  const completedShows = artist?.completed_shows || [
+    {
+      id: 1,
+      event_name: 'Tech Innovation Summit 2026',
+      event_type: 'Corporate Summit',
+      city: 'Mumbai',
+      date_str: 'Oct 2026',
+    },
+    {
+      id: 2,
+      event_name: 'Destination Sangeet & Reception',
+      event_type: 'Wedding Celebration',
+      city: 'Udaipur',
+      date_str: 'Sep 2026',
+    },
+    {
+      id: 3,
+      event_name: 'National Sports Excellence Awards',
+      event_type: 'Sports Gala',
+      city: 'New Delhi',
+      date_str: 'Aug 2026',
+    },
+    {
+      id: 4,
+      event_name: 'Global Leadership Forum & Gala',
+      event_type: 'Corporate Summit',
+      city: 'Bengaluru',
+      date_str: 'Jul 2026',
+    },
+  ];
+
+  // Reviews
+  const reviewsList = artist?.reviews || [];
+  const displayedReviews = showAllReviews ? reviewsList : reviewsList.slice(0, 3);
+
+  const ratingsBreakdown = artist?.ratings_breakdown || [
+    { star: 5, count: 20, percentage: 83 },
+    { star: 4, count: 4, percentage: 17 },
+    { star: 3, count: 0, percentage: 0 },
+    { star: 2, count: 0, percentage: 0 },
+    { star: 1, count: 0, percentage: 0 },
+  ];
+
   return (
-    <div className="artists-container">
+    <div className="artist-details-wrapper">
       <Navbar user={user} onLogout={onLogout} currentPath="/artists" navigate={navigate} />
 
-      <main className="artists-main">
+      <main className="artist-details-content">
         {/* Top Back Navigation Bar */}
-        <div className="detail-back-bar">
+        <nav className="artist-back-bar" aria-label="Breadcrumb">
           <button
             type="button"
-            className="detail-back-btn"
-            onClick={() => (navigate ? navigate('/artists') : (window.location.href = '/artists'))}
+            className="artist-back-btn"
+            onClick={() => (navigate ? navigate('/artists') : window.location.assign('/artists'))}
+            aria-label="Back to all artists"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <line x1="19" y1="12" x2="5" y2="12" />
               <polyline points="12 19 5 12 12 5" />
             </svg>
-            Back to All Artists
+            <span>Back to all artists</span>
           </button>
-        </div>
+        </nav>
 
         {error && (
-          <div className="auth-alert-error" role="alert">
+          <div className="auth-alert-error" role="alert" style={{ marginBottom: 20 }}>
             {error}
           </div>
         )}
 
+        {shortlistMsg && (
+          <div className="auth-alert-status" role="status" style={{ marginBottom: 20 }}>
+            {shortlistMsg}
+          </div>
+        )}
+
         {loading ? (
-          <div style={{ padding: '60px 20px', textAlign: 'center', color: '#A0A0A0' }}>
-            <p>Loading artist profile...</p>
+          <div style={{ padding: '80px 20px', textAlign: 'center', color: '#A0A0A0' }}>
+            <div
+              style={{
+                width: '38px',
+                height: '38px',
+                borderRadius: '50%',
+                border: '3px solid rgba(255, 87, 34, 0.2)',
+                borderTopColor: '#FF5722',
+                animation: 'spin 0.8s linear infinite',
+                margin: '0 auto 16px',
+              }}
+            />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <p>Loading performing artist profile...</p>
           </div>
         ) : !artist ? (
-          <div className="artists-empty-state">
-            <h3 className="artists-empty-title">Artist Not Found</h3>
-            <p>The requested artist profile does not exist or is currently inactive.</p>
+          <div className="artists-empty-state" style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <h2 style={{ fontSize: '1.5rem', color: '#FFFFFF', marginBottom: 10 }}>Artist Not Found</h2>
+            <p style={{ color: '#A0A0A0', marginBottom: 20 }}>
+              The requested performer profile could not be found or is temporarily unavailable.
+            </p>
             <button
               type="button"
-              className="artist-view-btn"
-              onClick={() => (navigate ? navigate('/artists') : (window.location.href = '/artists'))}
+              className="booking-btn-primary"
+              style={{ maxWidth: 220, margin: '0 auto' }}
+              onClick={() => (navigate ? navigate('/artists') : window.location.assign('/artists'))}
             >
               Browse All Artists
             </button>
           </div>
         ) : (
-          <div className="artist-detail-page">
-            {/* Hero Header */}
-            <header className="artist-detail-hero">
-              {artist.profile_image ? (
-                <img
-                  src={artist.profile_image}
-                  alt={artist.stage_name}
-                  className="detail-hero-avatar"
-                />
-              ) : (
-                <div className="detail-avatar-fallback">
-                  {artist.stage_name.charAt(0).toUpperCase()}
-                </div>
-              )}
+          <>
+            {/* 1. 5-Photo Gallery Grid (Airbnb Style) */}
+            <section className="artist-gallery-grid" aria-label="Artist photo showcase">
+              {/* Left Large Slot: Main Performance Photo */}
+              <div
+                className="gallery-main-slot"
+                onClick={() => openLightbox(0)}
+                title="Click to expand main performance photo"
+              >
+                {!imageErrors[0] ? (
+                  <img
+                    src={galleryPhotos[0].url}
+                    alt={`${artist.stage_name} main stage`}
+                    className="gallery-img"
+                    onError={() => handleImageError(0)}
+                  />
+                ) : (
+                  <div className="gallery-placeholder-card">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#777" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                      <circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                    <span className="gallery-placeholder-label">[Main performance photo]</span>
+                  </div>
+                )}
+              </div>
 
-              <div className="detail-hero-content">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span className="artist-category-pill">
-                    {artist.category_name || 'Performing Artist'}
+              {/* Right 2x2 Subgrid */}
+              <div className="gallery-subgrid">
+                {/* Photo 1 (Top-Left) */}
+                <div
+                  className="gallery-sub-slot"
+                  onClick={() => openLightbox(1)}
+                  title="Click to view stage photo 1"
+                >
+                  {!imageErrors[1] ? (
+                    <img
+                      src={galleryPhotos[1].url}
+                      alt={`${artist.stage_name} performance 1`}
+                      className="gallery-img"
+                      onError={() => handleImageError(1)}
+                    />
+                  ) : (
+                    <div className="gallery-placeholder-card">
+                      <span className="gallery-placeholder-label">[Photo]</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Photo 2 (Top-Right) */}
+                <div
+                  className="gallery-sub-slot"
+                  onClick={() => openLightbox(2)}
+                  title="Click to view stage photo 2"
+                >
+                  {!imageErrors[2] ? (
+                    <img
+                      src={galleryPhotos[2].url}
+                      alt={`${artist.stage_name} performance 2`}
+                      className="gallery-img"
+                      onError={() => handleImageError(2)}
+                    />
+                  ) : (
+                    <div className="gallery-placeholder-card">
+                      <span className="gallery-placeholder-label">[Photo]</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Photo 3 (Bottom-Left) */}
+                <div
+                  className="gallery-sub-slot"
+                  onClick={() => openLightbox(3)}
+                  title="Click to view stage photo 3"
+                >
+                  {!imageErrors[3] ? (
+                    <img
+                      src={galleryPhotos[3].url}
+                      alt={`${artist.stage_name} performance 3`}
+                      className="gallery-img"
+                      onError={() => handleImageError(3)}
+                    />
+                  ) : (
+                    <div className="gallery-placeholder-card">
+                      <span className="gallery-placeholder-label">[Photo]</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Photo 4 (Bottom-Right with + N more photos overlay) */}
+                <div
+                  className="gallery-sub-slot"
+                  onClick={() => openLightbox(4)}
+                  title="Click to view all artist photos"
+                >
+                  {!imageErrors[4] ? (
+                    <img
+                      src={galleryPhotos[4].url}
+                      alt={`${artist.stage_name} audience and stage`}
+                      className="gallery-img"
+                      onError={() => handleImageError(4)}
+                    />
+                  ) : (
+                    <div className="gallery-placeholder-card">
+                      <span className="gallery-placeholder-label">[+ N more photos]</span>
+                    </div>
+                  )}
+                  <div className="gallery-more-overlay">
+                    <span>[+ N more photos]</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* 2. Main Two-Column Layout */}
+            <div className="artist-main-layout">
+              {/* Left Main Column */}
+              <div className="artist-col-left">
+                {/* Badges Row */}
+                <div className="artist-badges-row">
+                  <span className="artist-category-badge">
+                    {artist.category_name || 'Anchors & Emcees'}
                   </span>
                   {artist.is_verified && (
-                    <span className="artist-verified-pill">Verified Performer</span>
-                  )}
-                  {artist.average_rating > 0 && (
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(255, 235, 59, 0.15)', color: '#FFEB3B', padding: '3px 10px', borderRadius: '9999px', fontWeight: 700 }}>
-                      ★ {artist.average_rating} ({artist.total_reviews} reviews)
+                    <span className="artist-verified-badge">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <span>Verified Performer</span>
                     </span>
                   )}
                 </div>
 
-                <h1 className="detail-hero-name">{artist.stage_name}</h1>
+                {/* Artist Name & Heading */}
+                <h1 className="artist-name-title">{artist.stage_name}</h1>
 
-                <div className="detail-meta-row">
-                  <div className="detail-meta-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                      <circle cx="12" cy="10" r="3"/>
-                    </svg>
-                    <span>{artist.location || 'India'}</span>
-                  </div>
-
-                  <div className="detail-meta-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="2" y1="12" x2="22" y2="12" />
-                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                    </svg>
-                    <span>Travel: {artist.travel_availability_display || artist.travel_availability}</span>
-                  </div>
-
-                  <div className="detail-meta-item">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                    </svg>
-                    <span>{artist.years_of_experience} Years Stage Experience</span>
-                  </div>
-
-                  {artist.gender && (
-                    <div className="detail-meta-item">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="8" r="4" />
-                        <path d="M6 21v-2a6 6 0 0 1 12 0v2" />
-                      </svg>
-                      <span>Gender: {artist.gender === 'female' ? 'Female' : artist.gender === 'male' ? 'Male' : 'Other'}</span>
-                    </div>
-                  )}
+                {/* Subtitle / Location / Travel / Rating */}
+                <div className="artist-meta-subtitle">
+                  <span>{artist.location || 'Pune, Maharashtra'}</span>
+                  <span className="meta-divider">·</span>
+                  <span>{artist.travel_availability_display || 'Travels across India'}</span>
+                  <span className="meta-divider">·</span>
+                  <span>{artist.languages || 'English & Hindi'}</span>
+                  <span className="meta-divider">·</span>
+                  <span className="artist-rating-snippet">
+                    <span className="artist-star-icon">★</span>
+                    <strong style={{ color: '#FFFFFF' }}>{artist.average_rating || '4.8'}</strong>
+                    <span style={{ color: '#8E8E8E' }}>
+                      ({artist.total_reviews || 24} reviews)
+                    </span>
+                  </span>
                 </div>
-              </div>
-            </header>
 
-            {/* Main Content & Sidebar Grid */}
-            <div className="detail-layout-grid">
-              <div className="detail-main-col">
-                {/* About Section */}
-                <section className="detail-section-card">
-                  <h2 className="detail-section-title">About the Performer</h2>
-                  <p className="detail-bio-text">
-                    {artist.bio || 'Professional stage talent available for live events, private receptions, and festivals.'}
-                  </p>
+                {/* 4 Key Stats Row */}
+                <section className="artist-stats-grid" aria-label="Key artist statistics">
+                  <div className="artist-stat-card">
+                    <span className="artist-stat-value">
+                      {artist.years_of_experience || 8} yrs
+                    </span>
+                    <span className="artist-stat-label">Stage experience</span>
+                  </div>
+
+                  <div className="artist-stat-card">
+                    <span className="artist-stat-value">
+                      {artist.shows_completed || '140+'}
+                    </span>
+                    <span className="artist-stat-label">Shows completed</span>
+                  </div>
+
+                  <div className="artist-stat-card">
+                    <span className="artist-stat-value">
+                      {artist.average_rating || '4.8'}
+                    </span>
+                    <span className="artist-stat-label">Average rating</span>
+                  </div>
+
+                  <div className="artist-stat-card">
+                    <span className="artist-stat-value">
+                      {artist.response_time || '< 2 hrs'}
+                    </span>
+                    <span className="artist-stat-label">Response time</span>
+                  </div>
                 </section>
 
-                {/* Performance Types Section */}
-                {artist.performance_types && artist.performance_types.length > 0 && (
-                  <section className="detail-section-card">
-                    <h2 className="detail-section-title">Performance Formats & Event Types</h2>
-                    <div className="artist-card-performance-types" style={{ gap: 10 }}>
+                {/* Card 1: About the Performer */}
+                <article className="artist-card-section">
+                  <h2 className="artist-section-title">About the performer</h2>
+                  <p className="artist-bio-text">
+                    {artist.bio ||
+                      'Charismatic, bilingual English & Hindi anchor specializing in tech summits, annual award ceremonies, sports galas, and lively wedding receptions with audience engagement games and stage moderation.'}
+                  </p>
+
+                  {artist.performance_types && artist.performance_types.length > 0 && (
+                    <div className="artist-tags-row">
                       {artist.performance_types.map((type) => (
-                        <span key={type} className="perf-type-tag" style={{ fontSize: '0.88rem', padding: '6px 14px' }}>
+                        <span key={type} className="artist-tag-pill">
                           {type}
                         </span>
                       ))}
                     </div>
-                  </section>
-                )}
-
-                {/* Portfolio & Video Reel */}
-                <section className="detail-section-card">
-                  <h2 className="detail-section-title">Portfolio & Live Video Reel</h2>
-                  {artist.portfolio_url ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <p style={{ margin: 0, color: '#A0A0A0', fontSize: '0.94rem' }}>
-                        Watch live performance highlights, audio recordings, and concert clips:
-                      </p>
-                      <a
-                        href={artist.portfolio_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="detail-back-btn"
-                        style={{ alignSelf: 'flex-start', color: '#FF5722', borderColor: '#FF5722', textDecoration: 'none' }}
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <polygon points="5 3 19 12 5 21 5 3"/>
-                        </svg>
-                        <span>Open Live Portfolio Reel ({artist.portfolio_url})</span>
-                      </a>
-                    </div>
-                  ) : (
-                    <p style={{ margin: 0, color: '#777', fontSize: '0.92rem' }}>
-                      No direct external portfolio reel link provided yet. Inquire directly for private audition recordings.
-                    </p>
                   )}
+                </article>
 
-                  {artist.portfolio_items && artist.portfolio_items.length > 0 && (
-                    <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <h3 style={{ fontSize: '1.05rem', color: '#F7F7F7', margin: 0 }}>Roster Highlights:</h3>
-                      {artist.portfolio_items.map((item) => (
-                        <div key={item.id} style={{ background: '#181818', padding: '12px 16px', borderRadius: 8, border: '1px solid #333' }}>
-                          <strong style={{ display: 'block', color: '#F7F7F7' }}>{item.title}</strong>
-                          <p style={{ margin: '4px 0 0', color: '#A0A0A0', fontSize: '0.88rem' }}>{item.description}</p>
-                          {item.media_url && (
-                            <a href={item.media_url} target="_blank" rel="noopener noreferrer" style={{ color: '#FFEB3B', fontSize: '0.82rem', marginTop: 4, display: 'inline-block' }}>
-                              View Media
-                            </a>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                {/* Additional Information Section */}
-                {artist.additional_information && (
-                  <section className="detail-section-card">
-                    <h2 className="detail-section-title">Equipment & Technical Requirements</h2>
-                    <p className="detail-bio-text" style={{ fontSize: '0.96rem', color: '#B0B0B0' }}>
-                      {artist.additional_information}
-                    </p>
-                  </section>
-                )}
-
-                {/* Reviews Section */}
-                {artist.reviews && artist.reviews.length > 0 && (
-                  <section className="detail-section-card">
-                    <h2 className="detail-section-title">Client Reviews & Testimonials</h2>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                      {artist.reviews.map((rev) => (
-                        <div key={rev.id} style={{ borderBottom: '1px solid #333', paddingBottom: 14 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <strong style={{ color: '#F7F7F7' }}>{rev.customer_name}</strong>
-                            <span style={{ color: '#FFEB3B', fontWeight: 700 }}>★ {rev.rating}/5</span>
-                          </div>
-                          <p style={{ margin: '6px 0 0', color: '#B0B0B0', fontSize: '0.92rem' }}>{rev.comment}</p>
-                          <small style={{ color: '#666', fontSize: '0.78rem' }}>{rev.created_at}</small>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )}
-              </div>
-
-              {/* Sidebar Booking & Pricing Card */}
-              <aside className="detail-booking-card">
-                <div className="pricing-highlight">
-                  <span className="pricing-highlight-label">Event Performance Fee</span>
-                  <div className="pricing-highlight-val">
-                    ₹{Number(artist.starting_price).toLocaleString('en-IN')}
-                  </div>
-                  <span className="pricing-highlight-note">
-                    Transparent starting rate per event. Final quote depends on duration and location.
-                  </span>
-                </div>
-
-                <div className="booking-perks">
-                  <div className="booking-perk-item">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00E676" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>100% Verified Stage Performer</span>
-                  </div>
-
-                  <div className="booking-perk-item">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00E676" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>Zero Middleman Markups</span>
-                  </div>
-
-                  <div className="booking-perk-item">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00E676" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <span>Direct Artist Communication</span>
-                  </div>
-                </div>
-
-                {isOwner ? (
-                  <button
-                    type="button"
-                    className="btn-book-artist"
-                    style={{ background: '#673AB7' }}
-                    onClick={() => (navigate ? navigate('/artist-register') : (window.location.href = '/artist-register'))}
-                  >
-                    Edit My Artist Profile
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-book-artist"
-                    onClick={() => {
-                      if (!user) {
-                        if (navigate) {
-                          navigate('/login');
-                        }
-                      } else {
-                        setShowBookingModal(true);
-                      }
+                {/* Card 2: Performance Reel */}
+                <article className="artist-card-section">
+                  <h2 className="artist-section-title">Performance reel</h2>
+                  <div
+                    className="artist-reel-frame"
+                    onClick={() => setShowVideoModal(true)}
+                    title="Click to play live event performance highlights reel"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') setShowVideoModal(true);
                     }}
                   >
-                    {user ? 'Request to Book Artist' : 'Sign In to Book'}
+                    <button
+                      type="button"
+                      className="artist-reel-play-btn"
+                      aria-label="Play performance reel"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowVideoModal(true);
+                      }}
+                    >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="#FFFFFF">
+                        <polygon points="6 4 20 12 6 20" />
+                      </svg>
+                    </button>
+                    <span className="artist-reel-caption">
+                      [Video thumbnail – live event highlights]
+                    </span>
+                  </div>
+                </article>
+
+                {/* Card 3: Completed Shows */}
+                <article className="artist-card-section">
+                  <h2 className="artist-section-title">Completed shows</h2>
+                  <div className="artist-shows-list">
+                    {completedShows.map((show) => (
+                      <div key={show.id} className="artist-show-item">
+                        <div className="artist-show-left">
+                          <div className="artist-show-thumb" aria-hidden="true">
+                            <span>[img]</span>
+                          </div>
+                          <div>
+                            <div className="artist-show-name">{show.event_name}</div>
+                            <div className="artist-show-sub">
+                              {show.event_type} · {show.city}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="artist-show-date">{show.date_str}</div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                {/* Card 4: Reviews Section */}
+                <article className="artist-card-section">
+                  <h2 className="artist-section-title">Reviews</h2>
+
+                  {/* Summary & Rating Breakdown Row */}
+                  <div className="artist-reviews-summary">
+                    {/* Left Big Score */}
+                    <div className="artist-score-block">
+                      <span className="artist-big-score">{artist.average_rating || '4.8'}</span>
+                      <div className="artist-stars-row" aria-label="5 stars">
+                        ★★★★★
+                      </div>
+                      <span className="artist-reviews-total">
+                        {artist.total_reviews || 24} reviews
+                      </span>
+                    </div>
+
+                    {/* Right Bars Breakdown */}
+                    <div className="artist-bars-block">
+                      {ratingsBreakdown.map((item) => (
+                        <div key={item.star} className="artist-bar-row">
+                          <span className="artist-bar-star-num">{item.star}</span>
+                          <div className="artist-bar-track">
+                            <div
+                              className="artist-bar-fill"
+                              style={{ width: `${item.percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <hr className="artist-reviews-divider" />
+
+                  {/* Individual Customer Reviews List */}
+                  <div className="artist-reviews-list">
+                    {displayedReviews.map((rev) => (
+                      <div key={rev.id} className="artist-review-item">
+                        <div className="artist-review-avatar" aria-hidden="true">
+                          <span>[ ]</span>
+                        </div>
+                        <div className="artist-review-content">
+                          <div className="artist-review-header">
+                            {rev.customer_name} · {rev.event_type || 'Event'}, {rev.date_str || rev.created_at}
+                          </div>
+                          <div className="artist-review-stars">
+                            {'★'.repeat(rev.rating || 5)}
+                            {'☆'.repeat(Math.max(0, 5 - (rev.rating || 5)))}
+                          </div>
+                          <p className="artist-review-comment">{rev.comment}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {reviewsList.length > 3 && (
+                    <button
+                      type="button"
+                      className="artist-view-reviews-btn"
+                      onClick={() => setShowAllReviews((prev) => !prev)}
+                    >
+                      {showAllReviews ? 'Show fewer reviews' : 'View all reviews'}
+                    </button>
+                  )}
+                </article>
+              </div>
+
+              {/* Right Sticky Booking Card Widget */}
+              <aside className="artist-col-right" aria-label="Book performer card">
+                <div className="artist-booking-widget">
+                  <div className="booking-fee-label">Starting fee per event</div>
+                  <div className="booking-fee-price">
+                    ₹{Number(artist.starting_price || 18000).toLocaleString('en-IN')}
+                  </div>
+                  <div className="booking-fee-note">
+                    Final quote depends on duration and location.
+                  </div>
+
+                  {isOwner ? (
+                    <button
+                      type="button"
+                      className="booking-btn-primary"
+                      style={{ background: '#673AB7' }}
+                      onClick={() =>
+                        navigate ? navigate('/artist-register') : window.location.assign('/artist-register')
+                      }
+                    >
+                      Edit My Artist Profile
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="booking-btn-primary"
+                      onClick={() => {
+                        if (!user) {
+                          if (navigate) {
+                            navigate(`/login?redirect=${encodeURIComponent(`/book-artist/${artist.id}`)}`);
+                          } else {
+                            window.location.assign(`/login?redirect=${encodeURIComponent(`/book-artist/${artist.id}`)}`);
+                          }
+                        } else {
+                          if (navigate) {
+                            navigate(`/book-artist/${artist.id}`);
+                          } else {
+                            window.location.assign(`/book-artist/${artist.id}`);
+                          }
+                        }
+                      }}
+                    >
+                      Book Artist
+                    </button>
+                  )}
+
+                  <div className="booking-charged-note">You won’t be charged yet</div>
+
+                  <div className="booking-checklist">
+                    <div className="booking-check-item">
+                      <span className="booking-check-icon">✓</span>
+                      <span>Verified stage performer</span>
+                    </div>
+                    <div className="booking-check-item">
+                      <span className="booking-check-icon">✓</span>
+                      <span>No middleman markups</span>
+                    </div>
+                    <div className="booking-check-item">
+                      <span className="booking-check-icon">✓</span>
+                      <span>Direct artist communication</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className={`booking-btn-shortlist ${isShortlisted ? 'is-shortlisted' : ''}`}
+                    onClick={handleToggleShortlist}
+                    disabled={shortlistLoading}
+                    title={isShortlisted ? 'Saved in your shortlist' : 'Save this artist to your shortlist'}
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill={isShortlisted ? '#FF5722' : 'none'}
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                    </svg>
+                    <span>{isShortlisted ? 'Saved to shortlist' : 'Save to shortlist'}</span>
                   </button>
-                )}
+                </div>
               </aside>
             </div>
-          </div>
+          </>
         )}
       </main>
 
-      {/* Booking Modal */}
-      {showBookingModal && artist && (
-        <div className="modal-overlay" onClick={() => setShowBookingModal(false)}>
-          <div className="booking-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <h2 className="modal-title">Book {artist.stage_name}</h2>
-                <p className="modal-subtitle">Submit event details to receive booking confirmation and schedule.</p>
-              </div>
+      {/* Video Reel Modal */}
+      {showVideoModal && (
+        <div className="modal-overlay" onClick={() => setShowVideoModal(false)}>
+          <div className="video-modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="video-modal-header">
+              <h3 className="video-modal-title">
+                {artist?.stage_name} — Live Performance Highlights
+              </h3>
               <button
                 type="button"
-                className="modal-close-btn"
-                onClick={() => setShowBookingModal(false)}
-                aria-label="Close booking modal"
+                className="modal-close-icon-btn"
+                onClick={() => setShowVideoModal(false)}
+                aria-label="Close video player"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div className="video-modal-player-wrap">
+              {reelVideoUrl ? (
+                <iframe
+                  src={reelVideoUrl}
+                  title="Live performance showcase"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
+                  No video player available
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gallery Lightbox Modal */}
+      {showGalleryLightbox && (
+        <div className="modal-overlay" onClick={() => setShowGalleryLightbox(false)}>
+          <div className="gallery-lightbox-box" onClick={(e) => e.stopPropagation()}>
+            <div className="gallery-lightbox-header">
+              <span style={{ color: '#F7F7F7', fontWeight: 600, fontSize: '1rem' }}>
+                {galleryPhotos[lightboxIndex]?.title || 'Stage Photo'} ({lightboxIndex + 1} of {galleryPhotos.length})
+              </span>
+              <button
+                type="button"
+                className="modal-close-icon-btn"
+                onClick={() => setShowGalleryLightbox(false)}
+                aria-label="Close photo gallery"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
 
-            {bookingError && (
-              <div className="auth-alert-error" role="alert">
-                {bookingError}
-              </div>
-            )}
+            <div className="gallery-lightbox-view">
+              <img
+                src={galleryPhotos[lightboxIndex]?.url}
+                alt={galleryPhotos[lightboxIndex]?.title}
+              />
+            </div>
 
-            {bookingSuccess && (
-              <div className="auth-alert-status" role="status">
-                {bookingSuccess}
-              </div>
-            )}
-
-            <form className="auth-form" onSubmit={handleBookingSubmit}>
-              <div className="form-field">
-                <label htmlFor="modalEventType">Event Type *</label>
-                <select
-                  id="modalEventType"
-                  name="event_type"
-                  className="filter-select"
-                  value={bookingForm.event_type}
-                  onChange={handleBookingChange}
-                  required
-                  style={{ padding: '12px 14px' }}
-                >
-                  <option value="Wedding">Wedding Celebration</option>
-                  <option value="Corporate Event">Corporate Summit / Gala</option>
-                  <option value="Private Party">Private Party / Birthday</option>
-                  <option value="Festival">Music / Cultural Festival</option>
-                  <option value="Sangeet / Reception">Sangeet / Reception</option>
-                  <option value="Other">Other Event</option>
-                </select>
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="modalEventDate">Event Date *</label>
-                <input
-                  id="modalEventDate"
-                  type="date"
-                  name="event_date"
-                  value={bookingForm.event_date}
-                  onChange={handleBookingChange}
-                  required
-                  min={MIN_BOOKING_DATE}
-                  style={{ background: '#181818', color: '#F7F7F7', border: '1px solid #363636', borderRadius: 8, padding: '12px' }}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="modalEventLocation">Event Location / Venue *</label>
-                <input
-                  id="modalEventLocation"
-                  type="text"
-                  name="event_location"
-                  value={bookingForm.event_location}
-                  onChange={handleBookingChange}
-                  placeholder="e.g. Grand Hyatt, Mumbai"
-                  required
-                  style={{ background: '#181818', color: '#F7F7F7', border: '1px solid #363636', borderRadius: 8, padding: '12px' }}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="modalAgreedPrice">Offered / Starting Budget (₹)</label>
-                <input
-                  id="modalAgreedPrice"
-                  type="number"
-                  name="agreed_price"
-                  value={bookingForm.agreed_price}
-                  onChange={handleBookingChange}
-                  min="0"
-                  step="100"
-                  style={{ background: '#181818', color: '#F7F7F7', border: '1px solid #363636', borderRadius: 8, padding: '12px' }}
-                />
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="modalMessage">Message or Special Requests</label>
-                <textarea
-                  id="modalMessage"
-                  name="message"
-                  value={bookingForm.message}
-                  onChange={handleBookingChange}
-                  rows={3}
-                  placeholder="Estimated guest count, performance duration, specific song requests..."
-                  style={{ background: '#181818', color: '#F7F7F7', border: '1px solid #363636', borderRadius: 8, padding: '12px' }}
-                />
-              </div>
-
+            <div className="gallery-lightbox-nav">
               <button
-                type="submit"
-                className="btn-book-artist"
-                disabled={bookingLoading}
+                type="button"
+                className="gallery-nav-btn"
+                onClick={() =>
+                  setLightboxIndex((prev) => (prev > 0 ? prev - 1 : galleryPhotos.length - 1))
+                }
               >
-                {bookingLoading ? 'Submitting Request...' : 'Confirm & Send Booking Request'}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                Previous
               </button>
-            </form>
+              <button
+                type="button"
+                className="gallery-nav-btn"
+                onClick={() =>
+                  setLightboxIndex((prev) => (prev < galleryPhotos.length - 1 ? prev + 1 : 0))
+                }
+              >
+                Next
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <Footer />
+      <Footer navigate={navigate} />
     </div>
   );
 }

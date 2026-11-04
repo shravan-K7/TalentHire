@@ -15,8 +15,24 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
       return;
     }
 
-    if (path.startsWith('/#') && window.location.pathname === '/') {
-      return;
+    if (path.startsWith('/#')) {
+      const hash = path.substring(2);
+      if (window.location.pathname === '/' || window.location.pathname === '') {
+        const el = document.getElementById(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+          return;
+        }
+      } else {
+        if (navigate) {
+          navigate('/');
+          setTimeout(() => {
+            const el = document.getElementById(hash);
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          }, 150);
+          return;
+        }
+      }
     }
 
     if (navigate) {
@@ -29,7 +45,9 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
   const links = [
     { label: 'Home', path: '/' },
     { label: 'Explore Artists', path: '/artists' },
-    { label: 'About', path: '/#about' },
+    { label: 'Categories', path: '/#categories' },
+    { label: 'About Us', path: '/#about' },
+    { label: 'Contact', path: '/#contact' },
   ];
 
   if (user?.is_staff || user?.is_superuser) {
@@ -57,7 +75,7 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
     <header className="site-header">
       <nav className="site-navbar">
         <a href="/" className="navbar-brand" onClick={(event) => goTo(event, '/')}>
-          <span className="navbar-brand-text">TalentHire</span>
+          <span className="navbar-brand-white">Talent</span><span className="navbar-brand-orange">Hire</span>
         </a>
 
         <button
@@ -151,7 +169,7 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
                 className="navbar-login"
                 onClick={(event) => goTo(event, '/login')}
               >
-                SIGN IN
+                Login
               </a>
 
               <a
@@ -159,7 +177,7 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
                 className="navbar-register"
                 onClick={(event) => goTo(event, '/register')}
               >
-                GET STARTED
+                Register
               </a>
             </div>
           )}

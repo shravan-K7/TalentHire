@@ -413,7 +413,7 @@ export default function ArtistRegistration({
           </label>
 
           <label>
-            Phone Number
+            Phone Number *
             <input
               name="phone"
               type="tel"
@@ -441,7 +441,7 @@ export default function ArtistRegistration({
           </label>
 
           <label>
-            Years of Experience
+            Years of Experience *
             <input
               name="years_of_experience"
               type="number"
@@ -454,7 +454,7 @@ export default function ArtistRegistration({
           </label>
         </div>
 
-        <h2>Performance Types</h2>
+        <h2>Performance Types *</h2>
 
         <div className="performance-options">
           {performanceOptions.map((option) => (
