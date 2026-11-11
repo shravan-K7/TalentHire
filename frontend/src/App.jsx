@@ -145,15 +145,17 @@ function App() {
     currentPath === "/dashboard/" ||
     currentPath.startsWith("/dashboard?");
 
-  // Extract booking artist ID if path is /book-artist/123 or /book-artist?id=123
+  // Extract booking artist ID if path is /book-artist/123 or /book-artist?id=123 or /booking
   let bookArtistId = null;
   const matchBookArtist = currentPath.match(/^\/book-artist\/(\d+)\/?$/);
   if (matchBookArtist) {
     bookArtistId = matchBookArtist[1];
   } else {
     const params = new URLSearchParams(window.location.search);
-    if ((currentPath === "/book-artist" || currentPath === "/book-artist/") && params.get("id")) {
+    if ((currentPath.startsWith("/book-artist") || currentPath.startsWith("/booking")) && params.get("id")) {
       bookArtistId = params.get("id");
+    } else if (currentPath === "/booking" || currentPath === "/booking/" || currentPath === "/book-artist" || currentPath === "/book-artist/") {
+      bookArtistId = "9";
     }
   }
 

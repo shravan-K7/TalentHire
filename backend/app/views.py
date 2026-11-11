@@ -2,6 +2,10 @@ import json
 import logging
 import re
 
+import razorpay
+from decimal import Decimal, ROUND_HALF_UP
+from django.db import transaction
+
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.models import User
@@ -748,7 +752,9 @@ def artist_detail_view(request, artist_id):
     reviews_data = [
         {
             "id": r.id,
-            "customer_name": r.customer.get_full_name() or r.customer.username if r.customer else "Event Host",
+            "customer_name": r.customer.get_full_name() or r.customer.username
+            if r.customer
+            else "Event Host",
             "rating": r.rating,
             "comment": r.comment,
             "created_at": r.created_at.strftime("%b %d, %Y") if r.created_at else "",
@@ -771,7 +777,9 @@ def artist_detail_view(request, artist_id):
             {
                 "star": s,
                 "count": ratings_count[s],
-                "percentage": round((ratings_count[s] / total_rev) * 100) if total_rev else 0,
+                "percentage": round((ratings_count[s] / total_rev) * 100)
+                if total_rev
+                else 0,
             }
             for s in [5, 4, 3, 2, 1]
         ]
@@ -817,10 +825,9 @@ def artist_detail_view(request, artist_id):
         ]
 
     # Completed shows
-    completed_bookings = (
-        Booking.objects.filter(artist=artist, status=Booking.Status.COMPLETED)
-        .order_by("-event_date")
-    )
+    completed_bookings = Booking.objects.filter(
+        artist=artist, status=Booking.Status.COMPLETED
+    ).order_by("-event_date")
     completed_shows = [
         {
             "id": b.id,
@@ -884,7 +891,9 @@ def artist_detail_view(request, artist_id):
     data["is_favorited"] = is_favorited
     data["response_time"] = "< 2 hrs"
     data["shows_completed"] = (
-        140 if artist.years_of_experience >= 5 else max(25, artist.years_of_experience * 20)
+        140
+        if artist.years_of_experience >= 5
+        else max(25, artist.years_of_experience * 20)
     )
     data["languages"] = "English & Hindi"
 
@@ -921,7 +930,9 @@ def create_booking_view(request):
     if not event_time_str:
         return JsonResponse({"error": "Event time is required."}, status=400)
     if not event_location:
-        return JsonResponse({"error": "Event location / venue is required."}, status=400)
+        return JsonResponse(
+            {"error": "Event location / venue is required."}, status=400
+        )
     if not performance_duration:
         return JsonResponse({"error": "Performance duration is required."}, status=400)
 
@@ -947,14 +958,19 @@ def create_booking_view(request):
     dt_direct = parse_datetime(event_date_str)
     if dt_direct:
         if timezone.is_naive(dt_direct):
-            combined_dt = timezone.make_aware(dt_direct, timezone.get_current_timezone())
+            combined_dt = timezone.make_aware(
+                dt_direct, timezone.get_current_timezone()
+            )
         else:
             combined_dt = dt_direct
 
     if not combined_dt:
         parsed_d = parse_date(event_date_str)
         if not parsed_d:
-            return JsonResponse({"error": "Invalid event date format. Please select a valid date."}, status=400)
+            return JsonResponse(
+                {"error": "Invalid event date format. Please select a valid date."},
+                status=400,
+            )
 
         parsed_t = parse_time(event_time_str)
         if not parsed_t:
@@ -966,18 +982,20 @@ def create_booking_view(request):
                 pass
 
         if not parsed_t:
-            return JsonResponse({"error": "Invalid event time format. Please provide a valid time."}, status=400)
+            return JsonResponse(
+                {"error": "Invalid event time format. Please provide a valid time."},
+                status=400,
+            )
 
         combined_dt = timezone.make_aware(
             datetime.datetime.combine(parsed_d, parsed_t),
-            timezone.get_current_timezone()
+            timezone.get_current_timezone(),
         )
 
     # Reject invalid or past event dates instead of silently replacing them with a default date
     if combined_dt <= timezone.now():
         return JsonResponse(
-            {"error": "Event date and time must be in the future."},
-            status=400
+            {"error": "Event date and time must be in the future."}, status=400
         )
 
     audience_val = None
@@ -985,20 +1003,34 @@ def create_booking_view(request):
         try:
             audience_val = int(expected_audience_size)
             if audience_val <= 0:
-                return JsonResponse({"error": "Expected audience size must be a positive number."}, status=400)
+                return JsonResponse(
+                    {"error": "Expected audience size must be a positive number."},
+                    status=400,
+                )
         except (ValueError, TypeError):
-            return JsonResponse({"error": "Expected audience size must be a valid integer."}, status=400)
+            return JsonResponse(
+                {"error": "Expected audience size must be a valid integer."}, status=400
+            )
 
-    price_val = None
-    if agreed_price is not None and str(agreed_price).strip() != "":
+    # Customer's indicative budget (not the final booking price)
+    budget_val = None
+    customer_budget = data.get("customer_budget", agreed_price)
+    if customer_budget is not None and str(customer_budget).strip() != "":
         try:
-            price_val = round(float(agreed_price), 2)
-            if price_val < 0:
-                return JsonResponse({"error": "Budget cannot be negative."}, status=400)
-        except (ValueError, TypeError):
-            price_val = float(artist.starting_price)
-    else:
-        price_val = float(artist.starting_price)
+            budget_val = Decimal(str(customer_budget)).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+            if budget_val < Decimal("0.00"):
+                return JsonResponse(
+                    {"error": "Budget cannot be negative."},
+                    status=400,
+                )
+        except (ValueError, TypeError, ArithmeticError):
+            return JsonResponse(
+                {"error": "Please Enter a valid budget."},
+                status=400,
+            )
 
     booking = Booking.objects.create(
         customer=request.user,
@@ -1009,15 +1041,18 @@ def create_booking_view(request):
         performance_duration=performance_duration,
         expected_audience_size=audience_val,
         message=message_text,
-        agreed_price=price_val,
+        customer_budget=budget_val,
+        agreed_price=None,
         status=Booking.Status.PENDING,
     )
 
     # Automatically create pending payment record (indicative customer budget, not charged yet)
     Payment.objects.create(
         booking=booking,
-        amount=price_val,
-        transaction_id=f"TXN-{booking.id}-{int(timezone.now().timestamp())}",
+        amount=Decimal("0.00"),
+        commission_percentage=Decimal("8.00"),
+        commission_amount=Decimal("0.00"),
+        artist_amount=Decimal("0.00"),
         status=Payment.Status.PENDING,
     )
 
@@ -1104,7 +1139,9 @@ def customer_dashboard_view(request):
                 "id": payment.id,
                 "amount": str(payment.amount),
                 "status": payment.status,
-                "transaction_id": payment.transaction_id or f"TXN-{payment.id}",
+                "transaction_id": payment.transaction_id,
+                "commission_percentage": str(payment.commission_amount),
+                "artist_amount": str(payment.artist_amount),
                 "date": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
                 "artist_name": b.artist.stage_name,
             }
@@ -1140,7 +1177,7 @@ def customer_dashboard_view(request):
             "event_location": b.event_location,
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
-            "agreed_price": str(b.agreed_price) if b.agreed_price else "0.00",
+            "agreed_price": str(b.agreed_price) if b.agreed_price is not None else None,
             "status": b.status,
             "message": b.message,
             "created_at": b.created_at.strftime("%b %d, %Y"),
@@ -1773,35 +1810,126 @@ def artist_respond_booking_view(request, booking_id):
 
     action = data.get("action", "").strip().lower()
     reason = data.get("reason", "").strip()
+    final_price = data.get("final_price")
 
     if action == "accept":
-        booking.status = Booking.Status.ACCEPTED
-        booking.response_message = reason or "Booking request accepted by artist."
-        booking.save()
+        # Only pending booking requests can be accepted
+        if booking.status != Booking.Status.PENDING:
+            return JsonResponse(
+                {"error": "This booking request has already benn processed."},
+                status=400,
+            )
 
-        # Notify Customer
-        Notification.objects.create(
-            user=booking.customer,
-            title="Booking Request Accepted!",
-            message=f"{artist.stage_name} has accepted your booking for {booking.event_type} on {booking.event_date.strftime('%b %d, %Y')}.",
-            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        # Artist must provide the final confirmed price
+        if final_price is None or str(final_price).strip() == "":
+            return JsonResponse(
+                {"error": "Please enter the final booking price."},
+                status=400,
+            )
+
+        try:
+            confirmed_price = Decimal(str(final_price)).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+            if not confirmed_price.is_finite() or confirmed_price <= Decimal("0.00"):
+                return JsonResponse(
+                    {"error": "Final booking price must be greater than zero."},
+                    status=400,
+                )
+        except (ValueError, TypeError, ArithmeticError):
+            return JsonResponse(
+                {"error": "Please enter a valid booking price."},
+                status=400,
+            )
+
+        payment = Payment.objects.filter(booking=booking).first()
+
+        if not payment:
+            return JsonResponse(
+                {"erroe": "Payment record not found for this booking."},
+                status=404,
+            )
+
+        if payment.status != Payment.Status.PENDING:
+            return JsonResponse(
+                {"error": "This booking's payment cannot be updated."},
+                status=400,
+            )
+
+        # Calculate TalentHire's 8% commission and artist's 92% share
+        commission = (confirmed_price * Decimal("8.00") / Decimal("100")).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        artist_share = (confirmed_price - commission).quantize(
+            Decimal("0.01")
         )
 
-        # Notify Artist
-        Notification.objects.create(
-            user=request.user,
-            title="Booking Confirmed",
-            message=f"You accepted the booking with {booking.customer.get_full_name() or booking.customer.username} for {booking.event_type}.",
-            notification_type=Notification.NotificationType.BOOKING_UPDATE,
-        )
+        # Save booking and payment details together
+        with transaction.atomic():
+            booking.agreed_price = confirmed_price
+            booking.status = Booking.Status.ACCEPTED
+            booking.response_message = (
+                reason or "Booking accpeted and final price confirmed."
+            )
+            booking.save(
+                update_fields=[
+                    "agreed_price",
+                    "status",
+                    "response_message",
+                ]
+            )
 
-        return JsonResponse(
-            {
-                "message": "Booking request accepted successfully.",
-                "status": booking.status,
-                "booking_id": booking.id,
-            }
-        )
+            payment.amount = confirmed_price
+            payment.commission_percentage = Decimal("8.00")
+            payment.commission_amount = commission
+            payment.artist_amount = artist_share
+            payment.save(
+                update_fields=[
+                    "amount",
+                    "commission_percentage",
+                    "commission_amount",
+                    "artist_amount",
+                    "updated_at",
+                ]
+            )
+
+            # Notify customer
+            Notification.objects.create(
+                user=booking.customer,
+                title="Booking Request Accepted!",
+                message=(
+                    f"{artist.stage_name} accepted your booking for "
+                    f"{booking.event_type}. Confirmed price: ₹{confirmed_price}, "
+                    "You can now proceed with payment."
+                ),
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+            # Notify artist
+            Notification.objects.create(
+                user=request.user,
+                title="Booking Confirmed",
+                message=(
+                    f"You accepted the booking with "
+                    f"{booking.customer.get_full_name() or booking.customer.username}."
+                    f"Confirmed price: ₹{confirmed_price}."
+                ),
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+            return JsonResponse(
+                {
+                    "message": "Booking accepted and final price confirmed.",
+                    "status": booking.status,
+                    "booking_id": booking.id,
+                    "agreed_price": str(confirmed_price),
+                    "commission_amount": str(commission),
+                    "artist_amount": str(artist_share),
+                    "payment_status": payment.status,
+                }
+            )
 
     elif action == "reject":
         booking.status = Booking.Status.REJECTED
@@ -2068,3 +2196,122 @@ def artist_availability_delete_view(request, avail_id):
 
     avail.delete()
     return JsonResponse({"message": "Availability record removed."})
+
+
+@csrf_protect
+@require_POST
+def create_razorpay_order_view(request, booking_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in."}, status=401)
+
+    try:
+        with transaction.atomic():
+            booking = (
+                Booking.objects.select_for_update()
+                .select_related("artist", "customer")
+                .filter(id=booking_id, customer=request.user)
+                .first()
+            )
+
+            if not booking:
+                return JsonResponse({"error": "Booking not found."}, status=404)
+
+            if booking.status != Booking.Status.ACCEPTED:
+                return JsonResponse(
+                    {
+                        "error": "Payment is available only after the artist accepts the booking."
+                    },
+                    status=400,
+                )
+
+            payment = (
+                Payment.objects.select_for_update().filter(booking=booking).first()
+            )
+
+            if not payment:
+                return JsonResponse(
+                    {"error": "Payment record not found for this booking."},
+                    status=404,
+                )
+
+            if payment.status == Payment.Status.SUCCESS:
+                return JsonResponse(
+                    {"error": "This booking has already been paid."},
+                    status=400,
+                )
+
+            # Reuse an existing Razorpay order if one was already created.
+            if payment.razorpay_order_id:
+                return JsonResponse(
+                    {
+                        "key": settings.RAZORPAY_KEY_ID,
+                        "order_id": payment.razorpay_order_id,
+                        "amount": int(payment.amount * 100),
+                        "currency": "INR",
+                        "booking_id": booking.id,
+                    }
+                )
+
+            total = Decimal(str(booking.agreed_price)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
+            if total < Decimal("1.00"):
+                return JsonResponse(
+                    {"error": "Booking amount must be at least ₹1."},
+                    status=400,
+                )
+
+            commission = (total * Decimal("0.08")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            artist_amount = total - commission
+
+            client = razorpay.Client(
+                auth=(
+                    settings.RAZORPAY_KEY_ID,
+                    settings.RAZORPAY_KEY_SECRET,
+                )
+            )
+
+            order = client.order.create(
+                {
+                    "amount": int(total * 100),
+                    "currency": "INR",
+                    "receipt": f"THB{booking.id}P{payment.id}",
+                    "notes": {
+                        "booking_id": str(booking.id),
+                        "artist_id": str(booking.artist_id),
+                    },
+                }
+            )
+
+            payment.amount = total
+            payment.commission_percentage = Decimal("8.00")
+            payment.commission_amount = commission
+            payment.artist_amount = artist_amount
+            payment.razorpay_order_id = order["id"]
+            payment.save()
+
+        return JsonResponse(
+            {
+                "key": settings.RAZORPAY_KEY_ID,
+                "order_id": order["id"],
+                "amount": order["amount"],
+                "currency": order["currency"],
+                "booking_id": booking.id,
+            }
+        )
+
+    except razorpay.errors.RazorpayError:
+        logger.exception("Razorpay order creation failed.")
+        return JsonResponse(
+            {"error": "Unable to create payment order. Please try again."},
+            status=502,
+        )
+    except Exception:
+        logger.exception("Unexpected error while creating Razorpay order.")
+        return JsonResponse(
+            {"error": "Something went wrong while preparing payment."},
+            status=500,
+        )

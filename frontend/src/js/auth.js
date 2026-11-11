@@ -418,7 +418,7 @@ export async function fetchArtistDashboard() {
   return data
 }
 
-export async function respondArtistBooking(bookingId, { action, reason = '' }) {
+export async function respondArtistBooking(bookingId, { action, reason = '', final_price }) {
   const token = await getCsrfToken()
 
   const response = await fetch(`/api/artist/bookings/${bookingId}/respond/`, {
@@ -428,7 +428,7 @@ export async function respondArtistBooking(bookingId, { action, reason = '' }) {
       'Content-Type': 'application/json',
       'X-CSRFToken': token,
     },
-    body: JSON.stringify({ action, reason }),
+    body: JSON.stringify({ action, reason, final_price }),
   })
 
   const data = await readResponse(response)

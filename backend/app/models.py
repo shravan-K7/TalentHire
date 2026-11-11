@@ -9,6 +9,7 @@ class Category(models.Model):
     def __str__(self):
         return self.name
 
+
 class ArtistProfile(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -16,7 +17,9 @@ class ArtistProfile(models.Model):
         related_name="artist_profile",
     )
     category = models.ForeignKey(
-        Category, on_delete=models.PROTECT, related_name="artists",
+        Category,
+        on_delete=models.PROTECT,
+        related_name="artists",
     )
     stage_name = models.CharField(max_length=150)
     GENDER_CHOICES = [
@@ -32,7 +35,7 @@ class ArtistProfile(models.Model):
     )
     bio = models.TextField(blank=True)
     location = models.CharField(max_length=150)
-    phone = models.CharField(max_length=20,blank=True)
+    phone = models.CharField(max_length=20, blank=True)
     profile_image = models.ImageField(
         upload_to="artists/profiles/",
         blank=True,
@@ -52,7 +55,11 @@ class ArtistProfile(models.Model):
     )
     portfolio_url = models.URLField(blank=True)
     additional_information = models.TextField(blank=True)
-    starting_price = models.DecimalField(max_digits=10,decimal_places=2,default=0,)
+    starting_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
     is_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -60,8 +67,13 @@ class ArtistProfile(models.Model):
     def __str__(self):
         return self.stage_name
 
+
 class Portfolio(models.Model):
-    artist = models.ForeignKey(ArtistProfile,on_delete=models.CASCADE,related_name="portfolio_items",)
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.CASCADE,
+        related_name="portfolio_items",
+    )
     title = models.CharField(max_length=150)
     description = models.TextField(blank=True)
     media_url = models.URLField(blank=True)
@@ -69,6 +81,7 @@ class Portfolio(models.Model):
 
     def __str__(self):
         return self.title
+
 
 class Booking(models.Model):
     class Status(models.TextChoices):
@@ -78,8 +91,16 @@ class Booking(models.Model):
         CANCELLED = "cancelled", "Cancelled"
         COMPLETED = "completed", "Completed"
 
-    customer = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="bookings",)
-    artist = models.ForeignKey(ArtistProfile,on_delete=models.PROTECT,related_name="bookings",)
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="bookings",
+    )
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.PROTECT,
+        related_name="bookings",
+    )
     event_type = models.CharField(max_length=100)
     event_date = models.DateTimeField()
     event_location = models.CharField(max_length=200)
@@ -87,17 +108,29 @@ class Booking(models.Model):
     response_message = models.TextField(blank=True, default="")
     performance_duration = models.CharField(max_length=50, blank=True, default="")
     expected_audience_size = models.PositiveIntegerField(null=True, blank=True)
+    customer_budget = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Indicative budget submitted by the customer",
+    )
     agreed_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
         blank=True,
     )
-    status = models.CharField(max_length=20,choices=Status.choices,default=Status.PENDING,)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.customer} - {self.artist} ({self.status})"
+
 
 class Payment(models.Model):
     class Status(models.TextChoices):
@@ -106,16 +139,83 @@ class Payment(models.Model):
         FAILED = "failed", "Failed"
         REFUNDED = "refunded", "Refunded"
 
-    booking = models.OneToOneField(Booking,on_delete=models.PROTECT,related_name="payment",)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    transaction_id = models.CharField(max_length=255,unique=True,null=True,blank=True,)
-    status = models.CharField(max_length=20,choices=Status.choices,default=Status.PENDING,)
+    booking = models.OneToOneField(
+        Booking,
+        on_delete=models.PROTECT,
+        related_name="payment",
+    )
+
+    # Full amount charged to the customer
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+    )
+
+    # TalentHire commission (8%)
+    commission_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=8.00,
+    )
+
+    commission_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+
+    # Artist's share (92%)
+    artist_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+    )
+
+    # Razorpay order ID
+    razorpay_order_id = models.CharField(
+        max_length=100,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
+    # Actual Razorpay payment ID
+    transaction_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Payment #{self.id} - {self.status}"
+
 
 class Review(models.Model):
-    customer = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE,related_name="artists_reviews")
-    artist = models.ForeignKey(ArtistProfile,on_delete=models.CASCADE,related_name="reviews",)
-    booking = models.OneToOneField(Booking,on_delete=models.CASCADE,related_name="review",)
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="artists_reviews",
+    )
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.CASCADE,
+        related_name="reviews",
+    )
+    booking = models.OneToOneField(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name="review",
+    )
     rating = models.PositiveSmallIntegerField()
     comment = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -127,6 +227,7 @@ class Review(models.Model):
                 name="review_rating_1_to_5",
             )
         ]
+
     def __str__(self):
         return f"{self.artist} - {self.rating}/5"
 
@@ -220,4 +321,3 @@ class ArtistAvailability(models.Model):
     def __str__(self):
         status_text = "Available" if self.is_available else "Unavailable"
         return f"{self.artist.stage_name} - {self.date} ({status_text})"
-

@@ -31,4 +31,6 @@ urlpatterns = [
     path("artist/portfolio/<int:item_id>/delete/", views.artist_portfolio_delete_view, name="artist_portfolio_delete"),
     path("artist/availability/", views.artist_availability_view, name="artist_availability"),
     path("artist/availability/<int:avail_id>/delete/", views.artist_availability_delete_view, name="artist_availability_delete"),
+
+    path("bookings/<int:booking_id>/create-order/", views.create_razorpay_order_view, name="create_razorpay_order"),
 ]
