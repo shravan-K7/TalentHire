@@ -607,4 +607,50 @@ export async function updateArtistProfileData(formData) {
   return data
 }
 
+export async function createPaymentOrder(bookingId) {
+    const token = await getCsrfToken();
 
+    const response = await fetch(
+        `/api/payments/bookings/${bookingId}/create-order/`,
+        {
+            method: "POST",
+            credentials: "include",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": token,
+            },
+            body: JSON.stringify({}),
+        }
+    );
+
+    const data = await readResponse(response);
+
+    if (!response.ok) {
+        throw new Error(data.error || "Unable to create payment order.");
+    }
+
+    return data;
+}
+
+
+export async function verifyPayment(payload) {
+    const token = await getCsrfToken();
+
+    const response = await fetch("/api/payments/verify/", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify(payload),
+    });
+
+    const data = await readResponse(response);
+
+    if (!response.ok) {
+        throw new Error(data.error || "Payment verification failed.");
+    }
+
+    return data;
+}
