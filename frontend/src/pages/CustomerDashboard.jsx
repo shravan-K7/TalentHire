@@ -555,16 +555,28 @@ function CustomerDashboard({
 
         // Step 3: Verify payment through Django
         handler: async function (response) {
+          console.log("Razorpay response:", response);
+
+          const payload = {
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          };
+
           try {
-            await verifyPayment({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
+            // Verify payment with Django
+            await verifyPayment(payload);
 
             showToast("Payment successful and verified!");
-            await refreshDashboard();
+
+            // Refresh dashboard separately
+            try {
+              await refreshDashboard();
+            } catch (refreshError) {
+              console.error("Dashboard refresh failed:", refreshError);
+            }
           } catch (err) {
+            console.error("Payment verification error:", err);
             showToast(err.message || "Payment verification failed.");
           } finally {
             setPaymentLoadingId(null);
@@ -1898,8 +1910,19 @@ function CustomerDashboard({
                       <tbody>
                         {payments.map((p) => {
                           const isPaid =
-                            p.status === "completed" || p.status === "paid";
-                          const isPending = p.status === "pending";
+                            p.status === "completed" ||
+                            p.status === "paid" ||
+                            p.status === "success" ||
+                            p.status === "SUCCESS";
+                          const isPending =
+                            p.status === "pending" || p.status === "PENDING";
+                          const relatedBooking = bookings.find(
+                            (b) => b.id === p.booking_id,
+                          );
+                          const canPayNow =
+                            isPending &&
+                            (!relatedBooking ||
+                              relatedBooking.status === "accepted");
 
                           return (
                             <tr key={p.id}>
@@ -1908,8 +1931,7 @@ function CustomerDashboard({
                               </td>
                               <td className="td-txn">
                                 <span className="cd-txn-id">
-                                  {p.transaction_id ||
-                                    `00000055${String(p.id).padStart(4, "0")}`}
+                                  {p.transaction_id || "Pending"}
                                 </span>
                               </td>
                               <td className="td-amount">₹{p.amount}</td>
@@ -1924,7 +1946,29 @@ function CustomerDashboard({
                                       : p.status}
                                 </span>
                               </td>
-                              <td className="td-actions">
+                              <td className="td-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                {canPayNow && (
+                                  <button
+                                    type="button"
+                                    className="cd-btn-primary"
+                                    style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
+                                    onClick={() =>
+                                      handlePayNow(
+                                        relatedBooking || {
+                                          id: p.booking_id,
+                                          artist_name: p.artist_name,
+                                        },
+                                      )
+                                    }
+                                    disabled={
+                                      paymentLoadingId === (p.booking_id || p.id)
+                                    }
+                                  >
+                                    {paymentLoadingId === (p.booking_id || p.id)
+                                      ? "Processing..."
+                                      : "Pay Now"}
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   className="cd-table-icon-btn"
@@ -2832,8 +2876,7 @@ function CustomerDashboard({
                 <div>
                   <span className="cd-receipt-lbl">Transaction ID:</span>
                   <strong>
-                    {receiptItem.transaction_id ||
-                      `00000055${String(receiptItem.id || "102").padStart(4, "0")}`}
+                    {receiptItem.transaction_id || "Pending"}
                   </strong>
                 </div>
               </div>

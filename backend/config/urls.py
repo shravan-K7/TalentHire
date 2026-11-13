@@ -28,8 +28,9 @@ urlpatterns = [
     path("api/artist/availability/<int:avail_id>/delete/", views.artist_availability_delete_view, name="api_artist_availability_delete"),
     path("api/artist/profile/", views.artist_profile_view, name="api_artist_profile"),
     path("api/artist/categories/", views.artist_categories, name="api_artist_categories"),
-    path("api/payments/bookings/<int:booking_id>/create-order/",views.create_razorpay_order_view,name="create_razorpay_order"),
-    path("api/payments/verify/",views.verify_razorpay_payment_view,name="verify_razorpay_payment"),
+    path("api/payments/bookings/<int:booking_id>/create-order/", views.create_razorpay_order_view, name="create_razorpay_order"),
+    path("api/payments/verify/", views.verify_razorpay_payment_view, name="verify_razorpay_payment"),
+    path("api/payments/webhook/", views.razorpay_webhook_view, name="razorpay_webhook"),
 ]
 
 if settings.DEBUG:

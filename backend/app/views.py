@@ -17,7 +17,7 @@ from django.db import IntegrityError, models
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, csrf_protect, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST, require_http_methods
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests
@@ -1137,6 +1137,7 @@ def customer_dashboard_view(request):
         if payment:
             payment_data = {
                 "id": payment.id,
+                "booking_id": b.id,
                 "amount": str(payment.amount),
                 "status": payment.status,
                 "transaction_id": payment.transaction_id,
@@ -1145,6 +1146,7 @@ def customer_dashboard_view(request):
                 "artist_amount": str(payment.artist_amount),
                 "date": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
                 "artist_name": b.artist.stage_name,
+                "booking_status": b.status,
             }
             payments_list.append(payment_data)
             recent_activity.append(
@@ -1568,15 +1570,36 @@ def artist_dashboard_view(request):
     ).order_by("event_date")
     upcoming_count = upcoming_qs.count()
 
-    # Calculate earnings
-    completed_earnings = sum(
-        (b.agreed_price or 0)
-        for b in bookings_qs.filter(status=Booking.Status.COMPLETED)
-    )
-    pending_earnings = sum(
-        (b.agreed_price or 0)
-        for b in bookings_qs.filter(status=Booking.Status.ACCEPTED)
-    )
+    # Calculate earnings based on 92% artist share
+    completed_earnings = Decimal("0.00")
+    pending_earnings = Decimal("0.00")
+
+    for b in bookings_qs:
+        payment = getattr(b, "payment", None)
+        if b.agreed_price is not None:
+            price = Decimal(str(b.agreed_price))
+            expected_artist_share = (price * Decimal("0.92")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        else:
+            expected_artist_share = Decimal("0.00")
+
+        artist_share = (
+            payment.artist_amount
+            if payment and payment.artist_amount and payment.artist_amount > Decimal("0.00")
+            else expected_artist_share
+        )
+
+        if b.status == Booking.Status.COMPLETED:
+            # Only count completed earnings if payment is successful
+            if payment and payment.status == Payment.Status.SUCCESS:
+                completed_earnings += artist_share
+        elif b.status == Booking.Status.ACCEPTED:
+            if not payment or payment.status != Payment.Status.SUCCESS:
+                pending_earnings += artist_share
+            else:
+                completed_earnings += artist_share
+
     total_earnings = completed_earnings + pending_earnings
 
     serialized_bookings = []
@@ -1589,9 +1612,12 @@ def artist_dashboard_view(request):
         if payment:
             payment_data = {
                 "id": payment.id,
+                "booking_id": b.id,
                 "amount": str(payment.amount),
+                "artist_amount": str(payment.artist_amount),
+                "commission_amount": str(payment.commission_amount),
                 "status": payment.status,
-                "transaction_id": payment.transaction_id or f"TXN-{payment.id}",
+                "transaction_id": payment.transaction_id,
                 "date": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
                 "customer_name": b.customer.get_full_name() or b.customer.username,
             }
@@ -1602,7 +1628,7 @@ def artist_dashboard_view(request):
                     "id": f"pay-{payment.id}",
                     "type": "payment",
                     "title": f"Payment {payment.status.title()}",
-                    "description": f"₹{payment.amount} for {b.event_type} from {b.customer.get_full_name() or b.customer.username}",
+                    "description": f"₹{payment.artist_amount or payment.amount} for {b.event_type} from {b.customer.get_full_name() or b.customer.username}",
                     "timestamp": payment.created_at.isoformat(),
                     "formatted_time": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
                     "status": payment.status,
@@ -1817,7 +1843,7 @@ def artist_respond_booking_view(request, booking_id):
         # Only pending booking requests can be accepted
         if booking.status != Booking.Status.PENDING:
             return JsonResponse(
-                {"error": "This booking request has already benn processed."},
+                {"error": "This booking request has already been processed."},
                 status=400,
             )
 
@@ -1848,7 +1874,7 @@ def artist_respond_booking_view(request, booking_id):
 
         if not payment:
             return JsonResponse(
-                {"erroe": "Payment record not found for this booking."},
+                {"error": "Payment record not found for this booking."},
                 status=404,
             )
 
@@ -1873,7 +1899,7 @@ def artist_respond_booking_view(request, booking_id):
             booking.agreed_price = confirmed_price
             booking.status = Booking.Status.ACCEPTED
             booking.response_message = (
-                reason or "Booking accpeted and final price confirmed."
+                reason or "Booking accepted and final price confirmed."
             )
             booking.save(
                 update_fields=[
@@ -2200,6 +2226,72 @@ def artist_availability_delete_view(request, avail_id):
     return JsonResponse({"message": "Availability record removed."})
 
 
+RAZORPAY_API_ERRORS = (
+    razorpay.errors.BadRequestError,
+    razorpay.errors.GatewayError,
+    razorpay.errors.ServerError,
+)
+
+
+def calculate_commission(amount):
+    """
+    Given total booking amount, returns:
+    - total (Decimal quantize 0.01)
+    - commission (8% platform commission)
+    - artist_share (92% artist share)
+    """
+    total = Decimal(str(amount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    commission = (total * Decimal("0.08")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    artist_share = total - commission
+    return total, commission, artist_share
+
+
+def dispatch_payment_success_notifications(payment):
+    """
+    Dispatches payment success notifications to customer and artist.
+    Avoids duplicate notifications if webhook and frontend verification run together.
+    Safely checks if artist has an associated user account.
+    """
+    customer = payment.booking.customer
+    artist = payment.booking.artist
+    artist_user = getattr(artist, "user", None)
+
+    # 1. Customer notification
+    customer_msg = (
+        f"Your payment of ₹{payment.amount} for "
+        f"{artist.stage_name} was successful."
+    )
+    if not Notification.objects.filter(
+        user=customer,
+        notification_type=Notification.NotificationType.PAYMENT,
+        message=customer_msg,
+    ).exists():
+        Notification.objects.create(
+            user=customer,
+            title="Payment Successful",
+            message=customer_msg,
+            notification_type=Notification.NotificationType.PAYMENT,
+        )
+
+    # 2. Artist notification
+    if artist_user:
+        artist_msg = (
+            f"Payment of ₹{payment.amount} was successfully "
+            f"received for booking #{payment.booking.id}."
+        )
+        if not Notification.objects.filter(
+            user=artist_user,
+            notification_type=Notification.NotificationType.PAYMENT,
+            message=artist_msg,
+        ).exists():
+            Notification.objects.create(
+                user=artist_user,
+                title="Booking Payment Received",
+                message=artist_msg,
+                notification_type=Notification.NotificationType.PAYMENT,
+            )
+
+
 @csrf_protect
 @require_POST
 def create_razorpay_order_view(request, booking_id):
@@ -2209,73 +2301,177 @@ def create_razorpay_order_view(request, booking_id):
     try:
         with transaction.atomic():
             booking = (
-                Booking.objects.select_for_update()
+                Booking.objects
+                .select_for_update()
                 .select_related("artist", "customer")
-                .filter(id=booking_id, customer=request.user)
+                .filter(
+                    id=booking_id,
+                    customer=request.user
+                )
                 .first()
             )
 
             if not booking:
-                return JsonResponse({"error": "Booking not found."}, status=404)
+                return JsonResponse(
+                    {"error": "Booking not found."},
+                    status=404
+                )
 
             if booking.status != Booking.Status.ACCEPTED:
                 return JsonResponse(
                     {
-                        "error": "Payment is available only after the artist accepts the booking."
+                        "error": (
+                            "Payment is available only after "
+                            "the artist accepts the booking."
+                        )
                     },
-                    status=400,
+                    status=400
                 )
 
             payment = (
-                Payment.objects.select_for_update().filter(booking=booking).first()
+                Payment.objects
+                .select_for_update()
+                .filter(booking=booking)
+                .first()
             )
 
             if not payment:
                 return JsonResponse(
                     {"error": "Payment record not found for this booking."},
-                    status=404,
+                    status=404
                 )
 
             if payment.status == Payment.Status.SUCCESS:
                 return JsonResponse(
                     {"error": "This booking has already been paid."},
-                    status=400,
+                    status=400
                 )
 
-            total = Decimal(str(booking.agreed_price)).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
+            total, commission, artist_amount = calculate_commission(booking.agreed_price)
 
             if total < Decimal("1.00"):
                 return JsonResponse(
                     {"error": "Booking amount must be at least ₹1."},
-                    status=400,
+                    status=400
                 )
 
-            commission = (total * Decimal("0.08")).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            artist_amount = total - commission
-
-            # Reuse an existing Razorpay order if one was already created.
-            if payment.razorpay_order_id:
-                return JsonResponse(
-                    {
-                        "key": settings.RAZORPAY_KEY_ID,
-                        "order_id": payment.razorpay_order_id,
-                        "amount": int(payment.amount * 100),
-                        "currency": "INR",
-                        "booking_id": booking.id,
-                    }
-                )
-
+            # Initialize Razorpay client.
             client = razorpay.Client(
                 auth=(
                     settings.RAZORPAY_KEY_ID,
-                    settings.RAZORPAY_KEY_SECRET,
+                    settings.RAZORPAY_KEY_SECRET
                 )
             )
 
+            # Check an existing Razorpay order before reusing it.
+            existing_order = None
+            if payment.razorpay_order_id:
+                try:
+                    existing_order = client.order.fetch(
+                        payment.razorpay_order_id
+                    )
+                except razorpay.errors.BadRequestError:
+                    logger.warning(
+                        "Razorpay order %s not found on Razorpay; creating new order.",
+                        payment.razorpay_order_id
+                    )
+                    existing_order = None
+                except RAZORPAY_API_ERRORS:
+                    logger.exception(
+                        "Unable to fetch existing Razorpay order %s",
+                        payment.razorpay_order_id
+                    )
+                    return JsonResponse(
+                        {"error": "Unable to check existing payment order."},
+                        status=502
+                    )
+
+                if existing_order:
+                    order_status = existing_order.get("status")
+
+                    # If Razorpay reports paid, reconcile the payment immediately.
+                    if order_status == "paid":
+                        logger.warning(
+                            "Razorpay order %s is paid; reconciling payment status.",
+                            payment.razorpay_order_id
+                        )
+                        order_payments = client.order.payments(payment.razorpay_order_id)
+                        captured_payments = [
+                            p for p in order_payments.get("items", [])
+                            if p.get("status") == "captured"
+                        ]
+                        if captured_payments:
+                            captured = captured_payments[0]
+                            payment.status = Payment.Status.SUCCESS
+                            payment.transaction_id = captured.get("id")
+                            payment.amount = total
+                            payment.commission_percentage = Decimal("8.00")
+                            payment.commission_amount = commission
+                            payment.artist_amount = artist_amount
+                            payment.save(
+                                update_fields=[
+                                    "status",
+                                    "transaction_id",
+                                    "amount",
+                                    "commission_percentage",
+                                    "commission_amount",
+                                    "artist_amount",
+                                    "updated_at",
+                                ]
+                            )
+                            dispatch_payment_success_notifications(payment)
+                            return JsonResponse(
+                                {
+                                    "message": "Payment has already been paid and reconciled.",
+                                    "status": Payment.Status.SUCCESS,
+                                    "transaction_id": payment.transaction_id,
+                                    "booking_id": booking.id,
+                                    "already_paid": True,
+                                }
+                            )
+
+                        return JsonResponse(
+                            {
+                                "error": (
+                                    "This payment order is already paid. "
+                                    "Payment reconciliation is required."
+                                ),
+                                "payment_reconciliation_required": True
+                            },
+                            status=409
+                        )
+
+                    # Reuse unpaid order if amount and currency match.
+                    expected_paise = int(total * 100)
+                    if (
+                        order_status in ("created", "attempted")
+                        and existing_order.get("amount") == expected_paise
+                        and existing_order.get("currency") == "INR"
+                    ):
+                        payment.amount = total
+                        payment.commission_percentage = Decimal("8.00")
+                        payment.commission_amount = commission
+                        payment.artist_amount = artist_amount
+                        payment.save(
+                            update_fields=[
+                                "amount",
+                                "commission_percentage",
+                                "commission_amount",
+                                "artist_amount",
+                                "updated_at"
+                            ]
+                        )
+                        return JsonResponse(
+                            {
+                                "key": settings.RAZORPAY_KEY_ID,
+                                "order_id": payment.razorpay_order_id,
+                                "amount": existing_order["amount"],
+                                "currency": existing_order["currency"],
+                                "booking_id": booking.id
+                            }
+                        )
+
+            # Create a new Razorpay order if no reusable existing order
             order = client.order.create(
                 {
                     "amount": int(total * 100),
@@ -2283,8 +2479,8 @@ def create_razorpay_order_view(request, booking_id):
                     "receipt": f"THB{booking.id}P{payment.id}",
                     "notes": {
                         "booking_id": str(booking.id),
-                        "artist_id": str(booking.artist_id),
-                    },
+                        "artist_id": str(booking.artist_id)
+                    }
                 }
             )
 
@@ -2293,7 +2489,16 @@ def create_razorpay_order_view(request, booking_id):
             payment.commission_amount = commission
             payment.artist_amount = artist_amount
             payment.razorpay_order_id = order["id"]
-            payment.save()
+            payment.save(
+                update_fields=[
+                    "amount",
+                    "commission_percentage",
+                    "commission_amount",
+                    "artist_amount",
+                    "razorpay_order_id",
+                    "updated_at"
+                ]
+            )
 
         return JsonResponse(
             {
@@ -2301,22 +2506,23 @@ def create_razorpay_order_view(request, booking_id):
                 "order_id": order["id"],
                 "amount": order["amount"],
                 "currency": order["currency"],
-                "booking_id": booking.id,
+                "booking_id": booking.id
             }
         )
 
-    except razorpay.errors.RazorpayError:
+    except RAZORPAY_API_ERRORS:
         logger.exception("Razorpay order creation failed.")
         return JsonResponse(
             {"error": "Unable to create payment order. Please try again."},
-            status=502,
+            status=502
         )
     except Exception:
         logger.exception("Unexpected error while creating Razorpay order.")
         return JsonResponse(
             {"error": "Something went wrong while preparing payment."},
-            status=500,
+            status=500
         )
+
 
 @csrf_protect
 @require_POST
@@ -2328,7 +2534,7 @@ def verify_razorpay_payment_view(request):
     try:
         data = json.loads(request.body)
         order_id = data.get("razorpay_order_id")
-        payment_id = data.get("razorpay_payment_is")
+        payment_id = data.get("razorpay_payment_id")
         signature = data.get("razorpay_signature")
     except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "Invalid request data."}, status=400)
@@ -2342,9 +2548,9 @@ def verify_razorpay_payment_view(request):
     # Find the payment through the customer's own booking.
     payment = (
         Payment.objects
-        .select_related("booking","booking__artist")
+        .select_related("booking", "booking__artist", "booking__customer")
         .filter(
-            razorpa_order_id=order_id,
+            razorpay_order_id=order_id,
             booking__customer=request.user,
         )
         .first()
@@ -2353,16 +2559,26 @@ def verify_razorpay_payment_view(request):
     if not payment:
         return JsonResponse({"error": "Payment order not found."}, status=404)
 
+    # Idempotent return if already verified with the same payment_id
     if payment.status == Payment.Status.SUCCESS:
         if payment.transaction_id == payment_id:
             return JsonResponse({
                 "message": "Payment already verified.",
                 "status": payment.status,
                 "transaction_id": payment.transaction_id,
+                "amount": str(payment.amount),
+                "commission_amount": str(payment.commission_amount),
+                "artist_amount": str(payment.artist_amount),
             })
 
+        logger.critical(
+            "Security Alert: Different payment ID %s received for already-paid booking %s (existing transaction: %s)",
+            payment_id,
+            payment.booking_id,
+            payment.transaction_id,
+        )
         return JsonResponse(
-            {"error": "This booking has already been paid."},
+            {"error": "This booking has already been paid with a different payment ID."},
             status=400,
         )
 
@@ -2429,7 +2645,7 @@ def verify_razorpay_payment_view(request):
             status=400,
         )
 
-    except razorpay.errors.RazorpayError:
+    except RAZORPAY_API_ERRORS:
         logger.exception("Razorpay payment verification failed.")
         return JsonResponse(
             {"error": "Unable to verify payment with Razorpay."},
@@ -2447,6 +2663,7 @@ def verify_razorpay_payment_view(request):
     with transaction.atomic():
         locked_payment = (
             Payment.objects.select_for_update()
+            .select_related("booking", "booking__artist", "booking__customer")
             .filter(id=payment.id)
             .first()
         )
@@ -2457,10 +2674,18 @@ def verify_razorpay_payment_view(request):
                     "message": "Payment already verified.",
                     "status": locked_payment.status,
                     "transaction_id": locked_payment.transaction_id,
+                    "amount": str(locked_payment.amount),
+                    "commission_amount": str(locked_payment.commission_amount),
+                    "artist_amount": str(locked_payment.artist_amount),
                 })
 
+            logger.critical(
+                "Security Alert: Different payment ID %s received concurrently for already-paid booking %s",
+                payment_id,
+                locked_payment.booking_id,
+            )
             return JsonResponse(
-                {"error": "This booking has already been paid."},
+                {"error": "This booking has already been paid with a different payment ID."},
                 status=400,
             )
 
@@ -2470,39 +2695,174 @@ def verify_razorpay_payment_view(request):
                 status=400,
             )
 
+        total, commission, artist_amount = calculate_commission(locked_payment.booking.agreed_price)
         locked_payment.status = Payment.Status.SUCCESS
         locked_payment.transaction_id = payment_id
+        locked_payment.amount = total
+        locked_payment.commission_percentage = Decimal("8.00")
+        locked_payment.commission_amount = commission
+        locked_payment.artist_amount = artist_amount
         locked_payment.save(update_fields=[
             "status",
             "transaction_id",
+            "amount",
+            "commission_percentage",
+            "commission_amount",
+            "artist_amount",
             "updated_at",
         ])
 
-        Notification.objects.create(
-            user=request.user,
-            title="Payment Successful",
-            message=(
-                f"Your payment of ₹{locked_payment.amount} for "
-                f"{locked_payment.booking.artist.stage_name} was successful."
-            ),
-            notification_type=Notification.NotificationType.PAYMENT,
-        )
-
-        Notification.objects.create(
-            user=locked_payment.booking.artist.user,
-            title="Booking Payment Received",
-            message=(
-                f"Payment of ₹{locked_payment.amount} was successfully "
-                f"received for booking #{locked_payment.booking.id}."
-            ),
-            notification_type=Notification.NotificationType.PAYMENT,
-        )
+        dispatch_payment_success_notifications(locked_payment)
 
     return JsonResponse({
         "message": "Payment verified successfully.",
         "status": Payment.Status.SUCCESS,
         "transaction_id": payment_id,
-        "amount": str(payment.amount),
-        "commission_amount": str(payment.commission_amount),
-        "artist_amount": str(payment.artist_amount),
+        "amount": str(locked_payment.amount),
+        "commission_amount": str(locked_payment.commission_amount),
+        "artist_amount": str(locked_payment.artist_amount),
     })
+
+
+@csrf_exempt
+@require_POST
+def razorpay_webhook_view(request):
+    """
+    Handle asynchronous Razorpay webhook events:
+    - payment.captured: Reconcile payment status to SUCCESS.
+    - payment.failed: Log/update payment status.
+    - refund.processed / payment.refunded: Mark payment as REFUNDED.
+    Verifies the webhook signature using RAZORPAY_WEBHOOK_SECRET.
+    """
+    webhook_secret = getattr(settings, "RAZORPAY_WEBHOOK_SECRET", "")
+    if not webhook_secret:
+        logger.error("RAZORPAY_WEBHOOK_SECRET is not configured on the server.")
+        return JsonResponse({"error": "Webhook secret not configured."}, status=500)
+
+    webhook_signature = (
+        request.headers.get("X-Razorpay-Signature")
+        or request.META.get("HTTP_X_RAZORPAY_SIGNATURE")
+    )
+    if not webhook_signature:
+        return JsonResponse({"error": "Missing webhook signature."}, status=400)
+
+    # Verify signature
+    try:
+        client = razorpay.Client(
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+        )
+        client.utility.verify_webhook_signature(
+            request.body.decode("utf-8"),
+            webhook_signature,
+            webhook_secret,
+        )
+    except razorpay.errors.SignatureVerificationError:
+        logger.warning("Invalid Razorpay webhook signature received.")
+        return JsonResponse({"error": "Invalid webhook signature."}, status=400)
+    except Exception:
+        logger.exception("Error during webhook signature verification.")
+        return JsonResponse({"error": "Signature verification error."}, status=400)
+
+    try:
+        event = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"error": "Invalid webhook payload."}, status=400)
+
+    event_type = event.get("event")
+    payload = event.get("payload", {})
+
+    logger.info("Received Razorpay webhook event: %s", event_type)
+
+    if event_type == "payment.captured":
+        payment_entity = payload.get("payment", {}).get("entity", {})
+        order_id = payment_entity.get("order_id")
+        payment_id = payment_entity.get("id")
+        status = payment_entity.get("status")
+        amount = payment_entity.get("amount")
+        currency = payment_entity.get("currency")
+
+        if not order_id or not payment_id:
+            return JsonResponse({"error": "Incomplete payment data in webhook."}, status=400)
+
+        with transaction.atomic():
+            payment = (
+                Payment.objects.select_for_update()
+                .select_related("booking", "booking__artist", "booking__customer")
+                .filter(razorpay_order_id=order_id)
+                .first()
+            )
+
+            if not payment:
+                logger.warning("Payment record not found for webhook order %s", order_id)
+                return JsonResponse({"error": "Payment order not found."}, status=404)
+
+            # Idempotent handling for duplicate webhook
+            if payment.status == Payment.Status.SUCCESS:
+                if payment.transaction_id == payment_id:
+                    return JsonResponse({"message": "Payment already captured.", "status": "ok"})
+                logger.critical(
+                    "Security Alert: Webhook received different payment ID %s for already-paid booking %s",
+                    payment_id,
+                    payment.booking_id,
+                )
+                return JsonResponse({"error": "Different payment ID for already-paid booking."}, status=409)
+
+            # Validate currency and amount
+            expected_amount = int(payment.amount * 100)
+            if amount != expected_amount or currency != "INR" or status != "captured":
+                logger.error(
+                    "Webhook payment mismatch for order %s: amount=%s (expected %s), currency=%s, status=%s",
+                    order_id, amount, expected_amount, currency, status
+                )
+                return JsonResponse({"error": "Payment parameters mismatch."}, status=400)
+
+            total, commission, artist_amount = calculate_commission(payment.booking.agreed_price)
+            payment.status = Payment.Status.SUCCESS
+            payment.transaction_id = payment_id
+            payment.amount = total
+            payment.commission_percentage = Decimal("8.00")
+            payment.commission_amount = commission
+            payment.artist_amount = artist_amount
+            payment.save(update_fields=[
+                "status", "transaction_id", "amount",
+                "commission_percentage", "commission_amount",
+                "artist_amount", "updated_at"
+            ])
+
+            dispatch_payment_success_notifications(payment)
+
+        return JsonResponse({"status": "ok", "message": "Payment successfully reconciled."})
+
+    elif event_type == "payment.failed":
+        payment_entity = payload.get("payment", {}).get("entity", {})
+        order_id = payment_entity.get("order_id")
+        payment_id = payment_entity.get("id")
+
+        if order_id:
+            payment = Payment.objects.filter(razorpay_order_id=order_id).first()
+            if payment and payment.status == Payment.Status.PENDING:
+                logger.info("Payment %s failed for order %s", payment_id, order_id)
+
+        return JsonResponse({"status": "ok", "message": "Payment failure noted."})
+
+    elif event_type in ("refund.processed", "payment.refunded"):
+        payment_entity = payload.get("payment", {}).get("entity", {})
+        order_id = payment_entity.get("order_id")
+        payment_id = payment_entity.get("id")
+
+        payment = None
+        if order_id:
+            payment = Payment.objects.filter(razorpay_order_id=order_id).first()
+        elif payment_id:
+            payment = Payment.objects.filter(transaction_id=payment_id).first()
+
+        if payment:
+            with transaction.atomic():
+                payment.status = Payment.Status.REFUNDED
+                payment.save(update_fields=["status", "updated_at"])
+                logger.info("Payment %s refunded for order %s", payment_id, order_id)
+
+        return JsonResponse({"status": "ok", "message": "Refund processed."})
+
+    # For other unhandled events, return 200 so Razorpay does not retry
+    return JsonResponse({"status": "ignored", "event": event_type})

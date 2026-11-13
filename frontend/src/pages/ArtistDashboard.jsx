@@ -3077,14 +3077,14 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                                   color: "#A0A0A0",
                                 }}
                               >
-                                {pay.transaction_id}
+                                {pay.transaction_id || "Pending"}
                               </span>
                             </td>
                             <td>{pay.customer_name}</td>
                             <td>{pay.date}</td>
                             <td>
                               <strong style={{ color: "#F7F7F7" }}>
-                                ₹{pay.amount}
+                                ₹{pay.artist_amount || pay.amount}
                               </strong>
                             </td>
                             <td>
@@ -3760,7 +3760,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 >
                   <span style={{ color: "#888888" }}>Transaction ID:</span>
                   <strong style={{ color: "#F7F7F7", fontFamily: "monospace" }}>
-                    {receiptItem.transaction_id}
+                    {receiptItem.transaction_id || "Pending"}
                   </strong>
                 </div>
                 <div
