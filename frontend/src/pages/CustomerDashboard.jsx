@@ -1778,6 +1778,12 @@ function CustomerDashboard({
                           ₹{b.agreed_price || "25,000"}
                         </span>
                       </div>
+                      {b.customer_phone && (
+                        <div className="cd-event-summary-item">
+                          <span className="cd-summary-label">Contact Phone</span>
+                          <span className="cd-summary-value">{b.customer_phone}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Map & Location Preview Card */}

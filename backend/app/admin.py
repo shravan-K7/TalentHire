@@ -50,6 +50,7 @@ class BookingAdmin(admin.ModelAdmin):
         "customer",
         "artist",
         "event_type",
+        "customer_phone",
         "event_date",
         "event_location",
         "agreed_price",
@@ -60,6 +61,7 @@ class BookingAdmin(admin.ModelAdmin):
     search_fields = (
         "customer__username",
         "customer__email",
+        "customer_phone",
         "artist__stage_name",
         "event_location",
         "event_type",

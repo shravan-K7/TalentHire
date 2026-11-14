@@ -45,6 +45,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     event_date: '2026-11-20',
     event_time: '19:00',
     event_location: '',
+    customer_phone: user?.phone || user?.customer_profile?.phone || '',
     performance_duration: '',
     expected_audience_size: '',
     budget: '18000',
@@ -53,6 +54,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [fieldError, setFieldError] = useState({ field: '', message: '' });
   const [bookingSuccessData, setBookingSuccessData] = useState(null);
 
   // Authentication check: unauthenticated customers must be redirected to login
@@ -83,9 +85,10 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
             ...prev,
             budget: data.starting_price ? String(parseInt(data.starting_price, 10)) : prev.budget || '18000',
             event_location: data.location || prev.event_location,
+            customer_phone: prev.customer_phone || user?.phone || user?.customer_profile?.phone || '',
           }));
         }
-      } catch (err) {
+      } catch {
         if (isMounted) {
           // If fetching fails, gracefully use DEFAULT_ARTIST so page renders reliably
           setArtist(DEFAULT_ARTIST);
@@ -93,6 +96,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
             ...prev,
             budget: String(DEFAULT_ARTIST.starting_price),
             event_location: DEFAULT_ARTIST.location,
+            customer_phone: prev.customer_phone || user?.phone || user?.customer_profile?.phone || '',
           }));
         }
       } finally {
@@ -107,7 +111,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     return () => {
       isMounted = false;
     };
-  }, [artistId]);
+  }, [artistId, user]);
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -118,6 +122,30 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     if (submitError) {
       setSubmitError('');
     }
+    if (fieldError.field) {
+      setFieldError({ field: '', message: '' });
+    }
+  }
+
+  function handleFocus(fieldId) {
+    if (fieldError.field === fieldId) {
+      setFieldError({ field: '', message: '' });
+    }
+  }
+
+  function pointOutField(fieldId, message) {
+    setSubmitError(message);
+    setFieldError({ field: fieldId, message });
+
+    setTimeout(() => {
+      const el = document.getElementById(fieldId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (typeof el.focus === 'function') {
+          el.focus({ preventScroll: true });
+        }
+      }
+    }, 30);
   }
 
   function handleBackToArtist() {
@@ -142,36 +170,19 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     }
 
     setSubmitError('');
+    setFieldError({ field: '', message: '' });
 
-    // Validations
+    // Validations with smooth scroll and point-out
     if (!formData.event_type.trim()) {
-      setSubmitError('Please select an event type.');
+      pointOutField('eventType', 'Please select an event type.');
       return;
     }
     if (!formData.event_date) {
-      setSubmitError('Please choose the event date from the calendar.');
+      pointOutField('eventDateTimeSection', 'Please choose the event date from the calendar.');
       return;
     }
     if (!formData.event_time) {
-      setSubmitError('Please choose the event start time.');
-      return;
-    }
-    if (!formData.event_location.trim()) {
-      setSubmitError('Please enter the venue / location.');
-      return;
-    }
-    if (!formData.performance_duration.trim()) {
-      setSubmitError('Please select the performance duration.');
-      return;
-    }
-    if (!formData.expected_audience_size) {
-      setSubmitError('Please enter the expected audience size.');
-      return;
-    }
-
-    const audNum = Number(formData.expected_audience_size);
-    if (isNaN(audNum) || audNum <= 0 || !Number.isInteger(audNum)) {
-      setSubmitError('Expected audience size must be a positive whole number.');
+      pointOutField('eventDateTimeSection', 'Please choose the event start time.');
       return;
     }
 
@@ -180,7 +191,38 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     const eventDateTime = new Date(combinedStr);
     const now = new Date();
     if (isNaN(eventDateTime.getTime()) || eventDateTime <= now) {
-      setSubmitError('The event date and time must be in the future.');
+      pointOutField('eventDateTimeSection', 'The event date and time must be in the future.');
+      return;
+    }
+
+    if (!formData.event_location.trim()) {
+      pointOutField('eventLocation', 'Please enter the venue / location.');
+      return;
+    }
+
+    if (!formData.customer_phone.trim()) {
+      pointOutField('customerPhone', 'Please enter your contact phone number.');
+      return;
+    }
+    const cleanPhoneDigits = formData.customer_phone.replace(/\D/g, '');
+    if (cleanPhoneDigits.length < 7 || cleanPhoneDigits.length > 15) {
+      pointOutField('customerPhone', 'Please enter a valid phone number (7 to 15 digits).');
+      return;
+    }
+
+    if (!formData.performance_duration.trim()) {
+      pointOutField('performanceDuration', 'Please select the performance duration.');
+      return;
+    }
+
+    if (!formData.expected_audience_size) {
+      pointOutField('expectedAudienceSize', 'Please enter the expected audience size.');
+      return;
+    }
+
+    const audNum = Number(formData.expected_audience_size);
+    if (isNaN(audNum) || audNum <= 0 || !Number.isInteger(audNum)) {
+      pointOutField('expectedAudienceSize', 'Expected audience size must be a positive whole number.');
       return;
     }
 
@@ -188,7 +230,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     if (formData.budget) {
       const budNum = Number(formData.budget);
       if (isNaN(budNum) || budNum < 0) {
-        setSubmitError('Budget cannot be negative.');
+        pointOutField('budget', 'Budget cannot be negative.');
         return;
       }
     }
@@ -202,6 +244,8 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
         event_date: formData.event_date,
         event_time: formData.event_time,
         event_location: formData.event_location.trim(),
+        customer_phone: formData.customer_phone.trim(),
+        phone: formData.customer_phone.trim(),
         performance_duration: formData.performance_duration.trim(),
         expected_audience_size: Number(formData.expected_audience_size),
         agreed_price: formData.budget ? Number(formData.budget) : (artist?.starting_price || 18000),
@@ -350,9 +394,11 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                   <select
                     id="eventType"
                     name="event_type"
-                    className="booking-control"
+                    className={`booking-control ${fieldError.field === 'eventType' ? 'booking-control-highlight' : ''}`}
                     value={formData.event_type}
                     onChange={handleChange}
+                    onFocus={() => handleFocus('eventType')}
+                    aria-invalid={fieldError.field === 'eventType' ? 'true' : undefined}
                     required
                   >
                     <option value="" disabled>Select event type</option>
@@ -362,29 +408,46 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                       </option>
                     ))}
                   </select>
+                  {fieldError.field === 'eventType' && (
+                    <div className="booking-field-pointer" role="alert">
+                      <span className="booking-pointer-arrow">👆</span>
+                      <span>{fieldError.message}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Event date & start time with custom responsive Calendar and Time slot picker */}
-                <div className="booking-field">
+                <div
+                  id="eventDateTimeSection"
+                  className={`booking-field ${fieldError.field === 'eventDateTimeSection' ? 'booking-field-highlight' : ''}`}
+                >
                   <label className="booking-field-label">
                     Event date & start time <span className="booking-req">*</span>
                   </label>
+                  {fieldError.field === 'eventDateTimeSection' && (
+                    <div className="booking-field-pointer" style={{ marginBottom: 10 }} role="alert">
+                      <span className="booking-pointer-arrow">👇</span>
+                      <span>{fieldError.message}</span>
+                    </div>
+                  )}
                   <BookingCalendarPicker
                     selectedDate={formData.event_date}
                     selectedTime={formData.event_time}
                     onDateChange={(newDate) => {
                       setFormData((prev) => ({ ...prev, event_date: newDate }));
                       if (submitError) setSubmitError('');
+                      if (fieldError.field === 'eventDateTimeSection') setFieldError({ field: '', message: '' });
                     }}
                     onTimeChange={(newTime) => {
                       setFormData((prev) => ({ ...prev, event_time: newTime }));
                       if (submitError) setSubmitError('');
+                      if (fieldError.field === 'eventDateTimeSection') setFieldError({ field: '', message: '' });
                     }}
                   />
                 </div>
 
                 {/* Venue / location */}
-                <div className="booking-field" style={{ marginBottom: 0 }}>
+                <div className="booking-field">
                   <label htmlFor="eventLocation" className="booking-field-label">
                     Venue / location <span className="booking-req">*</span>
                   </label>
@@ -392,12 +455,50 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                     id="eventLocation"
                     type="text"
                     name="event_location"
-                    className="booking-control"
+                    className={`booking-control ${fieldError.field === 'eventLocation' ? 'booking-control-highlight' : ''}`}
                     value={formData.event_location}
                     onChange={handleChange}
+                    onFocus={() => handleFocus('eventLocation')}
                     placeholder="Venue name, city"
+                    aria-invalid={fieldError.field === 'eventLocation' ? 'true' : undefined}
                     required
                   />
+                  {fieldError.field === 'eventLocation' && (
+                    <div className="booking-field-pointer" role="alert">
+                      <span className="booking-pointer-arrow">👆</span>
+                      <span>{fieldError.message}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Phone number */}
+                <div className="booking-field" style={{ marginBottom: 0 }}>
+                  <label htmlFor="customerPhone" className="booking-field-label">
+                    Phone number <span className="booking-req">*</span>
+                  </label>
+                  <input
+                    id="customerPhone"
+                    type="tel"
+                    name="customer_phone"
+                    className={`booking-control ${fieldError.field === 'customerPhone' ? 'booking-control-highlight' : ''}`}
+                    value={formData.customer_phone}
+                    onChange={handleChange}
+                    onFocus={() => handleFocus('customerPhone')}
+                    placeholder="e.g. +91 98765 43210"
+                    autoComplete="tel"
+                    aria-invalid={fieldError.field === 'customerPhone' ? 'true' : undefined}
+                    required
+                  />
+                  {fieldError.field === 'customerPhone' ? (
+                    <div className="booking-field-pointer" role="alert">
+                      <span className="booking-pointer-arrow">👆</span>
+                      <span>{fieldError.message}</span>
+                    </div>
+                  ) : (
+                    <span className="booking-field-hint">
+                      The artist will use this phone number to coordinate arrival and event schedule.
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -413,9 +514,11 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                     <select
                       id="performanceDuration"
                       name="performance_duration"
-                      className="booking-control"
+                      className={`booking-control ${fieldError.field === 'performanceDuration' ? 'booking-control-highlight' : ''}`}
                       value={formData.performance_duration}
                       onChange={handleChange}
+                      onFocus={() => handleFocus('performanceDuration')}
+                      aria-invalid={fieldError.field === 'performanceDuration' ? 'true' : undefined}
                       required
                     >
                       <option value="" disabled>Select duration</option>
@@ -425,6 +528,12 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                         </option>
                       ))}
                     </select>
+                    {fieldError.field === 'performanceDuration' && (
+                      <div className="booking-field-pointer" role="alert">
+                        <span className="booking-pointer-arrow">👆</span>
+                        <span>{fieldError.message}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="booking-field">
@@ -435,14 +544,22 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                       id="expectedAudienceSize"
                       type="number"
                       name="expected_audience_size"
-                      className="booking-control"
+                      className={`booking-control ${fieldError.field === 'expectedAudienceSize' ? 'booking-control-highlight' : ''}`}
                       value={formData.expected_audience_size}
                       onChange={handleChange}
+                      onFocus={() => handleFocus('expectedAudienceSize')}
                       placeholder="e.g. 250"
                       min="1"
                       step="1"
+                      aria-invalid={fieldError.field === 'expectedAudienceSize' ? 'true' : undefined}
                       required
                     />
+                    {fieldError.field === 'expectedAudienceSize' && (
+                      <div className="booking-field-pointer" role="alert">
+                        <span className="booking-pointer-arrow">👆</span>
+                        <span>{fieldError.message}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -454,16 +571,25 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                     id="budget"
                     type="number"
                     name="budget"
-                    className="booking-control"
+                    className={`booking-control ${fieldError.field === 'budget' ? 'booking-control-highlight' : ''}`}
                     value={formData.budget}
                     onChange={handleChange}
+                    onFocus={() => handleFocus('budget')}
                     placeholder={currentArtist.starting_price ? String(parseInt(currentArtist.starting_price, 10)) : '18000'}
                     min="0"
                     step="500"
+                    aria-invalid={fieldError.field === 'budget' ? 'true' : undefined}
                   />
-                  <span className="booking-field-hint">
-                    Prefilled with the artist's starting price. Final quote may differ.
-                  </span>
+                  {fieldError.field === 'budget' ? (
+                    <div className="booking-field-pointer" role="alert">
+                      <span className="booking-pointer-arrow">👆</span>
+                      <span>{fieldError.message}</span>
+                    </div>
+                  ) : (
+                    <span className="booking-field-hint">
+                      Prefilled with the artist's starting price. Final quote may differ.
+                    </span>
+                  )}
                 </div>
 
                 <div className="booking-field" style={{ marginBottom: 0 }}>

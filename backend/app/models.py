@@ -104,6 +104,7 @@ class Booking(models.Model):
     event_type = models.CharField(max_length=100)
     event_date = models.DateTimeField()
     event_location = models.CharField(max_length=200)
+    customer_phone = models.CharField(max_length=20, blank=True, default="")
     message = models.TextField(blank=True)
     response_message = models.TextField(blank=True, default="")
     performance_duration = models.CharField(max_length=50, blank=True, default="")

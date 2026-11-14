@@ -916,6 +916,25 @@ def create_booking_view(request):
     event_date_str = data.get("event_date", "").strip()
     event_time_str = data.get("event_time", "").strip()
     event_location = data.get("event_location", "").strip()
+    customer_phone = data.get("customer_phone", data.get("phone", ""))
+    if customer_phone is not None:
+        customer_phone = str(customer_phone).strip()
+    else:
+        customer_phone = ""
+
+    if not customer_phone:
+        customer_profile = getattr(request.user, "customer_profile", None)
+        if customer_profile and customer_profile.phone:
+            customer_phone = customer_profile.phone
+
+    if customer_phone:
+        digits = [c for c in customer_phone if c.isdigit()]
+        if len(digits) < 7 or len(digits) > 15:
+            return JsonResponse(
+                {"error": "Please enter a valid phone number (7 to 15 digits)."},
+                status=400,
+            )
+
     performance_duration = data.get("performance_duration", "").strip()
     expected_audience_size = data.get("expected_audience_size")
     message_text = data.get("message", "").strip()
@@ -1038,6 +1057,7 @@ def create_booking_view(request):
         event_type=event_type,
         event_date=combined_dt,
         event_location=event_location,
+        customer_phone=customer_phone[:20] if customer_phone else "",
         performance_duration=performance_duration,
         expected_audience_size=audience_val,
         message=message_text,
@@ -1045,6 +1065,15 @@ def create_booking_view(request):
         agreed_price=None,
         status=Booking.Status.PENDING,
     )
+
+    if customer_phone:
+        try:
+            cust_prof, _ = CustomerProfile.objects.get_or_create(user=request.user)
+            if not cust_prof.phone:
+                cust_prof.phone = customer_phone[:20]
+                cust_prof.save(update_fields=["phone"])
+        except Exception:
+            pass
 
     # Automatically create pending payment record (indicative customer budget, not charged yet)
     Payment.objects.create(
@@ -1080,6 +1109,7 @@ def create_booking_view(request):
             "status": booking.status,
             "event_type": booking.event_type,
             "event_date": booking.event_date.isoformat(),
+            "customer_phone": booking.customer_phone,
             "performance_duration": booking.performance_duration,
             "expected_audience_size": booking.expected_audience_size,
         },
@@ -1178,6 +1208,7 @@ def customer_dashboard_view(request):
             else "",
             "event_date_iso": b.event_date.isoformat() if b.event_date else "",
             "event_location": b.event_location,
+            "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
             "agreed_price": str(b.agreed_price) if b.agreed_price is not None else None,
@@ -1641,7 +1672,7 @@ def artist_dashboard_view(request):
             "customer_id": b.customer.id,
             "customer_name": b.customer.get_full_name() or b.customer.username,
             "customer_email": b.customer.email,
-            "customer_phone": customer_profile.phone if customer_profile else "",
+            "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "customer_location": customer_profile.location if customer_profile else "",
             "customer_image": customer_profile.profile_image.url
             if (customer_profile and customer_profile.profile_image)
@@ -1652,6 +1683,7 @@ def artist_dashboard_view(request):
             else "",
             "event_date_iso": b.event_date.isoformat() if b.event_date else "",
             "event_location": b.event_location,
+            "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
             "agreed_price": str(b.agreed_price) if b.agreed_price else "0.00",

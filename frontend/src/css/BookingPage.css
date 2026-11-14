@@ -191,6 +191,88 @@ select.booking-control option {
 }
 
 /* ==========================================================================
+   Field Validation Highlight & Smooth Pointer Callout
+   ========================================================================== */
+
+.booking-control-highlight {
+  border-color: #FF5252 !important;
+  box-shadow: 0 0 0 3px rgba(255, 82, 82, 0.28) !important;
+  animation: bookingPulseGlow 1.6s ease-in-out infinite;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+@keyframes bookingPulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(255, 82, 82, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(255, 82, 82, 0.5);
+  }
+}
+
+.booking-field-highlight {
+  border-radius: 12px;
+  padding: 10px;
+  margin: -10px -10px 14px -10px;
+  background: rgba(255, 82, 82, 0.05);
+  border: 1px solid rgba(255, 82, 82, 0.35);
+  animation: bookingSectionPulse 1.6s ease-in-out infinite;
+  transition: all 0.2s ease;
+}
+
+@keyframes bookingSectionPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(255, 82, 82, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 82, 82, 0.4);
+  }
+}
+
+.booking-field-pointer {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255, 82, 82, 0.12);
+  border: 1px solid rgba(255, 82, 82, 0.38);
+  color: #FF7070;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.86rem;
+  font-weight: 500;
+  margin-top: 5px;
+  width: fit-content;
+  animation: pointerFadeSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.booking-pointer-arrow {
+  display: inline-block;
+  font-size: 0.95rem;
+  line-height: 1;
+  animation: pointerBounce 1.2s ease-in-out infinite;
+}
+
+@keyframes pointerFadeSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pointerBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+/* ==========================================================================
    Custom Responsive Calendar & Time Slot Picker
    ========================================================================== */
 

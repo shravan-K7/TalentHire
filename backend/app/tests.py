@@ -322,6 +322,68 @@ class BookingViewTests(TestCase):
         cust_bookings = cust_res.json()["bookings"]
         self.assertTrue(any(b["id"] == booking.id and b["performance_duration"] == "3 hours" for b in cust_bookings))
 
+    def test_create_booking_with_phone_number(self):
+        self.client.login(username="bookingcustomer", password="securepassword123")
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Wedding",
+                "event_date": "2028-07-20",
+                "event_time": "19:00",
+                "event_location": "Taj Palace, New Delhi",
+                "customer_phone": "+91 98765 43210",
+                "performance_duration": "2 hours",
+                "expected_audience_size": 200,
+                "agreed_price": 45000,
+                "message": "Special sangeet entrance performance.",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertEqual(data["customer_phone"], "+91 98765 43210")
+
+        # Verify DB
+        booking = Booking.objects.get(id=data["booking_id"])
+        self.assertEqual(booking.customer_phone, "+91 98765 43210")
+
+        # Verify CustomerProfile updated
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.customer_profile.phone, "+91 98765 43210")
+
+        # Verify customer dashboard returns phone
+        cust_res = self.client.get("/api/customer/dashboard/")
+        self.assertEqual(cust_res.status_code, 200)
+        b_data = next(b for b in cust_res.json()["bookings"] if b["id"] == booking.id)
+        self.assertEqual(b_data["customer_phone"], "+91 98765 43210")
+
+        # Verify artist dashboard returns customer_phone
+        self.client.login(username="performingartist", password="securepassword123")
+        art_res = self.client.get("/api/artist/dashboard/")
+        self.assertEqual(art_res.status_code, 200)
+        art_b_data = next(b for b in art_res.json()["bookings"] if b["id"] == booking.id)
+        self.assertEqual(art_b_data["customer_phone"], "+91 98765 43210")
+
+    def test_create_booking_invalid_phone_rejected(self):
+        self.client.login(username="bookingcustomer", password="securepassword123")
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Wedding",
+                "event_date": "2028-07-20",
+                "event_time": "19:00",
+                "event_location": "Taj Palace, New Delhi",
+                "customer_phone": "123",
+                "performance_duration": "2 hours",
+                "expected_audience_size": 200,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("valid phone number", res.json()["error"])
+
 
 import datetime
 import hashlib

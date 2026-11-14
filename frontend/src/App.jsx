@@ -91,16 +91,24 @@ function App() {
       window.location.href = "/admin/";
       return;
     }
-    if (redirectTo && redirectTo !== "/artist-register") {
+    const params = new URLSearchParams(window.location.search);
+    const urlRedirect = params.get("redirect");
+    if (urlRedirect) {
+      navigate(urlRedirect);
+      return;
+    }
+    if (
+      redirectTo &&
+      redirectTo !== "/profile" &&
+      redirectTo !== "/customer-dashboard" &&
+      redirectTo !== "/artist-dashboard" &&
+      redirectTo !== "/artist-register"
+    ) {
       navigate(redirectTo);
       return;
     }
-    const hasProfile = Boolean(loggedInUser?.artist_profile || loggedInUser?.is_artist);
-    if ((isArtist || loggedInUser?.role === "artist") && !hasProfile) {
-      navigate("/artist-register");
-    } else {
-      navigate("/profile");
-    }
+    // Land on home page instead of dashboard
+    navigate("/");
   }
 
   function handleArtistProfileSaved(artistData) {

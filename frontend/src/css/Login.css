@@ -184,6 +184,47 @@
   margin-top: 2px;
 }
 
+/* Password Input Wrapper & Eye Toggle Button */
+.password-input-wrapper {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-wrapper input {
+  padding-right: 48px;
+  width: 100%;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #757575);
+  cursor: pointer;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: color 0.2s ease, background-color 0.2s ease;
+  line-height: 1;
+}
+
+.password-toggle-btn:hover {
+  color: var(--text-primary, #F7F7F7);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.password-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent-1, #FF5722);
+  outline-offset: 1px;
+}
+
 /* Live Username Validation Styling */
 .username-input-wrapper {
   position: relative;
