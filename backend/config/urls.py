@@ -9,6 +9,7 @@ urlpatterns = [
     path("api/auth/", include("app.urls")),
     path("api/artists/", views.artists_list_view, name="api_artists_list"),
     path("api/artists/<int:artist_id>/", views.artist_detail_view, name="api_artist_detail"),
+    path("api/artists/<int:artist_id>/availability/", views.artist_public_availability_view, name="api_artist_public_availability"),
     path("api/bookings/", views.create_booking_view, name="api_create_booking"),
     path("api/customer/dashboard/", views.customer_dashboard_view, name="api_customer_dashboard"),
     path("api/customer/profile/", views.customer_update_profile_view, name="api_customer_update_profile"),

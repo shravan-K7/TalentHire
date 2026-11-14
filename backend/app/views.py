@@ -900,6 +900,201 @@ def artist_detail_view(request, artist_id):
     return JsonResponse({"artist": data})
 
 
+def is_artist_date_occupied(artist, calendar_date, exclude_booking_id=None):
+    """
+    Determines whether an artist is occupied on a specific Asia/Kolkata calendar date.
+    Returns: (is_occupied: bool, reason: str, conflicting_obj)
+
+    Occupied conditions:
+      1. Manually blocked by the artist (ArtistAvailability where is_available=False).
+      2. Completed booking (Booking status COMPLETED).
+      3. Confirmed booking with successful payment (Booking status ACCEPTED, Payment status SUCCESS).
+      4. Active accepted reservation (Booking status ACCEPTED, unpaid, within 24 hours of accepted_at).
+         - For legacy accepted bookings where accepted_at is NULL, treats them conservatively as active
+           to avoid prematurely releasing dates.
+
+    Unoccupied conditions:
+      - Ordinary pending inquiries (Booking status PENDING).
+      - Cancelled or rejected bookings.
+      - Expired unpaid reservations (Booking status ACCEPTED, unpaid, past 24-hour deadline).
+    """
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone
+
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    now_tz = timezone.now()
+
+    # 1. Check manual availability override
+    manual_block = ArtistAvailability.objects.filter(
+        artist=artist,
+        date=calendar_date,
+        is_available=False,
+    ).first()
+    if manual_block:
+        reason_text = (
+            f"Date is manually marked as unavailable ({manual_block.reason})."
+            if manual_block.reason
+            else "Date is manually marked as unavailable by the artist."
+        )
+        return True, reason_text, manual_block
+
+    # 2. Query bookings in an expanded window to catch any time boundaries
+    day_start = datetime.combine(calendar_date, time.min, tzinfo=kolkata_tz)
+    day_end = datetime.combine(calendar_date + timedelta(days=1), time.min, tzinfo=kolkata_tz)
+
+    bookings_qs = (
+        Booking.objects.filter(
+            artist=artist,
+            status__in=[Booking.Status.ACCEPTED, Booking.Status.COMPLETED],
+            event_date__gte=day_start - timedelta(days=1),
+            event_date__lt=day_end + timedelta(days=1),
+        )
+        .select_related("payment")
+    )
+    if exclude_booking_id:
+        bookings_qs = bookings_qs.exclude(id=exclude_booking_id)
+
+    for b in bookings_qs:
+        b_date = timezone.localtime(b.event_date, timezone=kolkata_tz).date()
+        if b_date == calendar_date:
+            if b.status == Booking.Status.COMPLETED:
+                return True, "a completed booking already exists on this date.", b
+
+            if b.status == Booking.Status.ACCEPTED:
+                payment = getattr(b, "payment", None)
+                if payment and payment.status == Payment.Status.SUCCESS:
+                    return True, "a confirmed booking with successful payment already exists on this date.", b
+
+                # 24-hour payment reservation check
+                accepted_at = getattr(b, "accepted_at", None)
+                if accepted_at:
+                    if accepted_at + timedelta(hours=24) > now_tz:
+                        return True, "an active accepted reservation is awaiting payment for this date.", b
+                    # If accepted_at + 24 hours <= now_tz, it has expired and does NOT occupy the date.
+                else:
+                    # Legacy fallback for existing pre-migration records without accepted_at
+                    legacy_ts = payment.updated_at if payment else b.created_at
+                    if legacy_ts and (legacy_ts + timedelta(hours=24) > now_tz):
+                        return True, "an active accepted reservation is awaiting payment for this date.", b
+                    elif not legacy_ts:
+                        return True, "an accepted reservation occupies this date.", b
+
+    return False, "", None
+
+
+@require_GET
+def artist_public_availability_view(request, artist_id):
+    """
+    Public endpoint: GET /api/artists/<artist_id>/availability/?month=YYYY-MM
+    Returns unavailable calendar dates for the requested artist and month.
+
+    Combines:
+      - Manual blocks (ArtistAvailability records where is_available=False)
+      - Confirmed/completed bookings (Booking status COMPLETED)
+      - Paid accepted bookings (Booking status ACCEPTED, Payment status SUCCESS)
+      - Active accepted reservations (Booking status ACCEPTED, within 24h of acceptance)
+
+    Guarantees:
+      - Publicly accessible GET endpoint.
+      - Uses Asia/Kolkata timezone to avoid date-shifting anomalies.
+      - Excludes ordinary pending requests (pending requests do not reserve the date).
+      - Excludes expired unpaid reservations (releases the date after 24 hours).
+      - Zero customer PII leakage (no names, phones, emails, amounts, or Razorpay IDs).
+    """
+    artist = ArtistProfile.objects.filter(id=artist_id, is_active=True).first()
+    if not artist:
+        return JsonResponse({"error": "Artist profile not found."}, status=404)
+
+    month_str = request.GET.get("month", "").strip()
+    if not month_str:
+        return JsonResponse(
+            {"error": "Query parameter 'month' is required in YYYY-MM format."},
+            status=400,
+        )
+
+    match = re.match(r"^(\d{4})-(0[1-9]|1[0-2])$", month_str)
+    if not match:
+        return JsonResponse(
+            {"error": "Invalid month format. Expected YYYY-MM (e.g. 2026-12)."},
+            status=400,
+        )
+
+    year = int(match.group(1))
+    month = int(match.group(2))
+
+    from datetime import date, datetime, timedelta
+    import calendar
+    from zoneinfo import ZoneInfo
+
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    now_tz = timezone.now()
+
+    last_day = calendar.monthrange(year, month)[1]
+    start_date = date(year, month, 1)
+    end_date = date(year, month, last_day)
+
+    start_dt = datetime(year, month, 1, 0, 0, 0, tzinfo=kolkata_tz)
+    if month == 12:
+        next_month_dt = datetime(year + 1, 1, 1, 0, 0, 0, tzinfo=kolkata_tz)
+    else:
+        next_month_dt = datetime(year, month + 1, 1, 0, 0, 0, tzinfo=kolkata_tz)
+
+    unavailable_dates = set()
+
+    # 1. Manually blocked dates
+    manual_blocks = ArtistAvailability.objects.filter(
+        artist=artist,
+        is_available=False,
+        date__gte=start_date,
+        date__lte=end_date,
+    )
+    for block in manual_blocks:
+        unavailable_dates.add(block.date.isoformat())
+
+    # 2. Bookings (Accepted reservations or Completed shows)
+    # Range query on event_date with buffer to capture any Asia/Kolkata timezone boundary cases
+    bookings = (
+        Booking.objects.filter(
+            artist=artist,
+            status__in=[Booking.Status.ACCEPTED, Booking.Status.COMPLETED],
+            event_date__gte=start_dt - timedelta(days=1),
+            event_date__lt=next_month_dt + timedelta(days=1),
+        )
+        .select_related("payment")
+    )
+
+    for booking in bookings:
+        b_ist_date = timezone.localtime(booking.event_date, timezone=kolkata_tz).date()
+        if b_ist_date.year == year and b_ist_date.month == month:
+            if booking.status == Booking.Status.COMPLETED:
+                unavailable_dates.add(b_ist_date.isoformat())
+            elif booking.status == Booking.Status.ACCEPTED:
+                payment = getattr(booking, "payment", None)
+                if payment and payment.status == Payment.Status.SUCCESS:
+                    unavailable_dates.add(b_ist_date.isoformat())
+                else:
+                    # Check 24-hour payment reservation expiry window
+                    accepted_at = getattr(booking, "accepted_at", None)
+                    if not accepted_at and payment:
+                        accepted_at = payment.updated_at
+                    if not accepted_at:
+                        accepted_at = booking.created_at
+
+                    if accepted_at + timedelta(hours=24) > now_tz:
+                        unavailable_dates.add(b_ist_date.isoformat())
+                    # Expired unpaid reservations do not block the date
+
+    return JsonResponse(
+        {
+            "artist_id": artist.id,
+            "month": month_str,
+            "unavailable_dates": sorted(list(unavailable_dates)),
+        },
+        status=200,
+    )
+
+
 @csrf_protect
 @require_POST
 def create_booking_view(request):
@@ -1051,39 +1246,57 @@ def create_booking_view(request):
                 status=400,
             )
 
-    booking = Booking.objects.create(
-        customer=request.user,
-        artist=artist,
-        event_type=event_type,
-        event_date=combined_dt,
-        event_location=event_location,
-        customer_phone=customer_phone[:20] if customer_phone else "",
-        performance_duration=performance_duration,
-        expected_audience_size=audience_val,
-        message=message_text,
-        customer_budget=budget_val,
-        agreed_price=None,
-        status=Booking.Status.PENDING,
-    )
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    local_event_date = timezone.localtime(combined_dt, timezone=kolkata_tz).date()
 
-    if customer_phone:
-        try:
-            cust_prof, _ = CustomerProfile.objects.get_or_create(user=request.user)
-            if not cust_prof.phone:
-                cust_prof.phone = customer_phone[:20]
-                cust_prof.save(update_fields=["phone"])
-        except Exception:
-            pass
+    with transaction.atomic():
+        # Consistent lock acquisition order: lock ArtistProfile row first
+        artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
 
-    # Automatically create pending payment record (indicative customer budget, not charged yet)
-    Payment.objects.create(
-        booking=booking,
-        amount=Decimal("0.00"),
-        commission_percentage=Decimal("8.00"),
-        commission_amount=Decimal("0.00"),
-        artist_amount=Decimal("0.00"),
-        status=Payment.Status.PENDING,
-    )
+        # Check whether the date is occupied by a manual block, completed show, or accepted/paid booking
+        occupied, occ_reason, _ = is_artist_date_occupied(artist_locked, local_event_date)
+        if occupied:
+            return JsonResponse(
+                {
+                    "error": "This artist already has a booking or active reservation on this date. Please select another date."
+                },
+                status=409,
+            )
+
+        booking = Booking.objects.create(
+            customer=request.user,
+            artist=artist_locked,
+            event_type=event_type,
+            event_date=combined_dt,
+            event_location=event_location,
+            customer_phone=customer_phone[:20] if customer_phone else "",
+            performance_duration=performance_duration,
+            expected_audience_size=audience_val,
+            message=message_text,
+            customer_budget=budget_val,
+            agreed_price=None,
+            status=Booking.Status.PENDING,
+        )
+
+        # Automatically create pending payment record (indicative customer budget, not charged yet)
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("0.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("0.00"),
+            artist_amount=Decimal("0.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        if customer_phone:
+            try:
+                cust_prof, _ = CustomerProfile.objects.get_or_create(user=request.user)
+                if not cust_prof.phone:
+                    cust_prof.phone = customer_phone[:20]
+                    cust_prof.save(update_fields=["phone"])
+            except Exception:
+                pass
 
     # Create notification for customer
     Notification.objects.create(
@@ -1872,13 +2085,6 @@ def artist_respond_booking_view(request, booking_id):
     final_price = data.get("final_price")
 
     if action == "accept":
-        # Only pending booking requests can be accepted
-        if booking.status != Booking.Status.PENDING:
-            return JsonResponse(
-                {"error": "This booking request has already been processed."},
-                status=400,
-            )
-
         # Artist must provide the final confirmed price
         if final_price is None or str(final_price).strip() == "":
             return JsonResponse(
@@ -1902,20 +2108,6 @@ def artist_respond_booking_view(request, booking_id):
                 status=400,
             )
 
-        payment = Payment.objects.filter(booking=booking).first()
-
-        if not payment:
-            return JsonResponse(
-                {"error": "Payment record not found for this booking."},
-                status=404,
-            )
-
-        if payment.status != Payment.Status.PENDING:
-            return JsonResponse(
-                {"error": "This payment is not pending."},
-                status=400,
-            )
-
         # Calculate TalentHire's 8% commission and artist's 92% share
         commission = (confirmed_price * Decimal("8.00") / Decimal("100")).quantize(
             Decimal("0.01"),
@@ -1926,17 +2118,82 @@ def artist_respond_booking_view(request, booking_id):
             rounding=ROUND_HALF_UP,
         )
 
-        # Save booking and payment details together
+        from zoneinfo import ZoneInfo
+        import datetime
+        kolkata_tz = ZoneInfo("Asia/Kolkata")
+
+        # Save booking and payment details together with concurrency protection
         with transaction.atomic():
-            booking.agreed_price = confirmed_price
-            booking.status = Booking.Status.ACCEPTED
-            booking.response_message = (
+            # 1. Lock ArtistProfile first
+            artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
+
+            # 2. Lock Booking second (do not use select_related on reverse OneToOne payment to avoid outer join FOR UPDATE in PostgreSQL)
+            booking_locked = (
+                Booking.objects.select_for_update()
+                .filter(id=booking_id, artist=artist_locked)
+                .select_related("customer")
+                .first()
+            )
+            if not booking_locked:
+                return JsonResponse(
+                    {"error": "Booking request not found or unauthorized."},
+                    status=404,
+                )
+
+            # Only pending booking requests can be accepted
+            if booking_locked.status != Booking.Status.PENDING:
+                return JsonResponse(
+                    {"error": "This booking request has already been processed."},
+                    status=400,
+                )
+
+            # Check whether another booking or manual block occupies this date
+            local_event_date = timezone.localtime(
+                booking_locked.event_date, timezone=kolkata_tz
+            ).date()
+            occupied, occ_reason, _ = is_artist_date_occupied(
+                artist_locked, local_event_date, exclude_booking_id=booking_locked.id
+            )
+            if occupied:
+                return JsonResponse(
+                    {
+                        "error": "This artist already has a booking or active reservation on this date. Please select another date."
+                    },
+                    status=409,
+                )
+
+            # 3. Lock Payment third
+            payment = (
+                Payment.objects.select_for_update()
+                .filter(booking=booking_locked)
+                .first()
+            )
+            if not payment:
+                return JsonResponse(
+                    {"error": "Payment record not found for this booking."},
+                    status=404,
+                )
+
+            if payment.status != Payment.Status.PENDING:
+                return JsonResponse(
+                    {"error": "This payment is not pending."},
+                    status=400,
+                )
+
+            now_time = timezone.now()
+            deadline_dt = now_time + datetime.timedelta(hours=24)
+
+            booking_locked.agreed_price = confirmed_price
+            booking_locked.status = Booking.Status.ACCEPTED
+            booking_locked.accepted_at = now_time
+            booking_locked.response_message = (
                 reason or "Booking accepted and final price confirmed."
             )
-            booking.save(
+            booking_locked.save(
                 update_fields=[
                     "agreed_price",
                     "status",
+                    "accepted_at",
                     "response_message",
                 ]
             )
@@ -1955,13 +2212,18 @@ def artist_respond_booking_view(request, booking_id):
                 ]
             )
 
+            deadline_str = timezone.localtime(deadline_dt, timezone=kolkata_tz).strftime(
+                "%b %d, %Y at %I:%M %p IST"
+            )
+
             # Notify customer
             Notification.objects.create(
-                user=booking.customer,
+                user=booking_locked.customer,
                 title="Booking Request Accepted!",
                 message=(
                     f"{artist.stage_name} accepted your booking for "
-                    f"{booking.event_type}. Confirmed price: ₹{confirmed_price}, "
+                    f"{booking_locked.event_type}. Confirmed price: ₹{confirmed_price}. "
+                    f"Payment must be completed within 24 hours (by {deadline_str}). "
                     "You can now proceed with payment."
                 ),
                 notification_type=Notification.NotificationType.BOOKING_UPDATE,
@@ -1973,8 +2235,8 @@ def artist_respond_booking_view(request, booking_id):
                 title="Booking Confirmed",
                 message=(
                     f"You accepted the booking with "
-                    f"{booking.customer.get_full_name() or booking.customer.username}."
-                    f"Confirmed price: ₹{confirmed_price}."
+                    f"{booking_locked.customer.get_full_name() or booking_locked.customer.username}. "
+                    f"Confirmed price: ₹{confirmed_price}. Payment deadline: {deadline_str}."
                 ),
                 notification_type=Notification.NotificationType.BOOKING_UPDATE,
             )
@@ -1982,8 +2244,10 @@ def artist_respond_booking_view(request, booking_id):
             return JsonResponse(
                 {
                     "message": "Booking accepted and final price confirmed.",
-                    "status": booking.status,
-                    "booking_id": booking.id,
+                    "status": booking_locked.status,
+                    "booking_id": booking_locked.id,
+                    "accepted_at": booking_locked.accepted_at.isoformat(),
+                    "expires_at": deadline_dt.isoformat(),
                     "agreed_price": str(confirmed_price),
                     "commission_amount": str(commission),
                     "artist_amount": str(artist_share),
@@ -1992,31 +2256,55 @@ def artist_respond_booking_view(request, booking_id):
             )
 
     elif action == "reject":
-        booking.status = Booking.Status.REJECTED
-        booking.response_message = reason or "Artist is unavailable for this date."
-        booking.save()
+        with transaction.atomic():
+            artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
+            booking_locked = (
+                Booking.objects.select_for_update()
+                .filter(id=booking_id, artist=artist_locked)
+                .select_related("customer")
+                .first()
+            )
+            if not booking_locked:
+                return JsonResponse(
+                    {"error": "Booking request not found or unauthorized."},
+                    status=404,
+                )
 
-        # Update payment status if exists
-        payment = getattr(booking, "payment", None)
-        if payment and payment.status == Payment.Status.PENDING:
-            payment.status = Payment.Status.FAILED
-            payment.save()
+            if booking_locked.status != Booking.Status.PENDING:
+                return JsonResponse(
+                    {"error": "This booking request has already been processed."},
+                    status=400,
+                )
 
-        # Notify Customer
-        Notification.objects.create(
-            user=booking.customer,
-            title="Booking Request Declined",
-            message=f"{artist.stage_name} was unable to accept your booking for {booking.event_type}. Reason: {booking.response_message}",
-            notification_type=Notification.NotificationType.BOOKING_UPDATE,
-        )
+            booking_locked.status = Booking.Status.REJECTED
+            booking_locked.response_message = reason or "Artist is unavailable for this date."
+            booking_locked.save(update_fields=["status", "response_message"])
 
-        return JsonResponse(
-            {
-                "message": "Booking request declined.",
-                "status": booking.status,
-                "booking_id": booking.id,
-            }
-        )
+            # 3. Update payment status if exists
+            payment = (
+                Payment.objects.select_for_update()
+                .filter(booking=booking_locked)
+                .first()
+            )
+            if payment and payment.status == Payment.Status.PENDING:
+                payment.status = Payment.Status.FAILED
+                payment.save(update_fields=["status", "updated_at"])
+
+            # Notify Customer
+            Notification.objects.create(
+                user=booking_locked.customer,
+                title="Booking Request Declined",
+                message=f"{artist.stage_name} was unable to accept your booking for {booking_locked.event_type}. Reason: {booking_locked.response_message}",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+            return JsonResponse(
+                {
+                    "message": "Booking request declined.",
+                    "status": booking_locked.status,
+                    "booking_id": booking_locked.id,
+                }
+            )
 
     return JsonResponse(
         {"error": "Invalid action. Choose 'accept' or 'reject'."}, status=400
@@ -2171,6 +2459,15 @@ def artist_portfolio_delete_view(request, item_id):
 def artist_availability_view(request):
     """
     List or add/update availability dates for the authenticated artist.
+    Phase 2 Requirements:
+      - Only authenticated artists can access.
+      - Acquires row-level lock on ArtistProfile (select_for_update) inside transaction.atomic.
+      - Converts booking event timestamps to Asia/Kolkata local date.
+      - Rejects with HTTP 409 Conflict if date is occupied by:
+          1. Successfully paid booking (Payment status SUCCESS)
+          2. Completed booking (Booking status COMPLETED)
+          3. Active accepted 24-hour reservation (Booking status ACCEPTED, within 24h)
+      - If date is available, creates or updates the ArtistAvailability record.
     """
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Authentication required."}, status=401)
@@ -2194,19 +2491,22 @@ def artist_availability_view(request):
         ]
         return JsonResponse({"availability": records})
 
+    # POST: create or update manual availability
     try:
         data = json.loads(request.body)
     except Exception:
         return JsonResponse({"error": "Invalid request body."}, status=400)
 
     date_str = data.get("date", "").strip()
-    is_available = data.get("is_available", True)
+    is_available = data.get("is_available", False)
     reason = data.get("reason", "").strip()
 
     if not date_str:
         return JsonResponse({"error": "Date is required."}, status=400)
 
     from django.utils.dateparse import parse_date
+    import datetime
+    from zoneinfo import ZoneInfo
 
     parsed = parse_date(date_str)
     if not parsed:
@@ -2214,14 +2514,73 @@ def artist_availability_view(request):
             {"error": "Invalid date format. Use YYYY-MM-DD."}, status=400
         )
 
-    avail, created = ArtistAvailability.objects.update_or_create(
-        artist=artist,
-        date=parsed,
-        defaults={
-            "is_available": bool(is_available),
-            "reason": reason,
-        },
-    )
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    now_tz = timezone.now()
+
+    # Time boundaries in Asia/Kolkata
+    day_start = datetime.datetime.combine(parsed, datetime.time.min, tzinfo=kolkata_tz)
+    day_end = datetime.datetime.combine(parsed + datetime.timedelta(days=1), datetime.time.min, tzinfo=kolkata_tz)
+
+    with transaction.atomic():
+        # Consistent lock acquisition order: lock ArtistProfile row first
+        artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
+
+        # Check if any active booking occupies this calendar date
+        conflicting_bookings = (
+            Booking.objects.filter(
+                artist=artist_locked,
+                status__in=[Booking.Status.ACCEPTED, Booking.Status.COMPLETED],
+                event_date__gte=day_start - datetime.timedelta(days=1),
+                event_date__lt=day_end + datetime.timedelta(days=1),
+            )
+            .select_related("payment")
+        )
+
+        for booking in conflicting_bookings:
+            b_ist_date = timezone.localtime(booking.event_date, timezone=kolkata_tz).date()
+            if b_ist_date == parsed:
+                if booking.status == Booking.Status.COMPLETED:
+                    return JsonResponse(
+                        {
+                            "error": f"Cannot block {parsed.isoformat()}: a completed booking already exists on this date."
+                        },
+                        status=409,
+                    )
+                elif booking.status == Booking.Status.ACCEPTED:
+                    payment = getattr(booking, "payment", None)
+                    if payment and payment.status == Payment.Status.SUCCESS:
+                        return JsonResponse(
+                            {
+                                "error": f"Cannot block {parsed.isoformat()}: a confirmed booking with successful payment already exists on this date."
+                            },
+                            status=409,
+                        )
+                    else:
+                        # 24-hour reservation check
+                        accepted_at = getattr(booking, "accepted_at", None)
+                        if not accepted_at and payment:
+                            accepted_at = payment.updated_at
+                        if not accepted_at:
+                            accepted_at = booking.created_at
+
+                        if accepted_at + datetime.timedelta(hours=24) > now_tz:
+                            return JsonResponse(
+                                {
+                                    "error": f"Cannot block {parsed.isoformat()}: an active accepted reservation is awaiting payment for this date."
+                                },
+                                status=409,
+                            )
+                        # If expired (>24h), it does not occupy the date
+
+        # No collision found with active bookings; create or update availability override
+        avail, created = ArtistAvailability.objects.update_or_create(
+            artist=artist_locked,
+            date=parsed,
+            defaults={
+                "is_available": bool(is_available),
+                "reason": reason,
+            },
+        )
 
     return JsonResponse(
         {
@@ -2233,7 +2592,8 @@ def artist_availability_view(request):
                 "is_available": avail.is_available,
                 "reason": avail.reason,
             },
-        }
+        },
+        status=200,
     )
 
 
@@ -2250,11 +2610,20 @@ def artist_availability_delete_view(request, avail_id):
             {"error": "Performing artist profile required."}, status=403
         )
 
-    avail = ArtistAvailability.objects.filter(id=avail_id, artist=artist).first()
-    if not avail:
-        return JsonResponse({"error": "Availability record not found."}, status=404)
+    with transaction.atomic():
+        artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
 
-    avail.delete()
+        avail = ArtistAvailability.objects.filter(id=avail_id, artist=artist_locked).first()
+        if not avail:
+            if ArtistAvailability.objects.filter(id=avail_id).exists():
+                return JsonResponse(
+                    {"error": "You are not authorized to modify another artist's availability."},
+                    status=403,
+                )
+            return JsonResponse({"error": "Availability record not found."}, status=404)
+
+        avail.delete()
+
     return JsonResponse({"message": "Availability record removed."})
 
 

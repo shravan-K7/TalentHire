@@ -13,6 +13,7 @@ urlpatterns = [
     path("artist/profile/", views.artist_profile_view, name="artist_profile"),
     path("artists/", views.artists_list_view, name="artists_list"),
     path("artists/<int:artist_id>/", views.artist_detail_view, name="artist_detail"),
+    path("artists/<int:artist_id>/availability/", views.artist_public_availability_view, name="artist_availability_public"),
     path("bookings/", views.create_booking_view, name="create_booking"),
     path("customer/dashboard/", views.customer_dashboard_view, name="customer_dashboard"),
     path("customer/profile/", views.customer_update_profile_view, name="customer_update_profile"),

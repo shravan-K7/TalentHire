@@ -127,7 +127,20 @@ class Booking(models.Model):
         choices=Status.choices,
         default=Status.PENDING,
     )
+    accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the artist accepted the booking request (starts 24-hour payment reservation)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def expires_at(self):
+        """Returns the 24-hour payment reservation deadline after acceptance."""
+        if self.accepted_at:
+            from datetime import timedelta
+            return self.accepted_at + timedelta(hours=24)
+        return None
 
     def __str__(self):
         return f"{self.customer} - {self.artist} ({self.status})"
