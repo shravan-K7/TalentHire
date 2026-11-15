@@ -337,13 +337,162 @@ export async function toggleFavoriteArtist(artistId) {
   return data
 }
 
-export async function cancelCustomerBooking(bookingId) {
+export async function fetchCustomerCancelPreview(bookingId) {
+  const response = await fetch(`/api/customer/bookings/${bookingId}/cancel-preview/`, {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load cancellation preview.')
+  }
+
+  return data
+}
+
+export async function cancelCustomerBooking(bookingId, reason = '') {
   const token = await getCsrfToken()
 
   const response = await fetch(`/api/customer/bookings/${bookingId}/cancel/`, {
     method: 'POST',
     credentials: 'include',
     headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ reason }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to cancel booking.')
+  }
+
+  return data
+}
+
+export async function requestCustomerReschedule(bookingId, { new_event_date, reason = '' }) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/customer/bookings/${bookingId}/reschedule/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ new_event_date, reason }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to submit rescheduling request.')
+  }
+
+  return data
+}
+
+export async function fetchCustomerRescheduleHistory(bookingId) {
+  const response = await fetch(`/api/customer/bookings/${bookingId}/reschedule-history/`, {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load rescheduling history.')
+  }
+
+  return data
+}
+
+export async function fetchArtistCancelPreview(bookingId) {
+  const response = await fetch(`/api/artist/bookings/${bookingId}/cancel-preview/`, {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load cancellation preview.')
+  }
+
+  return data
+}
+
+export async function cancelArtistBooking(bookingId, reason = '') {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/bookings/${bookingId}/cancel/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ reason }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to cancel booking.')
+  }
+
+  return data
+}
+
+export async function fetchArtistPendingReschedulingRequests() {
+  const response = await fetch('/api/artist/rescheduling-requests/', {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load pending rescheduling requests.')
+  }
+
+  return data
+}
+
+export async function respondArtistReschedulingRequest(requestId, { action, reason = '' }) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/rescheduling-requests/${requestId}/respond/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ action, reason }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to process rescheduling response.')
+  }
+
+  return data
+}
+
+export async function retryBookingRefund(bookingId) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/bookings/${bookingId}/refund/retry/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
       'X-CSRFToken': token,
     },
   })
@@ -351,7 +500,22 @@ export async function cancelCustomerBooking(bookingId) {
   const data = await readResponse(response)
 
   if (!response.ok) {
-    throw new Error(data.error || 'Failed to cancel booking.')
+    throw new Error(data.error || 'Failed to retry refund.')
+  }
+
+  return data
+}
+
+export async function fetchPublicArtistAvailability(artistId, month) {
+  const response = await fetch(`/api/artists/${artistId}/availability/?month=${encodeURIComponent(month)}`, {
+    method: 'GET',
+    credentials: 'include',
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to fetch artist availability.')
   }
 
   return data

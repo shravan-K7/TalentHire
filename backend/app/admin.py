@@ -9,6 +9,11 @@ from .models import (
     CustomerProfile,
     FavoriteArtist,
     Notification,
+    ArtistAvailability,
+    Refund,
+    ProcessedWebhookEvent,
+    BookingCancellation,
+    ReschedulingRequest,
 )
 
 
@@ -103,4 +108,62 @@ class NotificationAdmin(admin.ModelAdmin):
     list_filter = ("notification_type", "is_read", "created_at")
     search_fields = ("user__username", "title", "message")
     list_editable = ("is_read",)
+
+
+@admin.register(ArtistAvailability)
+class ArtistAvailabilityAdmin(admin.ModelAdmin):
+    list_display = ("artist", "date", "is_available", "reason", "created_at")
+    list_filter = ("is_available", "date")
+    search_fields = ("artist__stage_name", "reason")
+
+
+@admin.register(Refund)
+class RefundAdmin(admin.ModelAdmin):
+    list_display = ("id", "payment", "booking", "amount", "status", "razorpay_refund_id", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("razorpay_refund_id", "idempotency_key", "booking__customer__username")
+
+
+@admin.register(ProcessedWebhookEvent)
+class ProcessedWebhookEventAdmin(admin.ModelAdmin):
+    list_display = ("event_id", "event_type", "processed_at")
+    list_filter = ("event_type", "processed_at")
+    search_fields = ("event_id", "event_type")
+
+
+@admin.register(BookingCancellation)
+class BookingCancellationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "booking",
+        "cancelled_by",
+        "cancelled_by_user",
+        "refund_percentage",
+        "paid_amount",
+        "refund_amount",
+        "retained_amount",
+        "platform_fee",
+        "artist_payout",
+        "created_at",
+    )
+    list_filter = ("cancelled_by", "created_at")
+    search_fields = ("booking__id", "cancelled_by_user__username", "reason", "policy_applied")
+
+
+@admin.register(ReschedulingRequest)
+class ReschedulingRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "booking",
+        "customer",
+        "artist",
+        "original_event_date",
+        "new_event_date",
+        "status",
+        "requested_at",
+        "responded_at",
+    )
+    list_filter = ("status", "requested_at", "responded_at")
+    search_fields = ("booking__id", "customer__username", "artist__stage_name", "reason", "artist_response")
+
 

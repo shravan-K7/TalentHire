@@ -252,6 +252,8 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
         message: formData.additional_requirements.trim(),
       };
 
+      console.log("BOOKING PAYLOAD:", payload);
+
       const result = await createBooking(payload);
       setBookingSuccessData(result);
     } catch (err) {

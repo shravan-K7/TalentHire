@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.conf import settings
 from django.db import models, transaction
 
@@ -90,6 +91,7 @@ class Booking(models.Model):
         REJECTED = "rejected", "Rejected"
         CANCELLED = "cancelled", "Cancelled"
         COMPLETED = "completed", "Completed"
+        EXPIRED = "expired", "Expired"
 
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -335,3 +337,194 @@ class ArtistAvailability(models.Model):
     def __str__(self):
         status_text = "Available" if self.is_available else "Unavailable"
         return f"{self.artist.stage_name} - {self.date} ({status_text})"
+
+
+class Refund(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSED = "processed", "Processed"
+        FAILED = "failed", "Failed"
+
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="refunds",
+    )
+    booking = models.ForeignKey(
+        Booking,
+        on_delete=models.PROTECT,
+        related_name="refunds",
+    )
+    razorpay_refund_id = models.CharField(
+        max_length=100,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Authoritative Razorpay refund ID (e.g. rfnd_...)",
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Refund amount in INR",
+    )
+    currency = models.CharField(
+        max_length=10,
+        default="INR",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Reason for refund (e.g. date reallocated, late capture, cancellation)",
+    )
+    failure_reason = models.TextField(
+        blank=True,
+        default="",
+        help_text="Error message or exception details if refund API call failed",
+    )
+    idempotency_key = models.CharField(
+        max_length=150,
+        unique=True,
+        help_text="Unique key ensuring a payment is never refunded twice accidentally.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Refund #{self.id} for Payment #{self.payment_id} ({self.status})"
+
+
+class ProcessedWebhookEvent(models.Model):
+    event_id = models.CharField(
+        max_length=120,
+        unique=True,
+        help_text="Authoritative Razorpay event ID from webhook payload or header",
+    )
+    event_type = models.CharField(max_length=100)
+    payload_hash = models.CharField(max_length=64, blank=True, default="")
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-processed_at"]
+
+    def __str__(self):
+        return f"{self.event_type} - {self.event_id}"
+
+
+class BookingCancellation(models.Model):
+    class CancelledBy(models.TextChoices):
+        CUSTOMER = "customer", "Customer"
+        ARTIST = "artist", "Artist"
+        ADMIN = "admin", "Admin / Platform"
+
+    booking = models.OneToOneField(
+        Booking,
+        on_delete=models.PROTECT,
+        related_name="cancellation",
+    )
+    cancelled_by = models.CharField(
+        max_length=20,
+        choices=CancelledBy.choices,
+    )
+    cancelled_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="cancellations_made",
+    )
+    reason = models.TextField(blank=True, default="")
+    policy_applied = models.CharField(max_length=255)
+    refund_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    paid_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    refund_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    retained_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    platform_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    artist_payout = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    refund = models.ForeignKey(
+        "Refund",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancellations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Cancellation for Booking #{self.booking_id} by {self.cancelled_by}"
+
+
+class ReschedulingRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        CANCELLED = "cancelled", "Cancelled"
+
+    booking = models.ForeignKey(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name="rescheduling_requests",
+    )
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="customer_rescheduling_requests",
+    )
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.PROTECT,
+        related_name="artist_rescheduling_requests",
+    )
+    original_event_date = models.DateTimeField()
+    new_event_date = models.DateTimeField()
+    reason = models.TextField(blank=True, default="")
+    artist_response = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+    def __str__(self):
+        return f"Reschedule #{self.id} for Booking #{self.booking_id} ({self.status})"
+
+

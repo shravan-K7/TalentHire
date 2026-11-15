@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import re
@@ -25,6 +26,7 @@ from google.oauth2 import id_token
 from django.contrib.auth.decorators import login_required
 
 from .forms import LoginForm, ArtistProfileForm
+from .cancellation_policy import calculate_cancellation_refund
 from .models import (
     ArtistProfile,
     Category,
@@ -36,6 +38,10 @@ from .models import (
     FavoriteArtist,
     Notification,
     ArtistAvailability,
+    Refund,
+    ProcessedWebhookEvent,
+    BookingCancellation,
+    ReschedulingRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -1680,40 +1686,832 @@ def customer_toggle_favorite_view(request, artist_id):
     )
 
 
-@csrf_protect
-@require_POST
-def customer_cancel_booking_view(request, booking_id):
-    """Cancel a pending or accepted booking."""
+def send_notification_once(
+    user,
+    title,
+    message,
+    notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    dedupe_window_minutes=60,
+):
+    """
+    Creates a Notification only if an identical notification was not dispatched to the user recently.
+    Prevents duplicate notifications on retries and duplicate webhooks.
+    """
+    cutoff = timezone.now() - datetime.timedelta(minutes=dedupe_window_minutes)
+    if Notification.objects.filter(
+        user=user,
+        title=title,
+        message=message,
+        created_at__gte=cutoff,
+    ).exists():
+        return None
+    return Notification.objects.create(
+        user=user,
+        title=title,
+        message=message,
+        notification_type=notification_type,
+    )
+
+
+@require_GET
+def customer_cancel_preview_view(request, booking_id):
+    """
+    Read-only preview endpoint for customer booking cancellation.
+    Returns authoritative backend cancellation policy breakdown before customer confirms cancellation.
+    """
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Authentication required."}, status=401)
 
-    booking = Booking.objects.filter(id=booking_id, customer=request.user).first()
+    booking = Booking.objects.filter(id=booking_id).select_related("artist", "artist__user", "customer").first()
     if not booking:
         return JsonResponse({"error": "Booking not found."}, status=404)
 
-    if booking.status in [Booking.Status.COMPLETED, Booking.Status.CANCELLED]:
-        return JsonResponse(
-            {"error": f"Cannot cancel a booking that is already {booking.status}."},
-            status=400,
+    if booking.customer != request.user and not request.user.is_staff:
+        return JsonResponse({"error": "Unauthorized to view cancellation preview for this booking."}, status=403)
+
+    if booking.status == Booking.Status.COMPLETED:
+        return JsonResponse({"error": "Cannot cancel a booking that is already completed."}, status=400)
+    if booking.status == Booking.Status.CANCELLED:
+        return JsonResponse({"error": "This booking is already cancelled."}, status=400)
+
+    calc = calculate_cancellation_refund(booking, cancelled_by="customer")
+
+    return JsonResponse({
+        "booking_id": booking.id,
+        "event_type": booking.event_type,
+        "artist_name": booking.artist.stage_name,
+        "artist_id": booking.artist.id,
+        "event_date": booking.event_date.isoformat(),
+        "status": booking.status,
+        "policy_applied": calc["policy_applied"],
+        "refund_percentage": str(calc["refund_percentage"]),
+        "paid_amount": str(calc["paid_amount"]),
+        "refund_amount": str(calc["refund_amount"]),
+        "retained_amount": str(calc["retained_amount"]),
+        "platform_fee": str(calc["platform_fee"]),
+        "artist_payout": str(calc["artist_payout"]),
+        "days_until_event": calc["days_until_event"],
+        "is_eligible_for_refund": calc["is_eligible_for_refund"],
+    })
+
+
+@csrf_protect
+@require_POST
+def customer_cancel_booking_view(request, booking_id):
+    """
+    Cancel an eligible customer booking.
+    - Validates ownership and status (cannot cancel completed, expired, or already cancelled bookings).
+    - If unpaid/pending, cancels immediately and fails pending payment without refund.
+    - If paid (SUCCESS), calculates policy refund using actual customer-paid amount.
+    - Initiates refund via initiate_payment_refund helper.
+    - Records comprehensive financial and policy details in BookingCancellation.
+    - Notifies customer and artist (deduplicated).
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    booking = Booking.objects.filter(id=booking_id).select_related("artist", "artist__user", "customer").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if booking.customer != request.user:
+        return JsonResponse({"error": "Unauthorized. You can only cancel your own bookings."}, status=403)
+
+    if booking.status == Booking.Status.COMPLETED:
+        return JsonResponse({"error": "Cannot cancel a booking that is completed."}, status=400)
+    if booking.status == Booking.Status.CANCELLED:
+        return JsonResponse({"error": "Booking is already cancelled."}, status=400)
+    if booking.status in [Booking.Status.REJECTED, Booking.Status.EXPIRED]:
+        return JsonResponse({"error": f"Cannot cancel a booking that is {booking.status}."}, status=400)
+
+    # Read optional cancellation reason
+    reason = ""
+    try:
+        if request.body:
+            body_data = json.loads(request.body)
+            reason = str(body_data.get("reason", "")).strip()
+    except Exception:
+        reason = str(request.POST.get("reason", "")).strip()
+
+    # Financial and cancellation policy calculation
+    calc = calculate_cancellation_refund(booking, cancelled_by="customer")
+    paid_amount = calc["paid_amount"]
+    refund_amount = calc["refund_amount"]
+    policy_applied = calc["policy_applied"]
+    refund_percentage = calc["refund_percentage"]
+    retained_amount = calc["retained_amount"]
+    platform_fee = calc["platform_fee"]
+    artist_payout = calc["artist_payout"]
+
+    payment = Payment.objects.filter(booking=booking).first()
+
+    refund_obj = None
+    refund_success = False
+    refund_err = None
+
+    with transaction.atomic():
+        booking_locked = Booking.objects.select_for_update().get(id=booking.id)
+        if booking_locked.status in [Booking.Status.COMPLETED, Booking.Status.CANCELLED]:
+            return JsonResponse({"error": f"Cannot cancel a booking that is already {booking_locked.status}."}, status=400)
+
+        # Mark booking cancelled
+        booking_locked.status = Booking.Status.CANCELLED
+        booking_locked.save(update_fields=["status"])
+
+        # If payment is pending/unpaid, mark payment as failed
+        if payment:
+            payment_locked = Payment.objects.select_for_update().get(id=payment.id)
+            if payment_locked.status == Payment.Status.PENDING:
+                payment_locked.status = Payment.Status.FAILED
+                payment_locked.save(update_fields=["status", "updated_at"])
+
+        # Create cancellation record
+        cancellation = BookingCancellation.objects.create(
+            booking=booking_locked,
+            cancelled_by=BookingCancellation.CancelledBy.CUSTOMER,
+            cancelled_by_user=request.user,
+            reason=reason[:500],
+            policy_applied=policy_applied,
+            refund_percentage=refund_percentage,
+            paid_amount=paid_amount,
+            refund_amount=refund_amount,
+            retained_amount=retained_amount,
+            platform_fee=platform_fee,
+            artist_payout=artist_payout,
         )
 
-    booking.status = Booking.Status.CANCELLED
-    booking.save(update_fields=["status"])
+    # If eligible for a refund (> 0 and payment is SUCCESS), call initiate_payment_refund
+    if calc["is_eligible_for_refund"] and payment and payment.status == Payment.Status.SUCCESS:
+        refund_key = f"rfnd_cancel_{payment.transaction_id}_{int(refund_amount * 100)}"
+        refund_success, refund_obj, refund_err = initiate_payment_refund(
+            payment=payment,
+            amount=refund_amount,
+            reason=f"Customer cancelled booking #{booking.id}: {reason}"[:255],
+            idempotency_key=refund_key,
+        )
+        if refund_obj:
+            cancellation.refund = refund_obj
+            cancellation.save(update_fields=["refund"])
 
-    Notification.objects.create(
+    # Notifications (deduplicated)
+    artist_user = booking.artist.user
+    if refund_amount > Decimal("0.00"):
+        cust_msg = (
+            f"Your booking #{booking.id} with {booking.artist.stage_name} was cancelled. "
+            f"Policy: {policy_applied}. A refund of ₹{refund_amount} has been initiated."
+        )
+    elif paid_amount > Decimal("0.00"):
+        cust_msg = (
+            f"Your booking #{booking.id} with {booking.artist.stage_name} was cancelled. "
+            f"As per policy ({policy_applied}), refund amount is ₹0.00."
+        )
+    else:
+        cust_msg = f"Your booking #{booking.id} with {booking.artist.stage_name} has been cancelled."
+
+    send_notification_once(
         user=request.user,
         title="Booking Cancelled",
-        message=f"Booking for {booking.artist.stage_name} ({booking.event_type}) was cancelled.",
+        message=cust_msg,
         notification_type=Notification.NotificationType.BOOKING_UPDATE,
     )
+
+    art_msg = (
+        f"Booking #{booking.id} ({booking.event_type}) was cancelled by the customer. "
+        f"Retained artist compensation: ₹{artist_payout}."
+        if retained_amount > Decimal("0.00")
+        else f"Booking #{booking.id} ({booking.event_type}) was cancelled by the customer."
+    )
+    send_notification_once(
+        user=artist_user,
+        title="Booking Cancelled by Customer",
+        message=art_msg,
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    refund_status_str = "none"
+    if refund_obj:
+        refund_status_str = refund_obj.status
+    elif calc["is_eligible_for_refund"]:
+        refund_status_str = "failed"
 
     return JsonResponse(
         {
             "message": "Booking has been cancelled.",
             "booking_id": booking.id,
-            "status": booking.status,
+            "status": Booking.Status.CANCELLED,
+            "policy_applied": policy_applied,
+            "refund_percentage": str(refund_percentage),
+            "paid_amount": str(paid_amount),
+            "refund_amount": str(refund_amount),
+            "retained_amount": str(retained_amount),
+            "refund_status": refund_status_str,
+            "refund_id": refund_obj.razorpay_refund_id if refund_obj else None,
+            "error": refund_err if (not refund_success and calc["is_eligible_for_refund"]) else None,
         }
     )
+
+
+@require_GET
+def artist_cancel_preview_view(request, booking_id):
+    """
+    Read-only preview endpoint for artist booking cancellation.
+    Returns authoritative breakdown (100% refund policy for artist cancellation).
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist and not request.user.is_staff:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    booking = Booking.objects.filter(id=booking_id).select_related("artist", "customer").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if booking.artist != artist and not request.user.is_staff:
+        return JsonResponse({"error": "Unauthorized to view cancellation preview for this booking."}, status=403)
+
+    if booking.status == Booking.Status.COMPLETED:
+        return JsonResponse({"error": "Cannot cancel a booking that is already completed."}, status=400)
+    if booking.status == Booking.Status.CANCELLED:
+        return JsonResponse({"error": "This booking is already cancelled."}, status=400)
+
+    calc = calculate_cancellation_refund(booking, cancelled_by="artist")
+
+    return JsonResponse({
+        "booking_id": booking.id,
+        "event_type": booking.event_type,
+        "customer_name": booking.customer.get_full_name() or booking.customer.username,
+        "event_date": booking.event_date.isoformat(),
+        "status": booking.status,
+        "policy_applied": calc["policy_applied"],
+        "refund_percentage": str(calc["refund_percentage"]),
+        "paid_amount": str(calc["paid_amount"]),
+        "refund_amount": str(calc["refund_amount"]),
+        "retained_amount": str(calc["retained_amount"]),
+        "days_until_event": calc["days_until_event"],
+        "is_eligible_for_refund": calc["is_eligible_for_refund"],
+    })
+
+
+@csrf_protect
+@require_POST
+def artist_cancel_booking_view(request, booking_id):
+    """
+    Cancel an accepted booking by the performing artist.
+    - Only the assigned artist can cancel their own booking.
+    - Prevent cancelling completed, expired, or already cancelled bookings.
+    - If payment was captured, initiates a 100% full refund to customer.
+    - If payment is pending, cancels booking and marks payment as failed.
+    - Releases event date immediately upon cancellation.
+    - Records comprehensive financial details in BookingCancellation.
+    - Notifies customer and artist.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    booking = Booking.objects.filter(id=booking_id).select_related("artist", "customer").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if booking.artist != artist:
+        return JsonResponse({"error": "Unauthorized. You cannot cancel another artist's booking."}, status=403)
+
+    if booking.status == Booking.Status.COMPLETED:
+        return JsonResponse({"error": "Cannot cancel a booking that is completed."}, status=400)
+    if booking.status == Booking.Status.CANCELLED:
+        return JsonResponse({"error": "Booking is already cancelled."}, status=400)
+    if booking.status in [Booking.Status.REJECTED, Booking.Status.EXPIRED]:
+        return JsonResponse({"error": f"Cannot cancel a booking that is {booking.status}."}, status=400)
+
+    # Read optional cancellation reason
+    reason = ""
+    try:
+        if request.body:
+            body_data = json.loads(request.body)
+            reason = str(body_data.get("reason", "")).strip()
+    except Exception:
+        reason = str(request.POST.get("reason", "")).strip()
+
+    # Artist cancellation = 100% refund
+    calc = calculate_cancellation_refund(booking, cancelled_by="artist")
+    paid_amount = calc["paid_amount"]
+    refund_amount = calc["refund_amount"]
+    policy_applied = calc["policy_applied"]
+    refund_percentage = calc["refund_percentage"]
+
+    payment = Payment.objects.filter(booking=booking).first()
+
+    refund_obj = None
+    refund_success = False
+    refund_err = None
+
+    with transaction.atomic():
+        artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
+        booking_locked = Booking.objects.select_for_update().get(id=booking.id, artist=artist_locked)
+        if booking_locked.status in [Booking.Status.COMPLETED, Booking.Status.CANCELLED]:
+            return JsonResponse({"error": f"Cannot cancel a booking that is already {booking_locked.status}."}, status=400)
+
+        # Mark booking cancelled
+        booking_locked.status = Booking.Status.CANCELLED
+        booking_locked.save(update_fields=["status"])
+
+        # If payment is pending/unpaid, mark payment as failed
+        if payment:
+            payment_locked = Payment.objects.select_for_update().get(id=payment.id)
+            if payment_locked.status == Payment.Status.PENDING:
+                payment_locked.status = Payment.Status.FAILED
+                payment_locked.save(update_fields=["status", "updated_at"])
+
+        # Create cancellation record
+        cancellation = BookingCancellation.objects.create(
+            booking=booking_locked,
+            cancelled_by=BookingCancellation.CancelledBy.ARTIST,
+            cancelled_by_user=request.user,
+            reason=reason[:500],
+            policy_applied=policy_applied,
+            refund_percentage=refund_percentage,
+            paid_amount=paid_amount,
+            refund_amount=refund_amount,
+            retained_amount=Decimal("0.00"),
+            platform_fee=Decimal("0.00"),
+            artist_payout=Decimal("0.00"),
+        )
+
+    # If payment was captured, issue 100% full refund
+    if calc["is_eligible_for_refund"] and payment and payment.status == Payment.Status.SUCCESS:
+        refund_key = f"rfnd_artist_cancel_{payment.transaction_id}_{int(refund_amount * 100)}"
+        refund_success, refund_obj, refund_err = initiate_payment_refund(
+            payment=payment,
+            amount=refund_amount,
+            reason=f"Artist cancelled booking #{booking.id}: {reason}"[:255],
+            idempotency_key=refund_key,
+        )
+        if refund_obj:
+            cancellation.refund = refund_obj
+            cancellation.save(update_fields=["refund"])
+
+    # Notifications
+    cust_msg = (
+        f"Artist {artist.stage_name} has cancelled your booking #{booking.id} ({booking.event_type}). "
+        f"Reason: {reason or 'Artist unavailable'}. "
+        f"A full refund of ₹{refund_amount} has been initiated."
+        if refund_amount > Decimal("0.00")
+        else f"Artist {artist.stage_name} has cancelled your booking #{booking.id} ({booking.event_type}). Reason: {reason or 'Artist unavailable'}."
+    )
+    send_notification_once(
+        user=booking.customer,
+        title="Booking Cancelled by Artist",
+        message=cust_msg,
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    send_notification_once(
+        user=request.user,
+        title="Booking Cancelled",
+        message=f"You cancelled booking #{booking.id} with {booking.customer.username}." + (f" Full refund of ₹{refund_amount} initiated." if refund_amount > Decimal('0.00') else ""),
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    refund_status_str = "none"
+    if refund_obj:
+        refund_status_str = refund_obj.status
+    elif calc["is_eligible_for_refund"]:
+        refund_status_str = "failed"
+
+    return JsonResponse(
+        {
+            "message": "Booking has been cancelled by artist.",
+            "booking_id": booking.id,
+            "status": Booking.Status.CANCELLED,
+            "policy_applied": policy_applied,
+            "refund_percentage": str(refund_percentage),
+            "paid_amount": str(paid_amount),
+            "refund_amount": str(refund_amount),
+            "refund_status": refund_status_str,
+            "refund_id": refund_obj.razorpay_refund_id if refund_obj else None,
+            "error": refund_err if (not refund_success and calc["is_eligible_for_refund"]) else None,
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def customer_request_reschedule_view(request, booking_id):
+    """
+    Customer submits a request to reschedule an eligible booking to a proposed date/time.
+    Rules:
+    - Only customer owning the booking can submit.
+    - Booking cannot be completed, cancelled, rejected, or expired.
+    - Event date must be in the future.
+    - Only one pending rescheduling request allowed per booking at a time.
+    - Proposed date is validated and checked against artist availability (manual blocks and bookings).
+    - If occupied, returns 409 Conflict.
+    - The original date remains reserved while the request is pending.
+    - The proposed date is NOT reserved merely because a request is submitted.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    booking = Booking.objects.filter(id=booking_id).select_related("artist", "artist__user", "customer").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    if booking.customer != request.user:
+        return JsonResponse({"error": "Unauthorized. You can only reschedule your own bookings."}, status=403)
+
+    if booking.status in [Booking.Status.COMPLETED, Booking.Status.CANCELLED, Booking.Status.REJECTED, Booking.Status.EXPIRED]:
+        return JsonResponse({"error": f"Cannot reschedule a booking that is {booking.status}."}, status=400)
+
+    if booking.event_date <= timezone.now():
+        return JsonResponse({"error": "Cannot reschedule an event that has already passed."}, status=400)
+
+    # Check for existing pending request
+    if ReschedulingRequest.objects.filter(booking=booking, status=ReschedulingRequest.Status.PENDING).exists():
+        return JsonResponse({"error": "A rescheduling request is already pending for this booking."}, status=400)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = request.POST
+
+    new_date_raw = data.get("new_event_date")
+    reason = str(data.get("reason", "")).strip()
+
+    if not new_date_raw:
+        return JsonResponse({"error": "Proposed new event date is required."}, status=400)
+
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    try:
+        new_event_dt = datetime.datetime.fromisoformat(str(new_date_raw).strip())
+        if timezone.is_naive(new_event_dt):
+            new_event_dt = timezone.make_aware(new_event_dt, kolkata_tz)
+        else:
+            new_event_dt = new_event_dt.astimezone(kolkata_tz)
+    except Exception:
+        return JsonResponse({"error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)."}, status=400)
+
+    if new_event_dt <= timezone.now():
+        return JsonResponse({"error": "Proposed event date must be in the future."}, status=400)
+
+    # Check proposed date availability
+    new_calendar_date = timezone.localtime(new_event_dt, timezone=kolkata_tz).date()
+    occupied, occ_reason, _ = is_artist_date_occupied(
+        booking.artist,
+        new_calendar_date,
+        exclude_booking_id=booking.id,
+    )
+    if occupied:
+        return JsonResponse(
+            {"error": f"Artist is not available on this date ({occ_reason})."},
+            status=409,
+        )
+
+    with transaction.atomic():
+        # Double-check no duplicate under lock
+        if ReschedulingRequest.objects.filter(booking=booking, status=ReschedulingRequest.Status.PENDING).exists():
+            return JsonResponse({"error": "A rescheduling request is already pending for this booking."}, status=400)
+
+        resched_req = ReschedulingRequest.objects.create(
+            booking=booking,
+            customer=request.user,
+            artist=booking.artist,
+            original_event_date=booking.event_date,
+            new_event_date=new_event_dt,
+            reason=reason[:500],
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+    # Notify artist
+    orig_fmt = timezone.localtime(booking.event_date, timezone=kolkata_tz).strftime("%b %d, %Y at %I:%M %p")
+    new_fmt = timezone.localtime(new_event_dt, timezone=kolkata_tz).strftime("%b %d, %Y at %I:%M %p")
+    send_notification_once(
+        user=booking.artist.user,
+        title="Rescheduling Request Received",
+        message=(
+            f"Customer {request.user.get_full_name() or request.user.username} requested to reschedule "
+            f"Booking #{booking.id} from {orig_fmt} to {new_fmt}. Reason: {reason or 'No reason provided'}."
+        ),
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    send_notification_once(
+        user=request.user,
+        title="Rescheduling Request Submitted",
+        message=f"Your request to reschedule Booking #{booking.id} to {new_fmt} has been submitted to {booking.artist.stage_name}.",
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+    )
+
+    return JsonResponse(
+        {
+            "message": "Rescheduling request submitted successfully.",
+            "request_id": resched_req.id,
+            "booking_id": booking.id,
+            "original_event_date": resched_req.original_event_date.isoformat(),
+            "new_event_date": resched_req.new_event_date.isoformat(),
+            "reason": resched_req.reason,
+            "status": resched_req.status,
+            "created_at": resched_req.requested_at.isoformat(),
+        },
+        status=201,
+    )
+
+
+@require_GET
+def customer_reschedule_history_view(request, booking_id):
+    """View rescheduling request audit history for a booking."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    booking = Booking.objects.filter(id=booking_id).select_related("artist", "artist__user", "customer").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    is_customer = booking.customer == request.user
+    is_artist = getattr(request.user, "artist_profile", None) == booking.artist
+
+    if not (is_customer or is_artist or request.user.is_staff):
+        return JsonResponse({"error": "Unauthorized to view this booking's history."}, status=403)
+
+    requests_qs = ReschedulingRequest.objects.filter(booking=booking).order_by("-requested_at")
+    history = [
+        {
+            "id": r.id,
+            "original_event_date": r.original_event_date.isoformat(),
+            "new_event_date": r.new_event_date.isoformat(),
+            "reason": r.reason,
+            "artist_response": r.artist_response,
+            "status": r.status,
+            "requested_at": r.requested_at.isoformat(),
+            "responded_at": r.responded_at.isoformat() if r.responded_at else None,
+        }
+        for r in requests_qs
+    ]
+
+    return JsonResponse(
+        {
+            "booking_id": booking.id,
+            "current_event_date": booking.event_date.isoformat(),
+            "booking_status": booking.status,
+            "history": history,
+        }
+    )
+
+
+@require_GET
+def artist_pending_rescheduling_requests_view(request):
+    """View pending rescheduling requests for the authenticated artist."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    requests_qs = (
+        ReschedulingRequest.objects.filter(
+            artist=artist,
+            status=ReschedulingRequest.Status.PENDING,
+        )
+        .select_related("booking", "customer")
+        .order_by("-requested_at")
+    )
+
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    pending_list = [
+        {
+            "request_id": r.id,
+            "booking_id": r.booking_id,
+            "customer_name": r.customer.get_full_name() or r.customer.username,
+            "customer_email": r.customer.email,
+            "event_type": r.booking.event_type,
+            "original_event_date": r.original_event_date.isoformat(),
+            "original_event_date_formatted": timezone.localtime(r.original_event_date, timezone=kolkata_tz).strftime("%b %d, %Y at %I:%M %p"),
+            "new_event_date": r.new_event_date.isoformat(),
+            "new_event_date_formatted": timezone.localtime(r.new_event_date, timezone=kolkata_tz).strftime("%b %d, %Y at %I:%M %p"),
+            "reason": r.reason,
+            "status": r.status,
+            "requested_at": r.requested_at.isoformat(),
+        }
+        for r in requests_qs
+    ]
+
+    return JsonResponse(
+        {
+            "count": len(pending_list),
+            "pending_requests": pending_list,
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def artist_respond_reschedule_view(request, request_id):
+    """
+    Artist approves or declines a customer's rescheduling request.
+    On Approval:
+    - Atomically locks ArtistProfile, Booking, and ReschedulingRequest rows.
+    - Re-checks artist availability on the new date inside the transaction to prevent concurrent double-booking.
+    - Updates booking event_date atomically.
+    - Releases the original date automatically.
+    - Sets request status to APPROVED.
+    - Preserves payment amounts without pricing alterations.
+    - Dispatches notifications.
+    On Rejection:
+    - Sets request status to REJECTED with optional artist note.
+    - Leaves original booking date unchanged.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Performing artist profile required."}, status=403)
+
+    try:
+        data = json.loads(request.body)
+    except Exception:
+        data = request.POST
+
+    action = str(data.get("action", "")).strip().lower()
+    reason = str(data.get("reason", "")).strip()
+
+    if action not in ("approve", "reject"):
+        return JsonResponse({"error": "Invalid action. Choose 'approve' or 'reject'."}, status=400)
+
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+
+    with transaction.atomic():
+        # Lock in consistent order:
+        # 1. ArtistProfile
+        artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
+
+        # 2. ReschedulingRequest check
+        resched_req = (
+            ReschedulingRequest.objects.filter(id=request_id, artist=artist_locked)
+            .select_related("customer")
+            .first()
+        )
+        if not resched_req:
+            return JsonResponse({"error": "Rescheduling request not found or unauthorized."}, status=404)
+
+        # 3. Booking lock
+        booking_locked = Booking.objects.select_for_update().get(id=resched_req.booking_id)
+
+        # 4. ReschedulingRequest lock
+        req_locked = ReschedulingRequest.objects.select_for_update().get(id=request_id)
+
+        if req_locked.status != ReschedulingRequest.Status.PENDING:
+            return JsonResponse({"error": "This rescheduling request has already been processed."}, status=400)
+
+        if booking_locked.status in [Booking.Status.COMPLETED, Booking.Status.CANCELLED]:
+            return JsonResponse({"error": f"Cannot reschedule a booking that is {booking_locked.status}."}, status=400)
+
+        if action == "approve":
+            # Recheck availability for new date under lock
+            new_calendar_date = timezone.localtime(req_locked.new_event_date, timezone=kolkata_tz).date()
+            occupied, occ_reason, _ = is_artist_date_occupied(
+                artist_locked,
+                new_calendar_date,
+                exclude_booking_id=booking_locked.id,
+            )
+            if occupied:
+                return JsonResponse(
+                    {"error": f"Artist is no longer available on this date ({occ_reason})."},
+                    status=409,
+                )
+
+            # Update booking event_date atomically
+            old_dt = booking_locked.event_date
+            booking_locked.event_date = req_locked.new_event_date
+            booking_locked.save(update_fields=["event_date"])
+
+            # Update request
+            req_locked.status = ReschedulingRequest.Status.APPROVED
+            req_locked.responded_at = timezone.now()
+            req_locked.artist_response = reason or "Approved by artist"
+            req_locked.save(update_fields=["status", "responded_at", "artist_response"])
+
+            new_fmt = timezone.localtime(req_locked.new_event_date, timezone=kolkata_tz).strftime("%b %d, %Y at %I:%M %p")
+            old_fmt = timezone.localtime(old_dt, timezone=kolkata_tz).strftime("%b %d, %Y at %I:%M %p")
+
+            # Notifications
+            send_notification_once(
+                user=booking_locked.customer,
+                title="Rescheduling Request Approved!",
+                message=(
+                    f"{artist_locked.stage_name} approved your request to reschedule Booking #{booking_locked.id}. "
+                    f"New event date: {new_fmt}."
+                ),
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+            send_notification_once(
+                user=request.user,
+                title="Rescheduling Confirmed",
+                message=f"You approved rescheduling for Booking #{booking_locked.id} from {old_fmt} to {new_fmt}.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+            return JsonResponse(
+                {
+                    "message": "Rescheduling request approved successfully.",
+                    "request_id": req_locked.id,
+                    "booking_id": booking_locked.id,
+                    "new_event_date": booking_locked.event_date.isoformat(),
+                    "status": req_locked.status,
+                }
+            )
+
+        else:  # reject
+            req_locked.status = ReschedulingRequest.Status.REJECTED
+            req_locked.responded_at = timezone.now()
+            req_locked.artist_response = reason or "Declined by artist"
+            req_locked.save(update_fields=["status", "responded_at", "artist_response"])
+
+            send_notification_once(
+                user=booking_locked.customer,
+                title="Rescheduling Request Declined",
+                message=(
+                    f"{artist_locked.stage_name} was unable to reschedule Booking #{booking_locked.id}. "
+                    f"Reason: {req_locked.artist_response}. Your original booking date remains confirmed."
+                ),
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+            return JsonResponse(
+                {
+                    "message": "Rescheduling request declined.",
+                    "request_id": req_locked.id,
+                    "booking_id": booking_locked.id,
+                    "status": req_locked.status,
+                    "reason": req_locked.artist_response,
+                }
+            )
+
+
+@csrf_protect
+@require_POST
+def retry_booking_refund_view(request, booking_id):
+    """
+    Safely retries a failed refund for a cancelled booking using the existing idempotency key.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    booking = Booking.objects.filter(id=booking_id).select_related("customer", "artist", "artist__user").first()
+    if not booking:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    is_customer = booking.customer == request.user
+    is_artist = getattr(request.user, "artist_profile", None) == booking.artist
+
+    if not (is_customer or is_artist or request.user.is_staff):
+        return JsonResponse({"error": "Unauthorized to retry refund for this booking."}, status=403)
+
+    failed_refund = Refund.objects.filter(booking=booking, status=Refund.Status.FAILED).first()
+    if not failed_refund:
+        # Check if already processed
+        processed_refund = Refund.objects.filter(booking=booking, status=Refund.Status.PROCESSED).first()
+        if processed_refund:
+            return JsonResponse({
+                "message": "Refund is already processed.",
+                "status": "processed",
+                "refund_id": processed_refund.razorpay_refund_id,
+            })
+        return JsonResponse({"error": "No failed refund found to retry for this booking."}, status=400)
+
+    payment = failed_refund.payment
+    success, refund_obj, err_msg = initiate_payment_refund(
+        payment=payment,
+        amount=failed_refund.amount,
+        reason=failed_refund.reason or f"Retry refund for Booking #{booking.id}",
+        idempotency_key=failed_refund.idempotency_key,
+    )
+
+    if success:
+        return JsonResponse(
+            {
+                "message": "Refund retry succeeded.",
+                "status": refund_obj.status,
+                "refund_id": refund_obj.razorpay_refund_id,
+            }
+        )
+    return JsonResponse(
+        {
+            "error": "Refund retry failed.",
+            "details": err_msg,
+            "status": refund_obj.status if refund_obj else "failed",
+        },
+        status=502,
+    )
+
 
 
 @csrf_protect
@@ -2693,6 +3491,444 @@ def dispatch_payment_success_notifications(payment):
             )
 
 
+def dispatch_reservation_expired_notifications(booking, artist):
+    """
+    Sends one-time notifications to customer and artist when an unpaid reservation expires.
+    Guarantees idempotency by checking for existing notification records.
+    """
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    event_date_str = timezone.localtime(booking.event_date, timezone=kolkata_tz).strftime("%b %d, %Y")
+
+    already_sent = Notification.objects.filter(
+        user=booking.customer,
+        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        title="Reservation Expired",
+        message__icontains=f"Booking #{booking.id}",
+    ).exists()
+
+    if not already_sent:
+        Notification.objects.create(
+            user=booking.customer,
+            title="Reservation Expired",
+            message=(
+                f"Your reservation for {artist.stage_name} on {event_date_str} (Booking #{booking.id}) "
+                "has expired because payment was not completed within the 24-hour deadline. "
+                "The reservation has been released."
+            ),
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        )
+
+        artist_user = getattr(artist, "user", None)
+        if artist_user:
+            Notification.objects.create(
+                user=artist_user,
+                title="Date Released",
+                message=(
+                    f"The reservation for {booking.customer.get_full_name() or booking.customer.username} "
+                    f"on {event_date_str} (Booking #{booking.id}) expired without payment. "
+                    "This calendar date is now available for new bookings."
+                ),
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+
+def dispatch_refund_notifications(refund):
+    """
+    Dispatches one-time notifications to customer and artist when a refund is processed.
+    Idempotent: prevents duplicate notifications if webhook and synchronous calls run together.
+    """
+    booking = refund.booking
+    customer = booking.customer
+    artist = booking.artist
+    artist_user = getattr(artist, "user", None)
+
+    artist_name = getattr(artist, "stage_name", "") or "your artist"
+    customer_name = customer.get_full_name() or customer.username
+
+    # 1. Customer notification
+    customer_title = "Refund Processed"
+    customer_msg = (
+        f"A refund of ₹{refund.amount} for {artist_name} (Booking #{booking.id}) "
+        "has been processed successfully via Razorpay."
+    )
+    if not Notification.objects.filter(
+        user=customer,
+        notification_type=Notification.NotificationType.PAYMENT,
+        title=customer_title,
+        message__icontains=f"Booking #{booking.id}",
+    ).exists():
+        Notification.objects.create(
+            user=customer,
+            title=customer_title,
+            message=customer_msg,
+            notification_type=Notification.NotificationType.PAYMENT,
+        )
+
+    # 2. Artist notification
+    if artist_user:
+        artist_title = "Booking Refunded"
+        artist_msg = (
+            f"Payment for Booking #{booking.id} ({customer_name}) has been refunded to the customer."
+        )
+        if not Notification.objects.filter(
+            user=artist_user,
+            notification_type=Notification.NotificationType.PAYMENT,
+            title=artist_title,
+            message__icontains=f"Booking #{booking.id}",
+        ).exists():
+            Notification.objects.create(
+                user=artist_user,
+                title=artist_title,
+                message=artist_msg,
+                notification_type=Notification.NotificationType.PAYMENT,
+            )
+
+
+def initiate_payment_refund(payment, amount=None, reason="", idempotency_key=None, client=None):
+    """
+    Initiates an actual refund through Razorpay's refund API for a captured payment.
+    Idempotent: prevents duplicate refunds via unique idempotency_key and database row-level locking.
+    Updates or creates a Refund record and updates payment status when confirmed.
+    Returns:
+        (success: bool, refund: Refund, error_message: str or None)
+    """
+    if not payment.transaction_id:
+        logger.error("Cannot refund Payment #%s: missing transaction_id.", payment.id)
+        return False, None, "Payment has no transaction ID to refund."
+
+    refund_amount = amount or payment.amount
+    key = idempotency_key or f"rfnd_{payment.transaction_id}_{int(refund_amount * 100)}"
+
+    # 1. Row-level check/creation of Refund record under lock
+    with transaction.atomic():
+        existing_refund = (
+            Refund.objects.select_for_update()
+            .filter(idempotency_key=key)
+            .first()
+        )
+        if existing_refund:
+            if existing_refund.status == Refund.Status.PROCESSED:
+                logger.info("Refund with idempotency key %s already processed.", key)
+                return True, existing_refund, None
+            refund = existing_refund
+        else:
+            refund = Refund.objects.create(
+                payment=payment,
+                booking=payment.booking,
+                amount=refund_amount,
+                status=Refund.Status.PENDING,
+                reason=reason[:255],
+                idempotency_key=key,
+            )
+
+    # 2. Call Razorpay refund API
+    try:
+        if client is None:
+            client = razorpay.Client(
+                auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+            )
+
+        refund_payload = {
+            "amount": int(refund_amount * 100),
+            "notes": {
+                "booking_id": str(payment.booking_id),
+                "payment_id": str(payment.id),
+                "reason": reason[:100],
+            }
+        }
+
+        logger.info(
+            "Calling Razorpay refund API for payment %s (amount %s, key %s)",
+            payment.transaction_id, refund_amount, key
+        )
+        res = client.payment.refund(
+            payment.transaction_id,
+            refund_payload,
+            headers={"X-Refund-Idempotency": key},
+        )
+        logger.info("Razorpay refund API response: %s", res)
+
+        refund_id = res.get("id") if isinstance(res, dict) else getattr(res, "id", None)
+        rf_status = res.get("status", "processed") if isinstance(res, dict) else getattr(res, "status", "processed")
+
+        with transaction.atomic():
+            locked_refund = Refund.objects.select_for_update().get(id=refund.id)
+            if refund_id:
+                locked_refund.razorpay_refund_id = str(refund_id)
+
+            if rf_status == "processed":
+                locked_refund.status = Refund.Status.PROCESSED
+                locked_payment = Payment.objects.select_for_update().get(id=payment.id)
+                if locked_payment.status == Payment.Status.SUCCESS:
+                    locked_payment.status = Payment.Status.REFUNDED
+                    locked_payment.save(update_fields=["status", "updated_at"])
+                dispatch_refund_notifications(locked_refund)
+            else:
+                locked_refund.status = Refund.Status.PENDING
+
+            locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
+            return True, locked_refund, None
+
+    except RAZORPAY_API_ERRORS as ex:
+        err_msg = str(ex)
+        logger.exception("Razorpay API error while initiating refund for payment %s: %s", payment.transaction_id, err_msg)
+        # Check if gateway already processed this refund (e.g. timeout on previous attempt or duplicate)
+        try:
+            if hasattr(client, "payment") and hasattr(client.payment, "fetch_multiple_refund"):
+                rf_resp = client.payment.fetch_multiple_refund(payment.transaction_id)
+                if isinstance(rf_resp, dict) and isinstance(rf_resp.get("items"), list):
+                    for rf_item in rf_resp["items"]:
+                        if isinstance(rf_item, dict) and rf_item.get("amount") == int(refund_amount * 100):
+                            rf_id = rf_item.get("id")
+                            rf_st = rf_item.get("status", "processed")
+                            with transaction.atomic():
+                                locked_refund = Refund.objects.select_for_update().get(id=refund.id)
+                                if rf_id:
+                                    locked_refund.razorpay_refund_id = str(rf_id)
+                                if rf_st == "processed":
+                                    locked_refund.status = Refund.Status.PROCESSED
+                                    locked_payment = Payment.objects.select_for_update().get(id=payment.id)
+                                    if locked_payment.status == Payment.Status.SUCCESS:
+                                        locked_payment.status = Payment.Status.REFUNDED
+                                        locked_payment.save(update_fields=["status", "updated_at"])
+                                    dispatch_refund_notifications(locked_refund)
+                                else:
+                                    locked_refund.status = Refund.Status.PENDING
+                                locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
+                                return True, locked_refund, None
+        except Exception as check_ex:
+            logger.warning("Could not reconcile refunds with Razorpay for payment %s: %s", payment.transaction_id, check_ex)
+
+        with transaction.atomic():
+            locked_refund = Refund.objects.select_for_update().get(id=refund.id)
+            locked_refund.status = Refund.Status.FAILED
+            locked_refund.failure_reason = err_msg[:500]
+            locked_refund.save(update_fields=["status", "failure_reason", "updated_at"])
+        return False, locked_refund, err_msg
+    except Exception as ex:
+        err_msg = str(ex)
+        logger.exception("Unexpected error while initiating refund for payment %s: %s", payment.transaction_id, err_msg)
+        # Check if gateway already processed this refund despite local timeout
+        try:
+            if hasattr(client, "payment") and hasattr(client.payment, "fetch_multiple_refund"):
+                rf_resp = client.payment.fetch_multiple_refund(payment.transaction_id)
+                if isinstance(rf_resp, dict) and isinstance(rf_resp.get("items"), list):
+                    for rf_item in rf_resp["items"]:
+                        if isinstance(rf_item, dict) and rf_item.get("amount") == int(refund_amount * 100):
+                            rf_id = rf_item.get("id")
+                            rf_st = rf_item.get("status", "processed")
+                            with transaction.atomic():
+                                locked_refund = Refund.objects.select_for_update().get(id=refund.id)
+                                if rf_id:
+                                    locked_refund.razorpay_refund_id = str(rf_id)
+                                if rf_st == "processed":
+                                    locked_refund.status = Refund.Status.PROCESSED
+                                    locked_payment = Payment.objects.select_for_update().get(id=payment.id)
+                                    if locked_payment.status == Payment.Status.SUCCESS:
+                                        locked_payment.status = Payment.Status.REFUNDED
+                                        locked_payment.save(update_fields=["status", "updated_at"])
+                                    dispatch_refund_notifications(locked_refund)
+                                else:
+                                    locked_refund.status = Refund.Status.PENDING
+                                locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
+                                return True, locked_refund, None
+        except Exception as check_ex:
+            logger.warning("Could not reconcile refunds with Razorpay for payment %s: %s", payment.transaction_id, check_ex)
+
+        with transaction.atomic():
+            locked_refund = Refund.objects.select_for_update().get(id=refund.id)
+            locked_refund.status = Refund.Status.FAILED
+            locked_refund.failure_reason = err_msg[:500]
+            locked_refund.save(update_fields=["status", "failure_reason", "updated_at"])
+        return False, locked_refund, err_msg
+
+
+
+def reconcile_gateway_order_payment(payment, booking, client=None):
+    """
+    Queries Razorpay for any payments captured against payment.razorpay_order_id.
+    Validates gateway capture timestamp against booking.expires_at.
+    Returns:
+      True if payment was captured before or at deadline and successfully reconciled to SUCCESS.
+      False otherwise.
+    """
+    if not payment.razorpay_order_id:
+        return False
+
+    if client is None:
+        client = razorpay.Client(
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+        )
+
+    try:
+        order_payments = client.order.payments(payment.razorpay_order_id)
+    except RAZORPAY_API_ERRORS:
+        return False
+    except Exception:
+        return False
+
+    items = order_payments.get("items", [])
+    expected_amount = int(payment.amount * 100)
+
+    import datetime
+    for item in items:
+        if (
+            item.get("status") == "captured"
+            and item.get("amount") == expected_amount
+            and item.get("currency") == "INR"
+        ):
+            created_at_ts = item.get("created_at")
+            if not created_at_ts:
+                continue
+
+            gateway_dt = datetime.datetime.fromtimestamp(
+                int(created_at_ts), tz=datetime.timezone.utc
+            )
+
+            # Compare gateway capture time with booking deadline
+            if booking.expires_at and gateway_dt <= booking.expires_at:
+                payment_id = item.get("id")
+                total, commission, artist_amount = calculate_commission(booking.agreed_price)
+                payment.status = Payment.Status.SUCCESS
+                payment.transaction_id = payment_id
+                payment.amount = total
+                payment.commission_percentage = Decimal("8.00")
+                payment.commission_amount = commission
+                payment.artist_amount = artist_amount
+                payment.save(update_fields=[
+                    "status", "transaction_id", "amount",
+                    "commission_percentage", "commission_amount",
+                    "artist_amount", "updated_at",
+                ])
+                if booking.status != Booking.Status.ACCEPTED:
+                    booking.status = Booking.Status.ACCEPTED
+                    booking.save(update_fields=["status"])
+                dispatch_payment_success_notifications(payment)
+                return True
+            else:
+                logger.warning(
+                    "Order %s payment %s was captured at %s after deadline %s",
+                    payment.razorpay_order_id, item.get("id"), gateway_dt, booking.expires_at,
+                )
+
+    return False
+
+
+def check_and_expire_reservations(artist=None, booking=None):
+    """
+    Scans for accepted, unpaid bookings whose 24-hour reservation window has passed.
+    Reconciles with Razorpay before expiring to ensure delayed capture is honored.
+    Applies strict PostgreSQL lock order:
+      1. ArtistProfile (select_for_update)
+      2. Booking (select_for_update)
+      3. Payment (select_for_update)
+    Returns:
+      dict with counts: {'checked': int, 'expired': int, 'retained': int, 'failed_reconciliation': int}
+    """
+    now_ts = timezone.now()
+
+    if booking:
+        candidates = Booking.objects.filter(id=booking.id)
+    else:
+        candidates = Booking.objects.filter(
+            status=Booking.Status.ACCEPTED,
+            accepted_at__isnull=False,
+            accepted_at__lte=now_ts - datetime.timedelta(hours=24),
+        )
+        if artist:
+            candidates = candidates.filter(artist=artist)
+
+    booking_ids = list(candidates.values_list("id", flat=True))
+
+    results = {
+        "checked": len(booking_ids),
+        "expired": 0,
+        "retained": 0,
+        "failed_reconciliation": 0,
+    }
+
+    for b_id in booking_ids:
+        try:
+            with transaction.atomic():
+                b_info = (
+                    Booking.objects.filter(id=b_id)
+                    .values("artist_id", "status")
+                    .first()
+                )
+                if not b_info or b_info["status"] != Booking.Status.ACCEPTED:
+                    continue
+
+                # 1. Lock ArtistProfile first
+                artist_locked = ArtistProfile.objects.select_for_update().get(id=b_info["artist_id"])
+
+                # 2. Lock Booking second
+                booking_locked = (
+                    Booking.objects.select_for_update()
+                    .filter(id=b_id, status=Booking.Status.ACCEPTED)
+                    .select_related("customer")
+                    .first()
+                )
+                if not booking_locked:
+                    continue
+
+                # 3. Lock Payment third
+                payment_locked = (
+                    Payment.objects.select_for_update()
+                    .filter(booking=booking_locked)
+                    .first()
+                )
+
+                # Never expire a payment already verified as SUCCESS
+                if payment_locked and payment_locked.status == Payment.Status.SUCCESS:
+                    results["retained"] += 1
+                    continue
+
+                # Re-verify deadline under lock
+                lock_now = timezone.now()
+                if not booking_locked.accepted_at or (
+                    booking_locked.accepted_at + datetime.timedelta(hours=24) > lock_now
+                ):
+                    results["retained"] += 1
+                    continue
+
+                # Reconcile with Razorpay if order_id exists
+                reconciled = False
+                if payment_locked and payment_locked.razorpay_order_id:
+                    try:
+                        reconciled = reconcile_gateway_order_payment(payment_locked, booking_locked)
+                    except Exception as ex:
+                        logger.warning(
+                            "Failed to reconcile order %s for booking %s: %s",
+                            payment_locked.razorpay_order_id, b_id, ex
+                        )
+                        results["failed_reconciliation"] += 1
+
+                if reconciled:
+                    results["retained"] += 1
+                    continue
+
+                # Expire the unpaid booking
+                booking_locked.status = Booking.Status.EXPIRED
+                booking_locked.response_message = (
+                    "Reservation expired: payment was not completed within the 24-hour deadline."
+                )
+                booking_locked.save(update_fields=["status", "response_message"])
+
+                if payment_locked and payment_locked.status == Payment.Status.PENDING:
+                    payment_locked.status = Payment.Status.FAILED
+                    payment_locked.save(update_fields=["status", "updated_at"])
+
+                # Dispatch notifications (idempotent, sent once)
+                dispatch_reservation_expired_notifications(booking_locked, artist_locked)
+                results["expired"] += 1
+
+        except Exception as e:
+            logger.exception("Error processing expiry for booking %s: %s", b_id, e)
+
+    return results
+
+
 @csrf_protect
 @require_POST
 def create_razorpay_order_view(request, booking_id):
@@ -2716,6 +3952,23 @@ def create_razorpay_order_view(request, booking_id):
                 return JsonResponse(
                     {"error": "Booking not found."},
                     status=404
+                )
+
+            if booking.status == Booking.Status.EXPIRED:
+                return JsonResponse(
+                    {"error": "This booking reservation has expired. The date has been released."},
+                    status=409,
+                )
+
+            # Check if 24-hour payment deadline has passed
+            now_check = timezone.now()
+            if booking.expires_at and now_check > booking.expires_at:
+                check_and_expire_reservations(booking=booking)
+                return JsonResponse(
+                    {
+                        "error": "The 24-hour payment deadline for this booking has expired. The reservation has been released."
+                    },
+                    status=409,
                 )
 
             if booking.status != Booking.Status.ACCEPTED:
@@ -2983,6 +4236,12 @@ def verify_razorpay_payment_view(request):
             status=400,
         )
 
+    if payment.status == Payment.Status.REFUNDED:
+        return JsonResponse(
+            {"error": "This payment has already been refunded."},
+            status=400,
+        )
+
     if payment.status != Payment.Status.PENDING:
         return JsonResponse(
             {"error": "This payment cannot be verified."},
@@ -3090,6 +4349,66 @@ def verify_razorpay_payment_view(request):
                 status=400,
             )
 
+        # Check authoritative gateway timestamp against the 24-hour reservation deadline
+        gateway_created_at = razorpay_payment.get("created_at")
+        gateway_dt = None
+        if gateway_created_at:
+            gateway_dt = datetime.datetime.fromtimestamp(
+                int(gateway_created_at), tz=datetime.timezone.utc
+            )
+
+        booking = locked_payment.booking
+        if booking.expires_at and gateway_dt and gateway_dt > booking.expires_at:
+            logger.warning(
+                "Payment %s for booking %s was captured on gateway at %s, which is after deadline %s",
+                payment_id, booking.id, gateway_dt, booking.expires_at,
+            )
+            locked_payment.status = Payment.Status.FAILED
+            locked_payment.transaction_id = payment_id
+            locked_payment.save(update_fields=["status", "transaction_id", "updated_at"])
+            booking.status = Booking.Status.EXPIRED
+            booking.response_message = (
+                "Payment was captured after the 24-hour reservation deadline. The date has been released and payment will be refunded."
+            )
+            booking.save(update_fields=["status", "response_message"])
+            initiate_payment_refund(
+                locked_payment,
+                reason="Captured after 24-hour reservation deadline",
+                client=client,
+            )
+            return JsonResponse(
+                {
+                    "error": "Payment was captured after the 24-hour reservation deadline. The reservation has expired and payment will be refunded.",
+                    "expired": True,
+                },
+                status=409,
+            )
+
+        # If booking was marked expired while payment was in transit, but captured in time:
+        if booking.status == Booking.Status.EXPIRED:
+            from zoneinfo import ZoneInfo
+            kolkata_tz = ZoneInfo("Asia/Kolkata")
+            local_event_date = timezone.localtime(booking.event_date, timezone=kolkata_tz).date()
+            occupied, occ_reason, _ = is_artist_date_occupied(
+                booking.artist, local_event_date, exclude_booking_id=booking.id
+            )
+            if occupied:
+                logger.critical("Verify: Payment %s captured before deadline but date %s was reallocated.", payment_id, local_event_date)
+                locked_payment.status = Payment.Status.FAILED
+                locked_payment.transaction_id = payment_id
+                locked_payment.save(update_fields=["status", "transaction_id", "updated_at"])
+                initiate_payment_refund(
+                    locked_payment,
+                    reason="Date reallocated before payment verification",
+                    client=client,
+                )
+                return JsonResponse(
+                    {"error": "Payment was captured before deadline, but the reservation had expired and the date was rebooked. A refund will be issued."},
+                    status=409,
+                )
+            booking.status = Booking.Status.ACCEPTED
+            booking.save(update_fields=["status"])
+
         if locked_payment.status != Payment.Status.PENDING:
             return JsonResponse(
                 {"error": "This payment is no longer pending."},
@@ -3172,7 +4491,24 @@ def razorpay_webhook_view(request):
     event_type = event.get("event")
     payload = event.get("payload", {})
 
-    logger.info("Received Razorpay webhook event: %s", event_type)
+    # Extract event ID for deduplication
+    event_id = (
+        request.headers.get("X-Razorpay-Event-Id")
+        or request.META.get("HTTP_X_RAZORPAY_EVENT_ID")
+        or event.get("event_id")
+        or event.get("id")
+    )
+    if not event_id:
+        import hashlib
+        event_id = hashlib.sha256(request.body).hexdigest()[:64]
+
+    # Quick pre-check for duplicate event before acquiring DB locks
+    if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+        logger.info("Duplicate Razorpay webhook event %s (%s) ignored.", event_id, event_type)
+        dup_msg = "Payment already captured." if event_type == "payment.captured" else "Duplicate event already processed."
+        return JsonResponse({"status": "ignored", "message": dup_msg, "event_id": event_id})
+
+    logger.info("Received Razorpay webhook event: %s (ID: %s)", event_type, event_id)
 
     if event_type == "payment.captured":
         payment_entity = payload.get("payment", {}).get("entity", {})
@@ -3186,6 +4522,10 @@ def razorpay_webhook_view(request):
             return JsonResponse({"error": "Incomplete payment data in webhook."}, status=400)
 
         with transaction.atomic():
+            # Check duplicate again under transaction
+            if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+                return JsonResponse({"status": "ignored", "message": "Payment already captured.", "event_id": event_id})
+
             payment = (
                 Payment.objects.select_for_update()
                 .select_related("booking", "booking__artist", "booking__customer")
@@ -3197,9 +4537,10 @@ def razorpay_webhook_view(request):
                 logger.warning("Payment record not found for webhook order %s", order_id)
                 return JsonResponse({"error": "Payment order not found."}, status=404)
 
-            # Idempotent handling for duplicate webhook
+            # Idempotent handling for already successful payment
             if payment.status == Payment.Status.SUCCESS:
                 if payment.transaction_id == payment_id:
+                    ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
                     return JsonResponse({"message": "Payment already captured.", "status": "ok"})
                 logger.critical(
                     "Security Alert: Webhook received different payment ID %s for already-paid booking %s",
@@ -3207,6 +4548,12 @@ def razorpay_webhook_view(request):
                     payment.booking_id,
                 )
                 return JsonResponse({"error": "Different payment ID for already-paid booking."}, status=409)
+
+            # A refunded payment cannot return to SUCCESS
+            if payment.status == Payment.Status.REFUNDED:
+                logger.warning("Captured event received for already refunded payment #%s.", payment.id)
+                ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
+                return JsonResponse({"status": "ignored", "message": "Payment has already been refunded.", "payment_status": "refunded"})
 
             # Validate currency and amount
             expected_amount = int(payment.amount * 100)
@@ -3216,6 +4563,55 @@ def razorpay_webhook_view(request):
                     order_id, amount, expected_amount, currency, status
                 )
                 return JsonResponse({"error": "Payment parameters mismatch."}, status=400)
+
+            # Validate authoritative gateway capture timing against 24-hour deadline
+            gateway_created_at = payment_entity.get("created_at")
+            gateway_dt = None
+            if gateway_created_at:
+                gateway_dt = datetime.datetime.fromtimestamp(
+                    int(gateway_created_at), tz=datetime.timezone.utc
+                )
+
+            booking = payment.booking
+            if booking.expires_at and gateway_dt and gateway_dt > booking.expires_at:
+                logger.warning(
+                    "Webhook: Payment %s was captured at %s after deadline %s",
+                    payment_id, gateway_dt, booking.expires_at,
+                )
+                payment.status = Payment.Status.FAILED
+                payment.transaction_id = payment_id
+                payment.save(update_fields=["status", "transaction_id", "updated_at"])
+                if booking.status == Booking.Status.ACCEPTED:
+                    booking.status = Booking.Status.EXPIRED
+                    booking.response_message = (
+                        "Payment was captured after the 24-hour reservation deadline. The date has been released and payment will be refunded."
+                    )
+                    booking.save(update_fields=["status", "response_message"])
+
+                initiate_payment_refund(payment, reason="Captured after 24-hour reservation deadline", client=client)
+                ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
+                return JsonResponse({"error": "Payment captured after reservation deadline.", "status": "expired_rejected"}, status=409)
+
+            # If booking was marked expired before the delayed webhook arrived:
+            if booking.status == Booking.Status.EXPIRED:
+                from zoneinfo import ZoneInfo
+                kolkata_tz = ZoneInfo("Asia/Kolkata")
+                local_event_date = timezone.localtime(booking.event_date, timezone=kolkata_tz).date()
+                occupied, occ_reason, _ = is_artist_date_occupied(
+                    booking.artist, local_event_date, exclude_booking_id=booking.id
+                )
+                if occupied:
+                    logger.critical("Webhook: Payment %s captured before deadline but date %s was reallocated.", payment_id, local_event_date)
+                    payment.status = Payment.Status.FAILED
+                    payment.transaction_id = payment_id
+                    payment.save(update_fields=["status", "transaction_id", "updated_at"])
+                    initiate_payment_refund(payment, reason="Date was reallocated before webhook arrived", client=client)
+                    ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
+                    return JsonResponse({"error": "Date was reallocated before webhook arrived. Flagged for refund.", "status": "reallocated"}, status=409)
+
+                # Date is still available! Restore booking
+                booking.status = Booking.Status.ACCEPTED
+                booking.save(update_fields=["status"])
 
             total, commission, artist_amount = calculate_commission(payment.booking.agreed_price)
             payment.status = Payment.Status.SUCCESS
@@ -3231,6 +4627,7 @@ def razorpay_webhook_view(request):
             ])
 
             dispatch_payment_success_notifications(payment)
+            ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
 
         return JsonResponse({"status": "ok", "message": "Payment successfully reconciled."})
 
@@ -3239,31 +4636,97 @@ def razorpay_webhook_view(request):
         order_id = payment_entity.get("order_id")
         payment_id = payment_entity.get("id")
 
-        if order_id:
-            payment = Payment.objects.filter(razorpay_order_id=order_id).first()
-            if payment and payment.status == Payment.Status.PENDING:
-                logger.info("Payment %s failed for order %s", payment_id, order_id)
+        with transaction.atomic():
+            if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+                return JsonResponse({"status": "ignored", "message": "Duplicate event already processed.", "event_id": event_id})
+
+            if order_id:
+                payment = Payment.objects.select_for_update().filter(razorpay_order_id=order_id).first()
+                if payment:
+                    if payment.status in (Payment.Status.SUCCESS, Payment.Status.REFUNDED):
+                        logger.warning(
+                            "Ignoring payment.failed webhook for payment #%s because current status is %s",
+                            payment.id, payment.status
+                        )
+                    elif payment.status == Payment.Status.PENDING:
+                        # Log failure, retain PENDING so customer can retry checkout order
+                        logger.info("Payment %s failed for order %s (retaining PENDING for retry)", payment_id, order_id)
+
+            ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
 
         return JsonResponse({"status": "ok", "message": "Payment failure noted."})
 
     elif event_type in ("refund.processed", "payment.refunded"):
+        refund_entity = payload.get("refund", {}).get("entity", {})
         payment_entity = payload.get("payment", {}).get("entity", {})
+
+        refund_id = refund_entity.get("id")
+        payment_id = refund_entity.get("payment_id") or payment_entity.get("id")
         order_id = payment_entity.get("order_id")
-        payment_id = payment_entity.get("id")
 
-        payment = None
-        if order_id:
-            payment = Payment.objects.filter(razorpay_order_id=order_id).first()
-        elif payment_id:
-            payment = Payment.objects.filter(transaction_id=payment_id).first()
+        with transaction.atomic():
+            if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+                return JsonResponse({"status": "ignored", "message": "Duplicate refund event already processed.", "event_id": event_id})
 
-        if payment:
-            with transaction.atomic():
+            payment = None
+            if payment_id:
+                payment = Payment.objects.select_for_update().filter(transaction_id=payment_id).first()
+            if not payment and order_id:
+                payment = Payment.objects.select_for_update().filter(razorpay_order_id=order_id).first()
+
+            refund = None
+            if refund_id:
+                refund = Refund.objects.select_for_update().filter(razorpay_refund_id=refund_id).first()
+            if not refund and payment:
+                refund = Refund.objects.select_for_update().filter(payment=payment).first()
+
+            if refund:
+                refund.status = Refund.Status.PROCESSED
+                if refund_id:
+                    refund.razorpay_refund_id = refund_id
+                refund.save(update_fields=["status", "razorpay_refund_id", "updated_at"])
+            elif payment:
+                raw_amt = refund_entity.get("amount")
+                amt = Decimal(str(raw_amt / 100)) if raw_amt else payment.amount
+                refund = Refund.objects.create(
+                    payment=payment,
+                    booking=payment.booking,
+                    razorpay_refund_id=refund_id or f"rfnd_{payment_id}",
+                    amount=amt,
+                    status=Refund.Status.PROCESSED,
+                    reason="Refund processed via Razorpay webhook",
+                    idempotency_key=f"rfnd_{refund_id or payment_id}",
+                )
+
+            if payment:
                 payment.status = Payment.Status.REFUNDED
                 payment.save(update_fields=["status", "updated_at"])
-                logger.info("Payment %s refunded for order %s", payment_id, order_id)
+                if refund:
+                    dispatch_refund_notifications(refund)
+                logger.info("Payment %s status updated to REFUNDED", payment_id)
+
+            ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
 
         return JsonResponse({"status": "ok", "message": "Refund processed."})
+
+    elif event_type == "refund.failed":
+        refund_entity = payload.get("refund", {}).get("entity", {})
+        refund_id = refund_entity.get("id")
+
+        with transaction.atomic():
+            if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+                return JsonResponse({"status": "ignored", "message": "Duplicate refund failure event already processed.", "event_id": event_id})
+
+            if refund_id:
+                refund = Refund.objects.select_for_update().filter(razorpay_refund_id=refund_id).first()
+                if refund:
+                    refund.status = Refund.Status.FAILED
+                    refund.failure_reason = refund_entity.get("error_description") or "Refund failed at bank or gateway"
+                    refund.save(update_fields=["status", "failure_reason", "updated_at"])
+
+            ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
+
+        return JsonResponse({"status": "ok", "message": "Refund failure recorded."})
 
     # For other unhandled events, return 200 so Razorpay does not retry
     return JsonResponse({"status": "ignored", "event": event_type})

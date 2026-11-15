@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import BookingCalendarPicker from "../components/BookingCalendarPicker";
 import {
   fetchCustomerDashboard,
   updateCustomerProfile,
@@ -8,6 +9,10 @@ import {
   deactivateCustomerAccount,
   toggleFavoriteArtist,
   cancelCustomerBooking,
+  fetchCustomerCancelPreview,
+  requestCustomerReschedule,
+  fetchCustomerRescheduleHistory,
+  fetchPublicArtistAvailability,
   markNotificationsRead,
   submitSupportInquiry,
   fetchArtistCategories,
@@ -129,6 +134,30 @@ function CustomerDashboard({
 
   // Action status toast
   const [toastMsg, setToastMsg] = useState("");
+
+  // Phase 6: Cancellation Modal State
+  const [cancelModalBooking, setCancelModalBooking] = useState(null);
+  const [cancelPreviewData, setCancelPreviewData] = useState(null);
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+
+  // Phase 6: Rescheduling Modal State
+  const [rescheduleModalBooking, setRescheduleModalBooking] = useState(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("19:00");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [rescheduleUnavailableDates, setRescheduleUnavailableDates] = useState([]);
+  const [rescheduleLoadingAvail, setRescheduleLoadingAvail] = useState(false);
+  const [rescheduleSubmitting, setRescheduleSubmitting] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState("");
+
+  // Phase 6: Rescheduling History Modal State
+  const [historyModalBooking, setHistoryModalBooking] = useState(null);
+  const [rescheduleHistoryList, setRescheduleHistoryList] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   // Listen to browser back/forward history navigation & currentPath updates
   useEffect(() => {
@@ -428,25 +457,158 @@ function CustomerDashboard({
     }
   }
 
-  // Handle Booking Cancellation
-  async function handleCancelBooking(bookingId) {
-    if (
-      !window.confirm("Are you sure you want to cancel this booking request?")
-    ) {
-      return;
+  // =======================================================================
+  // Phase 6: Cancellation, Rescheduling & History Handlers
+  // =======================================================================
+
+  // Open cancellation modal and fetch backend policy preview if applicable
+  async function openCancelModal(booking) {
+    if (!booking) return;
+    setCancelModalBooking(booking);
+    setCancelReason("");
+    setCancelError("");
+
+    // If booking is accepted or has payment, get authoritative refund calculation
+    if (booking.status === "accepted" || booking.payment?.status === "success") {
+      setCancelPreviewLoading(true);
+      setCancelPreviewData(null);
+      try {
+        const preview = await fetchCustomerCancelPreview(booking.id);
+        setCancelPreviewData(preview);
+      } catch (err) {
+        console.warn("Could not fetch cancellation preview:", err);
+        setCancelPreviewData(null);
+      } finally {
+        setCancelPreviewLoading(false);
+      }
+    } else {
+      setCancelPreviewData(null);
+      setCancelPreviewLoading(false);
     }
+  }
+
+  // Confirm customer cancellation
+  async function handleConfirmCancellation() {
+    if (!cancelModalBooking) return;
+    setCancelSubmitting(true);
+    setCancelError("");
 
     try {
-      const res = await cancelCustomerBooking(bookingId);
-      showToast(res.message || "Booking cancelled.");
-      if (selectedBooking && selectedBooking.id === bookingId) {
+      const res = await cancelCustomerBooking(cancelModalBooking.id, cancelReason);
+      const refundAmt = Number(res.refund_amount);
+      if (refundAmt > 0) {
+        showToast(`Booking cancelled. Refund of ₹${res.refund_amount} initiated.`);
+      } else {
+        showToast(res.message || "Booking cancelled.");
+      }
+
+      if (selectedBooking && selectedBooking.id === cancelModalBooking.id) {
         setSelectedBooking((prev) =>
           prev ? { ...prev, status: "cancelled" } : null,
         );
       }
+
+      setCancelModalBooking(null);
       refreshDashboard();
     } catch (err) {
-      showToast(err.message || "Unable to cancel booking.");
+      setCancelError(err.message || "Unable to cancel booking.");
+    } finally {
+      setCancelSubmitting(false);
+    }
+  }
+
+  // Open rescheduling modal
+  async function openRescheduleModal(booking) {
+    if (!booking) return;
+    setRescheduleModalBooking(booking);
+    setRescheduleReason("");
+    setRescheduleError("");
+
+    // Choose default new date (7 days from today)
+    const defDate = new Date();
+    defDate.setDate(defDate.getDate() + 7);
+    const yyyy = defDate.getFullYear();
+    const mm = String(defDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(defDate.getDate()).padStart(2, "0");
+    const initDateStr = `${yyyy}-${mm}-${dd}`;
+    setRescheduleDate(initDateStr);
+    setRescheduleTime("19:00");
+
+    const artistId = booking.artist_id || booking.artist?.id;
+    if (artistId) {
+      loadRescheduleAvailability(artistId, `${yyyy}-${mm}`);
+    }
+  }
+
+  // Load artist availability for month
+  async function loadRescheduleAvailability(artistId, monthStr) {
+    if (!artistId || !monthStr) return;
+    setRescheduleLoadingAvail(true);
+    try {
+      const avail = await fetchPublicArtistAvailability(artistId, monthStr);
+      setRescheduleUnavailableDates(avail.unavailable_dates || []);
+    } catch (err) {
+      console.warn("Failed to fetch artist availability:", err);
+      setRescheduleUnavailableDates([]);
+    } finally {
+      setRescheduleLoadingAvail(false);
+    }
+  }
+
+  // Submit rescheduling request
+  async function handleConfirmReschedule() {
+    if (!rescheduleModalBooking) return;
+    if (!rescheduleDate) {
+      setRescheduleError("Please select a new event date.");
+      return;
+    }
+
+    const proposedDateTime = new Date(`${rescheduleDate}T${rescheduleTime || "00:00"}`);
+    if (isNaN(proposedDateTime.getTime()) || proposedDateTime <= new Date()) {
+      setRescheduleError("New event date and time must be in the future.");
+      return;
+    }
+
+    if (rescheduleUnavailableDates.includes(rescheduleDate)) {
+      setRescheduleError("The artist is unavailable on this date. Please select another date.");
+      return;
+    }
+
+    setRescheduleSubmitting(true);
+    setRescheduleError("");
+
+    try {
+      const formattedDate = `${rescheduleDate} ${rescheduleTime}:00`;
+      await requestCustomerReschedule(rescheduleModalBooking.id, {
+        new_event_date: formattedDate,
+        reason: rescheduleReason,
+      });
+
+      showToast("Rescheduling request submitted. Awaiting artist approval.");
+      setRescheduleModalBooking(null);
+      refreshDashboard();
+    } catch (err) {
+      setRescheduleError(err.message || "Failed to submit rescheduling request.");
+    } finally {
+      setRescheduleSubmitting(false);
+    }
+  }
+
+  // Open rescheduling audit history modal
+  async function openHistoryModal(booking) {
+    if (!booking) return;
+    setHistoryModalBooking(booking);
+    setHistoryLoading(true);
+    setHistoryError("");
+    setRescheduleHistoryList([]);
+
+    try {
+      const res = await fetchCustomerRescheduleHistory(booking.id);
+      setRescheduleHistoryList(res.history || []);
+    } catch (err) {
+      setHistoryError(err.message || "Failed to load rescheduling history.");
+    } finally {
+      setHistoryLoading(false);
     }
   }
 
@@ -1547,7 +1709,64 @@ function CustomerDashboard({
                                   </button>
                                 )}
 
+                              {/* Reschedule Button for Accepted Bookings */}
+                              {b.status === "accepted" && (
+                                <button
+                                  type="button"
+                                  className="cd-btn-secondary cd-btn-sm"
+                                  style={{ padding: "5px 10px", fontSize: "0.8rem" }}
+                                  onClick={() => openRescheduleModal(b)}
+                                  title="Request Rescheduling"
+                                >
+                                  Reschedule
+                                </button>
+                              )}
+
+                              {/* Rescheduling History Icon */}
+                              <button
+                                type="button"
+                                className="cd-action-icon-btn"
+                                title="Rescheduling History"
+                                onClick={() => openHistoryModal(b)}
+                              >
+                                <svg
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <polyline points="12 6 12 12 16 14" />
+                                </svg>
+                              </button>
+
                               {/* Receipt Icon */}
+                              {/* Rescheduling History Icon */}
+                              <button
+                                type="button"
+                                className="cd-action-icon-btn"
+                                title="Rescheduling History"
+                                onClick={() => openHistoryModal(b)}
+                              >
+                                <svg
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <polyline points="12 6 12 12 16 14" />
+                                </svg>
+                              </button>
+
                               <button
                                 type="button"
                                 className="cd-action-icon-btn"
@@ -1572,13 +1791,13 @@ function CustomerDashboard({
                                 </svg>
                               </button>
 
-                              {/* Cancel Icon */}
-                              {b.status === "pending" && (
+                              {/* Cancel Icon for Eligible Bookings */}
+                              {(b.status === "pending" || b.status === "accepted") && (
                                 <button
                                   type="button"
                                   className="cd-action-icon-btn danger"
-                                  title="Cancel Booking Request"
-                                  onClick={() => handleCancelBooking(b.id)}
+                                  title="Cancel Booking"
+                                  onClick={() => openCancelModal(b)}
                                 >
                                   <svg
                                     width="17"
@@ -1647,6 +1866,28 @@ function CustomerDashboard({
                                 }}
                               >
                                 View Details
+                              </button>
+
+                              {/* Rescheduling History Icon */}
+                              <button
+                                type="button"
+                                className="cd-action-icon-btn"
+                                title="Rescheduling History"
+                                onClick={() => openHistoryModal(b)}
+                              >
+                                <svg
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <circle cx="12" cy="12" r="10" />
+                                  <polyline points="12 6 12 12 16 14" />
+                                </svg>
                               </button>
 
                               <button
@@ -1861,15 +2102,34 @@ function CustomerDashboard({
                         <span>Download Receipt</span>
                       </button>
 
-                      {b.status === "pending" && (
+                      {b.status === "accepted" && (
+                        <button
+                          type="button"
+                          className="cd-btn-secondary"
+                          onClick={() => openRescheduleModal(b)}
+                        >
+                          Request Rescheduling
+                        </button>
+                      )}
+
+                      {(b.status === "pending" || b.status === "accepted") && (
                         <button
                           type="button"
                           className="cd-btn-secondary cd-btn-cancel-booking"
-                          onClick={() => handleCancelBooking(b.id)}
+                          style={{ borderColor: "#EF5350", color: "#EF5350" }}
+                          onClick={() => openCancelModal(b)}
                         >
-                          Cancel
+                          Cancel Booking
                         </button>
                       )}
+
+                      <button
+                        type="button"
+                        className="cd-btn-outline"
+                        onClick={() => openHistoryModal(b)}
+                      >
+                        Rescheduling History
+                      </button>
                     </div>
                   </div>
                 );
@@ -2971,6 +3231,555 @@ function CustomerDashboard({
                 onClick={handleDeactivateAccount}
               >
                 {deactivating ? "Deactivating..." : "Confirm Deactivation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PHASE 6: CANCELLATION MODAL (WITH AUTHORITATIVE BACKEND POLICY BREAKDOWN)
+          ========================================================================= */}
+      {cancelModalBooking && (
+        <div
+          className="cd-modal-backdrop"
+          onClick={() => !cancelSubmitting && setCancelModalBooking(null)}
+        >
+          <div
+            className="cd-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "560px" }}
+          >
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title" style={{ color: "#EF5350" }}>
+                Cancel Booking #BK-{cancelModalBooking.id}
+              </h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() => !cancelSubmitting && setCancelModalBooking(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cd-modal-body">
+              <div
+                style={{
+                  marginBottom: "16px",
+                  color: "#D4D4D4",
+                  fontSize: "0.92rem",
+                  lineHeight: "1.6",
+                }}
+              >
+                <div>
+                  <strong>Artist:</strong> {cancelModalBooking.artist_name}
+                </div>
+                <div>
+                  <strong>Event Type:</strong> {cancelModalBooking.event_type}
+                </div>
+                <div>
+                  <strong>Scheduled Date:</strong>{" "}
+                  {cancelModalBooking.event_date}
+                </div>
+              </div>
+
+              {cancelPreviewLoading ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "24px",
+                    color: "#A0A0A0",
+                  }}
+                >
+                  Calculating authoritative cancellation refund preview...
+                </div>
+              ) : cancelPreviewData ? (
+                <div className="cd-policy-preview-card">
+                  <div className="cd-policy-header">
+                    <span
+                      style={{
+                        fontSize: "0.88rem",
+                        fontWeight: 700,
+                        color: "#FFFFFF",
+                      }}
+                    >
+                      Cancellation Refund Policy
+                    </span>
+                    <span
+                      className={`cd-policy-badge ${
+                        cancelPreviewData.refund_percentage === "100.00"
+                          ? "success"
+                          : cancelPreviewData.refund_percentage === "50.00"
+                          ? "warning"
+                          : "danger"
+                      }`}
+                    >
+                      {cancelPreviewData.refund_percentage}% Refund
+                    </span>
+                  </div>
+
+                  <div className="cd-policy-breakdown">
+                    <div className="cd-policy-row">
+                      <span>Policy Rule Applied:</span>
+                      <strong>{cancelPreviewData.policy_applied}</strong>
+                    </div>
+                    <div className="cd-policy-row">
+                      <span>Days Until Event:</span>
+                      <strong>
+                        {cancelPreviewData.days_until_event !== null
+                          ? `${cancelPreviewData.days_until_event} days`
+                          : "N/A"}
+                      </strong>
+                    </div>
+                    <div className="cd-policy-row">
+                      <span>Total Paid Amount:</span>
+                      <strong>₹{cancelPreviewData.paid_amount}</strong>
+                    </div>
+                    <div
+                      className="cd-policy-row"
+                      style={{
+                        paddingTop: "8px",
+                        borderTop: "1px solid #282828",
+                      }}
+                    >
+                      <span>Estimated Refund to Customer:</span>
+                      <span className="cd-policy-highlight">
+                        ₹{cancelPreviewData.refund_amount}
+                      </span>
+                    </div>
+
+                    {Number(cancelPreviewData.retained_amount) > 0 && (
+                      <>
+                        <div className="cd-policy-row">
+                          <span>Retained Amount:</span>
+                          <strong style={{ color: "#EF5350" }}>
+                            ₹{cancelPreviewData.retained_amount}
+                          </strong>
+                        </div>
+                        <div
+                          className="cd-policy-row"
+                          style={{
+                            fontSize: "0.82rem",
+                            color: "#888888",
+                            paddingLeft: "12px",
+                          }}
+                        >
+                          <span>• Platform Retained Fee:</span>
+                          <span>₹{cancelPreviewData.platform_fee}</span>
+                        </div>
+                        <div
+                          className="cd-policy-row"
+                          style={{
+                            fontSize: "0.82rem",
+                            color: "#888888",
+                            paddingLeft: "12px",
+                          }}
+                        >
+                          <span>• Artist Retained Share:</span>
+                          <span>₹{cancelPreviewData.artist_payout}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="cd-policy-info-box">
+                  <strong>Unpaid / Pending Reservation:</strong> No payment has
+                  been captured for this booking. Cancelling will release the
+                  reservation immediately with no charges.
+                </div>
+              )}
+
+              {cancelError && (
+                <div
+                  className="cd-alert cd-alert-error"
+                  style={{ marginBottom: "16px" }}
+                >
+                  {cancelError}
+                </div>
+              )}
+
+              <div style={{ marginBottom: "16px" }}>
+                <label
+                  className="cd-label"
+                  htmlFor="cancel_reason"
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    fontSize: "0.88rem",
+                  }}
+                >
+                  Reason for Cancellation (Optional)
+                </label>
+                <textarea
+                  id="cancel_reason"
+                  className="cd-form-textarea"
+                  placeholder="Let the artist know why you need to cancel this event..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  disabled={cancelSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="cd-modal-actions">
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() => setCancelModalBooking(null)}
+                disabled={cancelSubmitting}
+              >
+                Keep Booking
+              </button>
+              <button
+                type="button"
+                className="cd-btn-danger"
+                onClick={handleConfirmCancellation}
+                disabled={cancelSubmitting}
+              >
+                {cancelSubmitting ? "Cancelling..." : "Confirm Cancellation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PHASE 6: RESCHEDULING MODAL (WITH ARTIST AVAILABILITY INTEGRATION)
+          ========================================================================= */}
+      {rescheduleModalBooking && (
+        <div
+          className="cd-modal-backdrop"
+          onClick={() => !rescheduleSubmitting && setRescheduleModalBooking(null)}
+        >
+          <div
+            className="cd-modal-card cd-modal-card-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title">
+                Request Rescheduling for #BK-{rescheduleModalBooking.id}
+              </h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() => !rescheduleSubmitting && setRescheduleModalBooking(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cd-modal-body">
+              <div
+                style={{
+                  marginBottom: "14px",
+                  color: "#D4D4D4",
+                  fontSize: "0.92rem",
+                  lineHeight: "1.6",
+                }}
+              >
+                <div>
+                  <strong>Artist:</strong> {rescheduleModalBooking.artist_name}
+                </div>
+                <div>
+                  <strong>Currently Scheduled:</strong>{" "}
+                  {rescheduleModalBooking.event_date}
+                </div>
+              </div>
+
+              <p
+                style={{
+                  fontSize: "0.9rem",
+                  color: "#A0A0A0",
+                  marginBottom: "16px",
+                }}
+              >
+                Select your proposed new date and start time. Dates marked
+                unavailable in the calendar are blocked or booked and cannot be
+                selected.
+              </p>
+
+              {rescheduleLoadingAvail && (
+                <div
+                  style={{
+                    fontSize: "0.85rem",
+                    color: "#FF9800",
+                    marginBottom: "10px",
+                  }}
+                >
+                  Checking artist availability for selected month...
+                </div>
+              )}
+
+              <div style={{ marginBottom: "20px" }}>
+                <BookingCalendarPicker
+                  selectedDate={rescheduleDate}
+                  selectedTime={rescheduleTime}
+                  unavailableDates={rescheduleUnavailableDates}
+                  onMonthChange={(monthStr) => {
+                    const artistId =
+                      rescheduleModalBooking.artist_id ||
+                      rescheduleModalBooking.artist?.id;
+                    loadRescheduleAvailability(artistId, monthStr);
+                  }}
+                  onDateChange={(newDate) => {
+                    setRescheduleDate(newDate);
+                    setRescheduleError("");
+                  }}
+                  onTimeChange={(newTime) => {
+                    setRescheduleTime(newTime);
+                    setRescheduleError("");
+                  }}
+                />
+              </div>
+
+              {rescheduleError && (
+                <div
+                  className="cd-alert cd-alert-error"
+                  style={{ marginBottom: "16px" }}
+                >
+                  {rescheduleError}
+                </div>
+              )}
+
+              <div style={{ marginBottom: "16px" }}>
+                <label
+                  className="cd-label"
+                  htmlFor="reschedule_reason"
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    fontSize: "0.88rem",
+                  }}
+                >
+                  Reason for Rescheduling
+                </label>
+                <textarea
+                  id="reschedule_reason"
+                  className="cd-form-textarea"
+                  placeholder="Explain why you wish to reschedule (e.g., event hall schedule changed)..."
+                  value={rescheduleReason}
+                  onChange={(e) => setRescheduleReason(e.target.value)}
+                  disabled={rescheduleSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="cd-modal-actions">
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() => setRescheduleModalBooking(null)}
+                disabled={rescheduleSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="cd-btn-primary"
+                onClick={handleConfirmReschedule}
+                disabled={rescheduleSubmitting || !rescheduleDate}
+              >
+                {rescheduleSubmitting
+                  ? "Submitting..."
+                  : "Submit Reschedule Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PHASE 6: RESCHEDULING AUDIT HISTORY MODAL
+          ========================================================================= */}
+      {historyModalBooking && (
+        <div
+          className="cd-modal-backdrop"
+          onClick={() => setHistoryModalBooking(null)}
+        >
+          <div
+            className="cd-modal-card"
+            style={{ maxWidth: "620px" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title">
+                Rescheduling History (#BK-{historyModalBooking.id})
+              </h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() => setHistoryModalBooking(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cd-modal-body">
+              {historyLoading ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "28px",
+                    color: "#A0A0A0",
+                  }}
+                >
+                  Loading rescheduling audit history...
+                </div>
+              ) : historyError ? (
+                <div className="cd-alert cd-alert-error">{historyError}</div>
+              ) : rescheduleHistoryList.length === 0 ? (
+                <div className="cd-empty-card" style={{ padding: "28px 16px" }}>
+                  <h4 style={{ color: "#FFFFFF", margin: "0 0 8px 0" }}>
+                    No Rescheduling Requests
+                  </h4>
+                  <p
+                    style={{
+                      color: "#888888",
+                      margin: 0,
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    There are no previous or pending rescheduling requests
+                    recorded for this booking.
+                  </p>
+                </div>
+              ) : (
+                <div className="cd-history-list">
+                  {rescheduleHistoryList.map((req) => (
+                    <div key={req.id} className="cd-history-item">
+                      <div className="cd-history-item-header">
+                        <span className={`cd-history-badge ${req.status}`}>
+                          {req.status}
+                        </span>
+                        <span className="cd-history-meta">
+                          {new Date(req.requested_at).toLocaleDateString(
+                            "en-US",
+                            {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                              hour: "numeric",
+                              minute: "2-digit",
+                            },
+                          )}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: "10px",
+                          fontSize: "0.88rem",
+                        }}
+                      >
+                        <div>
+                          <span
+                            style={{
+                              color: "#888888",
+                              display: "block",
+                              fontSize: "0.76rem",
+                            }}
+                          >
+                            ORIGINAL DATE
+                          </span>
+                          <strong style={{ color: "#D4D4D4" }}>
+                            {new Date(req.original_event_date).toLocaleString(
+                              "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </strong>
+                        </div>
+                        <div>
+                          <span
+                            style={{
+                              color: "#888888",
+                              display: "block",
+                              fontSize: "0.76rem",
+                            }}
+                          >
+                            REQUESTED DATE
+                          </span>
+                          <strong style={{ color: "#FF5722" }}>
+                            {new Date(req.new_event_date).toLocaleString(
+                              "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              },
+                            )}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {req.reason && (
+                        <div className="cd-history-quote">
+                          <strong>Your Reason:</strong> "{req.reason}"
+                        </div>
+                      )}
+
+                      {req.artist_response && (
+                        <div
+                          className="cd-history-quote"
+                          style={{
+                            borderLeftColor:
+                              req.status === "approved"
+                                ? "#4CAF50"
+                                : "#EF5350",
+                          }}
+                        >
+                          <strong>Artist Response:</strong> "
+                          {req.artist_response}"
+                          {req.responded_at && (
+                            <span
+                              style={{
+                                display: "block",
+                                fontSize: "0.75rem",
+                                color: "#888888",
+                                marginTop: "4px",
+                              }}
+                            >
+                              Responded on{" "}
+                              {new Date(req.responded_at).toLocaleDateString(
+                                "en-US",
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "numeric",
+                                  minute: "2-digit",
+                                },
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="cd-modal-actions">
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() => setHistoryModalBooking(null)}
+              >
+                Close
               </button>
             </div>
           </div>

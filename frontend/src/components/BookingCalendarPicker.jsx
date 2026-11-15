@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 // Time slot configuration matching the requested design
 const TIME_SLOT_SECTIONS = [
@@ -66,6 +66,8 @@ export default function BookingCalendarPicker({
   selectedTime = '19:00',
   onDateChange,
   onTimeChange,
+  unavailableDates = null,
+  onMonthChange,
 }) {
   // Parse initial selected date for calendar navigation
   const initialDateObj = (() => {
@@ -84,6 +86,14 @@ export default function BookingCalendarPicker({
 
   const viewYear = viewDate.getFullYear();
   const viewMonth = viewDate.getMonth();
+
+  // Notify parent on month change or viewDate change
+  useEffect(() => {
+    if (onMonthChange) {
+      const monthStr = `${viewYear}-${pad2(viewMonth + 1)}`;
+      onMonthChange(monthStr);
+    }
+  }, [viewYear, viewMonth, onMonthChange]);
 
   // Today reference
   const today = new Date();
@@ -116,18 +126,24 @@ export default function BookingCalendarPicker({
   function handlePrevMonth(e) {
     e.preventDefault();
     if (!canGoPrev) return;
-    setViewDate(new Date(viewYear, viewMonth - 1, 1));
+    const nextDate = new Date(viewYear, viewMonth - 1, 1);
+    setViewDate(nextDate);
   }
 
   function handleNextMonth(e) {
     e.preventDefault();
-    setViewDate(new Date(viewYear, viewMonth + 1, 1));
+    const nextDate = new Date(viewYear, viewMonth + 1, 1);
+    setViewDate(nextDate);
   }
 
-  // Unavailable dates rule (e.g. Saturdays 14, 21, 28 in Nov 2026 per screenshot)
+  // Unavailable dates rule
   function isDateUnavailable(year, month, day) {
+    const formatted = toDateString(year, month, day);
+    if (Array.isArray(unavailableDates)) {
+      return unavailableDates.includes(formatted);
+    }
+    // Fallback if unavailableDates not passed
     if (year === 2026 && month === 10) {
-      // November is 0-indexed month 10
       if (day === 14 || day === 21 || day === 28) {
         return true;
       }

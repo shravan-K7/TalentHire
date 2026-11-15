@@ -11,6 +11,10 @@ import {
   deleteArtistAvailability,
   updateArtistProfileData,
   markNotificationsRead,
+  fetchArtistCancelPreview,
+  cancelArtistBooking,
+  fetchArtistPendingReschedulingRequests,
+  respondArtistReschedulingRequest,
 } from "../js/auth";
 import "../css/CustomerDashboard.css";
 
@@ -131,6 +135,23 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   // Toast feedback
   const [toastMsg, setToastMsg] = useState("");
 
+  // Phase 6: Pending Rescheduling Requests
+  const [pendingRescheduleRequests, setPendingRescheduleRequests] = useState([]);
+  const [rescheduleActionLoadingId, setRescheduleActionLoadingId] = useState(null);
+  const [rejectNoteModal, setRejectNoteModal] = useState({
+    open: false,
+    request: null,
+    reason: "",
+  });
+
+  // Phase 6: Artist Cancellation Modal State
+  const [artistCancelModalBooking, setArtistCancelModalBooking] = useState(null);
+  const [artistCancelPreview, setArtistCancelPreview] = useState(null);
+  const [artistCancelPreviewLoading, setArtistCancelPreviewLoading] = useState(false);
+  const [artistCancelReason, setArtistCancelReason] = useState("");
+  const [artistCancelSubmitting, setArtistCancelSubmitting] = useState(false);
+  const [artistCancelError, setArtistCancelError] = useState("");
+
   // Sync tab with browser URL history
   useEffect(() => {
     function handlePop() {
@@ -166,6 +187,15 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     }, 3500);
   }
 
+  const loadPendingRescheduling = useCallback(async () => {
+    try {
+      const res = await fetchArtistPendingReschedulingRequests();
+      setPendingRescheduleRequests(res.pending_requests || []);
+    } catch (err) {
+      console.warn("Could not load pending rescheduling requests:", err);
+    }
+  }, []);
+
   const loadDashboard = useCallback(async () => {
     try {
       const res = await fetchArtistDashboard();
@@ -189,12 +219,13 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       });
       setProfileImagePreview(artist.profile_image || "");
       setError("");
+      loadPendingRescheduling();
     } catch (err) {
       setError(err.message || "Unable to load artist dashboard data.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadPendingRescheduling]);
 
   useEffect(() => {
     let ignore = false;
@@ -223,6 +254,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           });
           setProfileImagePreview(artist.profile_image || "");
           setLoading(false);
+          loadPendingRescheduling();
         }
       } catch (err) {
         if (!ignore) {
@@ -237,7 +269,101 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [loadPendingRescheduling]);
+
+  // Phase 6: Approve Rescheduling Request
+  async function handleApproveReschedule(reqItem) {
+    setRescheduleActionLoadingId(reqItem.request_id);
+    try {
+      const res = await respondArtistReschedulingRequest(reqItem.request_id, {
+        action: "approve",
+      });
+      showToast(res.message || "Rescheduling approved. Event date has been updated.");
+      await loadDashboard();
+      await loadPendingRescheduling();
+    } catch (err) {
+      showToast(err.message || "Failed to approve rescheduling request.");
+    } finally {
+      setRescheduleActionLoadingId(null);
+    }
+  }
+
+  // Phase 6: Confirm Decline Rescheduling Request
+  async function handleConfirmRejectReschedule() {
+    if (!rejectNoteModal.request) return;
+    setRescheduleActionLoadingId(rejectNoteModal.request.request_id);
+    try {
+      const res = await respondArtistReschedulingRequest(
+        rejectNoteModal.request.request_id,
+        {
+          action: "reject",
+          reason: rejectNoteModal.reason,
+        }
+      );
+      showToast(res.message || "Rescheduling request declined.");
+      setRejectNoteModal({ open: false, request: null, reason: "" });
+      await loadDashboard();
+      await loadPendingRescheduling();
+    } catch (err) {
+      showToast(err.message || "Failed to decline rescheduling request.");
+    } finally {
+      setRescheduleActionLoadingId(null);
+    }
+  }
+
+  // Phase 6: Open Artist Cancellation Modal
+  async function openArtistCancelModal(booking) {
+    if (!booking) return;
+    setArtistCancelModalBooking(booking);
+    setArtistCancelReason("");
+    setArtistCancelError("");
+    setArtistCancelPreviewLoading(true);
+    setArtistCancelPreview(null);
+
+    try {
+      const preview = await fetchArtistCancelPreview(booking.id);
+      setArtistCancelPreview(preview);
+    } catch (err) {
+      console.warn("Could not fetch artist cancellation preview:", err);
+      setArtistCancelError(err.message || "Unable to load cancellation details.");
+    } finally {
+      setArtistCancelPreviewLoading(false);
+    }
+  }
+
+  // Phase 6: Confirm Artist Cancellation
+  async function handleConfirmArtistCancel() {
+    if (!artistCancelModalBooking) return;
+    setArtistCancelSubmitting(true);
+    setArtistCancelError("");
+
+    try {
+      const res = await cancelArtistBooking(
+        artistCancelModalBooking.id,
+        artistCancelReason
+      );
+      const refundAmt = Number(res.refund_amount);
+      if (refundAmt > 0) {
+        showToast(
+          `Booking cancelled. Full refund of ₹${res.refund_amount} initiated to customer.`
+        );
+      } else {
+        showToast(res.message || "Booking cancelled.");
+      }
+
+      if (selectedBooking && selectedBooking.id === artistCancelModalBooking.id) {
+        setSelectedBooking((prev) => (prev ? { ...prev, status: "cancelled" } : null));
+      }
+
+      setArtistCancelModalBooking(null);
+      await loadDashboard();
+      await loadPendingRescheduling();
+    } catch (err) {
+      setArtistCancelError(err.message || "Unable to cancel booking.");
+    } finally {
+      setArtistCancelSubmitting(false);
+    }
+  }
 
   // Handle Booking Response (Accept / Reject)
   async function handleConfirmBookingResponse() {
@@ -2308,6 +2434,13 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 </button>
                 <button
                   type="button"
+                  className={`cd-btn-${requestFilter === "reschedule" ? "primary" : "secondary"} cd-btn-sm`}
+                  onClick={() => setRequestFilter("reschedule")}
+                >
+                  Reschedule Requests ({pendingRescheduleRequests.length})
+                </button>
+                <button
+                  type="button"
                   className={`cd-btn-${requestFilter === "accepted" ? "primary" : "secondary"} cd-btn-sm`}
                   onClick={() => setRequestFilter("accepted")}
                 >
@@ -2322,12 +2455,188 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 </button>
               </div>
 
-              {filteredBookings.length === 0 ? (
+              {/* Phase 6: Pending Rescheduling Requests Section */}
+              {pendingRescheduleRequests.length > 0 &&
+                (requestFilter === "all" ||
+                  requestFilter === "pending" ||
+                  requestFilter === "reschedule") && (
+                  <div className="cd-reschedule-banner">
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      <h3
+                        style={{
+                          margin: 0,
+                          fontSize: "1.05rem",
+                          fontWeight: 700,
+                          color: "#FFA726",
+                        }}
+                      >
+                        Pending Rescheduling Requests (
+                        {pendingRescheduleRequests.length})
+                      </h3>
+                      <span style={{ fontSize: "0.82rem", color: "#A0A0A0" }}>
+                        Action required to accept or decline date changes
+                      </span>
+                    </div>
+
+                    {pendingRescheduleRequests.map((req) => (
+                      <div
+                        key={req.request_id}
+                        className="cd-reschedule-card"
+                      >
+                        <div className="cd-reschedule-card-header">
+                          <div>
+                            <span
+                              className="cd-booking-code"
+                              style={{ marginRight: "8px" }}
+                            >
+                              #BK-{req.booking_id}
+                            </span>
+                            <span
+                              style={{ fontWeight: 700, color: "#FFFFFF" }}
+                            >
+                              {req.customer_name}
+                            </span>{" "}
+                            <span
+                              style={{
+                                color: "#888888",
+                                fontSize: "0.86rem",
+                              }}
+                            >
+                              ({req.customer_email})
+                            </span>
+                            <div
+                              style={{
+                                color: "#CCCCCC",
+                                fontSize: "0.88rem",
+                                marginTop: "2px",
+                              }}
+                            >
+                              Event: <strong>{req.event_type}</strong>
+                            </div>
+                          </div>
+                          <span className="cd-history-badge pending">
+                            Pending Artist Approval
+                          </span>
+                        </div>
+
+                        <div className="cd-reschedule-dates-grid">
+                          <div className="cd-reschedule-date-box">
+                            <span
+                              style={{
+                                fontSize: "0.76rem",
+                                color: "#888888",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Current Scheduled Date
+                            </span>
+                            <strong
+                              style={{
+                                color: "#D4D4D4",
+                                fontSize: "0.92rem",
+                              }}
+                            >
+                              {req.original_event_date_formatted}
+                            </strong>
+                          </div>
+                          <div className="cd-reschedule-arrow">➔</div>
+                          <div className="cd-reschedule-date-box">
+                            <span
+                              style={{
+                                fontSize: "0.76rem",
+                                color: "#FF5722",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Proposed New Date
+                            </span>
+                            <strong
+                              style={{
+                                color: "#FF5722",
+                                fontSize: "0.92rem",
+                              }}
+                            >
+                              {req.new_event_date_formatted}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {req.reason && (
+                          <div
+                            style={{
+                              fontSize: "0.88rem",
+                              color: "#B0B0B0",
+                              background: "#151515",
+                              padding: "8px 12px",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <strong style={{ color: "#FFFFFF" }}>
+                              Host Note:
+                            </strong>{" "}
+                            "{req.reason}"
+                          </div>
+                        )}
+
+                        <div className="cd-reschedule-actions">
+                          <button
+                            type="button"
+                            className="cd-btn-primary cd-btn-sm"
+                            disabled={
+                              rescheduleActionLoadingId === req.request_id
+                            }
+                            onClick={() => handleApproveReschedule(req)}
+                          >
+                            {rescheduleActionLoadingId === req.request_id
+                              ? "Updating..."
+                              : "Approve New Date"}
+                          </button>
+                          <button
+                            type="button"
+                            className="cd-btn-ghost cd-btn-sm"
+                            style={{ color: "#EF5350" }}
+                            disabled={
+                              rescheduleActionLoadingId === req.request_id
+                            }
+                            onClick={() =>
+                              setRejectNoteModal({
+                                open: true,
+                                request: req,
+                                reason: "",
+                              })
+                            }
+                          >
+                            Decline Request
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              {requestFilter === "reschedule" &&
+              pendingRescheduleRequests.length === 0 ? (
+                <div className="cd-empty-card">
+                  <h3>No Rescheduling Requests Found</h3>
+                  <p>
+                    No customer rescheduling requests are awaiting your
+                    approval at this time.
+                  </p>
+                </div>
+              ) : requestFilter !== "reschedule" &&
+                filteredBookings.length === 0 ? (
                 <div className="cd-empty-card">
                   <h3>No Booking Requests Found</h3>
                   <p>No booking requests match the current filter selection.</p>
                 </div>
-              ) : (
+              ) : requestFilter !== "reschedule" ? (
                 <div className="cd-bookings-list">
                   {filteredBookings.map((b) => (
                     <div key={b.id} className="cd-booking-row-card">
@@ -2454,7 +2763,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           )}
 
@@ -2766,15 +3075,25 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     )}
 
                     {selectedBooking.status === "accepted" && (
-                      <button
-                        type="button"
-                        className="cd-btn-primary"
-                        onClick={() =>
-                          handleCompleteBooking(selectedBooking.id)
-                        }
-                      >
-                        Mark Performance as Completed
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="cd-btn-primary"
+                          onClick={() =>
+                            handleCompleteBooking(selectedBooking.id)
+                          }
+                        >
+                          Mark Performance as Completed
+                        </button>
+                        <button
+                          type="button"
+                          className="cd-btn-secondary"
+                          style={{ borderColor: "#EF5350", color: "#EF5350" }}
+                          onClick={() => openArtistCancelModal(selectedBooking)}
+                        >
+                          Cancel Booking (100% Refund)
+                        </button>
+                      </>
                     )}
 
                     <button
@@ -2975,6 +3294,14 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           onClick={() => handleCompleteBooking(b.id)}
                         >
                           Mark Completed
+                        </button>
+                        <button
+                          type="button"
+                          className="cd-btn-ghost cd-btn-sm"
+                          style={{ color: "#EF5350" }}
+                          onClick={() => openArtistCancelModal(b)}
+                        >
+                          Cancel
                         </button>
                       </div>
                     </div>
@@ -3824,6 +4151,289 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 onClick={() => setReceiptItem(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PHASE 6: ARTIST CANCELLATION MODAL (100% FULL REFUND TO CUSTOMER)
+          ========================================================================= */}
+      {artistCancelModalBooking && (
+        <div
+          className="cd-modal-backdrop"
+          onClick={() =>
+            !artistCancelSubmitting && setArtistCancelModalBooking(null)
+          }
+        >
+          <div
+            className="cd-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "560px" }}
+          >
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title" style={{ color: "#EF5350" }}>
+                Cancel Confirmed Booking #BK-{artistCancelModalBooking.id}
+              </h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() =>
+                  !artistCancelSubmitting && setArtistCancelModalBooking(null)
+                }
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cd-modal-body">
+              <div
+                style={{
+                  marginBottom: "16px",
+                  color: "#D4D4D4",
+                  fontSize: "0.92rem",
+                  lineHeight: "1.6",
+                }}
+              >
+                <div>
+                  <strong>Host / Organizer:</strong>{" "}
+                  {artistCancelModalBooking.customer_name}
+                </div>
+                <div>
+                  <strong>Event Type:</strong>{" "}
+                  {artistCancelModalBooking.event_type}
+                </div>
+                <div>
+                  <strong>Scheduled Date:</strong>{" "}
+                  {artistCancelModalBooking.event_date}
+                </div>
+              </div>
+
+              {artistCancelPreviewLoading ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "20px",
+                    color: "#A0A0A0",
+                  }}
+                >
+                  Loading cancellation refund details...
+                </div>
+              ) : (
+                <div
+                  className="cd-policy-preview-card"
+                  style={{ borderColor: "#EF5350" }}
+                >
+                  <div className="cd-policy-header">
+                    <span
+                      style={{
+                        fontSize: "0.88rem",
+                        fontWeight: 700,
+                        color: "#FFFFFF",
+                      }}
+                    >
+                      Artist Cancellation Policy
+                    </span>
+                    <span className="cd-policy-badge success">
+                      100% Customer Refund
+                    </span>
+                  </div>
+
+                  <div className="cd-policy-breakdown">
+                    <div className="cd-policy-row">
+                      <span>Policy Rule:</span>
+                      <strong>Full 100% Customer Refund Guarantee</strong>
+                    </div>
+                    <div className="cd-policy-row">
+                      <span>Customer Paid Amount:</span>
+                      <strong>
+                        ₹
+                        {artistCancelPreview?.paid_amount ||
+                          artistCancelModalBooking.payment?.amount ||
+                          artistCancelModalBooking.agreed_price ||
+                          "0.00"}
+                      </strong>
+                    </div>
+                    <div
+                      className="cd-policy-row"
+                      style={{
+                        paddingTop: "8px",
+                        borderTop: "1px solid #282828",
+                      }}
+                    >
+                      <span>Refund Issued to Customer:</span>
+                      <span className="cd-policy-highlight">
+                        ₹
+                        {artistCancelPreview?.refund_amount ||
+                          artistCancelModalBooking.payment?.amount ||
+                          artistCancelModalBooking.agreed_price ||
+                          "0.00"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="cd-policy-info-box">
+                <strong>Important:</strong> Cancelling an accepted booking
+                releases the reserved date on your calendar and immediately
+                initiates a full refund to the event host.
+              </div>
+
+              {artistCancelError && (
+                <div
+                  className="cd-alert cd-alert-error"
+                  style={{ marginBottom: "16px" }}
+                >
+                  {artistCancelError}
+                </div>
+              )}
+
+              <div style={{ marginBottom: "16px" }}>
+                <label
+                  className="cd-label"
+                  htmlFor="artist_cancel_reason"
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    fontSize: "0.88rem",
+                  }}
+                >
+                  Reason for Cancellation *
+                </label>
+                <textarea
+                  id="artist_cancel_reason"
+                  className="cd-form-textarea"
+                  placeholder="Please provide the host with a clear reason for cancellation (e.g., medical emergency, travel disruption)..."
+                  value={artistCancelReason}
+                  onChange={(e) => setArtistCancelReason(e.target.value)}
+                  disabled={artistCancelSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="cd-modal-actions">
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() => setArtistCancelModalBooking(null)}
+                disabled={artistCancelSubmitting}
+              >
+                Keep Booking
+              </button>
+              <button
+                type="button"
+                className="cd-btn-danger"
+                onClick={handleConfirmArtistCancel}
+                disabled={
+                  artistCancelSubmitting || !artistCancelReason.trim()
+                }
+              >
+                {artistCancelSubmitting
+                  ? "Cancelling..."
+                  : "Confirm Cancellation (100% Refund)"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PHASE 6: DECLINE RESCHEDULING MINI-MODAL
+          ========================================================================= */}
+      {rejectNoteModal.open && (
+        <div
+          className="cd-modal-backdrop"
+          onClick={() =>
+            setRejectNoteModal({ open: false, request: null, reason: "" })
+          }
+        >
+          <div
+            className="cd-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "480px" }}
+          >
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title" style={{ color: "#EF5350" }}>
+                Decline Rescheduling Request
+              </h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() =>
+                  setRejectNoteModal({ open: false, request: null, reason: "" })
+                }
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cd-modal-body">
+              <p
+                style={{
+                  color: "#B0B0B0",
+                  fontSize: "0.9rem",
+                  margin: "0 0 16px 0",
+                }}
+              >
+                Decline this date change request for #BK-
+                {rejectNoteModal.request?.booking_id}. The booking will remain
+                confirmed on its original date.
+              </p>
+
+              <div style={{ marginBottom: "16px" }}>
+                <label
+                  className="cd-label"
+                  htmlFor="reject_reason"
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    fontSize: "0.88rem",
+                  }}
+                >
+                  Reason for Declining (Optional note to host)
+                </label>
+                <textarea
+                  id="reject_reason"
+                  className="cd-form-textarea"
+                  placeholder="e.g., I have a prior recording session on that day..."
+                  value={rejectNoteModal.reason}
+                  onChange={(e) =>
+                    setRejectNoteModal((p) => ({
+                      ...p,
+                      reason: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="cd-modal-actions">
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() =>
+                  setRejectNoteModal({ open: false, request: null, reason: "" })
+                }
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="cd-btn-danger"
+                onClick={handleConfirmRejectReschedule}
+                disabled={
+                  rescheduleActionLoadingId ===
+                  rejectNoteModal.request?.request_id
+                }
+              >
+                {rescheduleActionLoadingId ===
+                rejectNoteModal.request?.request_id
+                  ? "Declining..."
+                  : "Decline Request"}
               </button>
             </div>
           </div>

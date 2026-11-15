@@ -2080,7 +2080,2244 @@ class Phase3BookingCreationAndAcceptanceTests(TestCase):
         self.assertEqual(res_29.status_code, 201)
 
 
+class Phase4ReservationExpiryAndReconciliationTests(TestCase):
+    def setUp(self):
+        import datetime
+        from zoneinfo import ZoneInfo
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Notification
+
+        self.client = Client()
+        self.kolkata = ZoneInfo("Asia/Kolkata")
+
+        self.category, _ = Category.objects.get_or_create(
+            name="DJ", defaults={"description": "DJ and Electronic"}
+        )
+        self.artist_user = User.objects.create_user(
+            username="artist_phase4",
+            email="artist4@example.com",
+            password="securepassword123",
+        )
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.category,
+            stage_name="DJ Phase 4",
+            bio="Electronic Producer",
+            location="Hyderabad",
+            is_active=True,
+        )
+
+        self.customer = User.objects.create_user(
+            username="cust_phase4",
+            email="cust4@example.com",
+            password="securepassword123",
+        )
+
+    def test_accepted_booking_before_deadline_remains_active(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.views import check_and_expire_reservations
+
+        event_dt = datetime.datetime(2027, 10, 10, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Club Night",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=4),
+            agreed_price=Decimal("18000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        results = check_and_expire_reservations(booking=booking)
+        self.assertEqual(results["expired"], 0)
+        self.assertEqual(results["retained"], 1)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.ACCEPTED)
+
+    def test_unpaid_accepted_booking_after_24h_expires(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Notification
+        from app.views import check_and_expire_reservations
+
+        event_dt = datetime.datetime(2027, 10, 12, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Night Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=25),
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        results = check_and_expire_reservations(booking=booking)
+        self.assertEqual(results["expired"], 1)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.EXPIRED)
+        self.assertIn("Reservation expired", booking.response_message)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+
+        # Verify customer notification
+        notif = Notification.objects.filter(
+            user=self.customer,
+            title="Reservation Expired",
+        ).first()
+        self.assertIsNotNone(notif)
+        self.assertIn("has expired", notif.message)
+
+        # Verify artist notification
+        artist_notif = Notification.objects.filter(
+            user=self.artist_user,
+            title="Date Released",
+        ).first()
+        self.assertIsNotNone(artist_notif)
+        self.assertIn("expired without payment", artist_notif.message)
+
+    def test_pending_booking_is_not_expired(self):
+        import datetime
+        from django.utils import timezone
+        from app.views import check_and_expire_reservations
+
+        event_dt = datetime.datetime(2027, 10, 14, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Pending Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.PENDING,
+            created_at=timezone.now() - datetime.timedelta(hours=48),
+        )
+
+        results = check_and_expire_reservations(booking=booking)
+        self.assertEqual(results["expired"], 0)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.PENDING)
+
+    def test_successful_payment_is_never_expired(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.views import check_and_expire_reservations
+
+        event_dt = datetime.datetime(2027, 10, 16, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Paid Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=30),
+            agreed_price=Decimal("18000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_p4_paid",
+            transaction_id="pay_p4_paid",
+        )
+
+        results = check_and_expire_reservations(booking=booking)
+        self.assertEqual(results["expired"], 0)
+        self.assertEqual(results["retained"], 1)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.ACCEPTED)
+
+    from unittest.mock import patch, MagicMock
+
+    @patch("razorpay.Client")
+    def test_payment_captured_before_deadline_delayed_webhook_reconciled(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+
+        # Acceptance was 25 hours ago, so deadline passed 1 hour ago
+        acceptance_time = timezone.now() - datetime.timedelta(hours=25)
+        deadline = acceptance_time + datetime.timedelta(hours=24)
+
+        event_dt = datetime.datetime(2027, 10, 20, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Delayed Webhook Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=acceptance_time,
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_delayed_webhook_123",
+        )
+
+        # The payment was captured at the gateway 2 hours BEFORE the deadline:
+        capture_time = deadline - datetime.timedelta(hours=2)
+        capture_unix = int(capture_time.timestamp())
+
+        # Mock webhook signature verification
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_delayed_valid_123",
+                        "order_id": "order_delayed_webhook_123",
+                        "status": "captured",
+                        "amount": 1800000,
+                        "currency": "INR",
+                        "created_at": capture_unix,
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post(
+                "/api/payments/webhook/",
+                data=webhook_body,
+                content_type="application/json",
+                HTTP_X_RAZORPAY_SIGNATURE="valid_mocked_signature",
+            )
+        self.assertEqual(res.status_code, 200)
+
+        # Payment should be reconciled to SUCCESS and booking remain ACCEPTED!
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.SUCCESS)
+        self.assertEqual(payment.transaction_id, "pay_delayed_valid_123")
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.ACCEPTED)
+
+    @patch("razorpay.Client")
+    def test_delayed_webhook_date_already_rebooked_triggers_refund_flag(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+
+        # Acceptance was 25 hours ago, deadline passed 1 hour ago
+        acceptance_time = timezone.now() - datetime.timedelta(hours=25)
+        deadline = acceptance_time + datetime.timedelta(hours=24)
+
+        event_dt = datetime.datetime(2027, 10, 30, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Rebooked Date Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.EXPIRED,
+            accepted_at=acceptance_time,
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_rebooked_date_789",
+        )
+
+        # In the interim, another customer rebooked and confirmed this date!
+        other_user = User.objects.create_user(username="other_customer_rebook", password="password123")
+        rebooked = Booking.objects.create(
+            customer=other_user,
+            artist=self.artist,
+            event_type="New Confirmed Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("20000.00"),
+        )
+        Payment.objects.create(
+            booking=rebooked,
+            amount=Decimal("20000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1600.00"),
+            artist_amount=Decimal("18400.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_rebooked_conf",
+            transaction_id="pay_rebooked_conf",
+        )
+
+        # Original payment was captured at gateway 2 hours before the deadline:
+        capture_time = deadline - datetime.timedelta(hours=2)
+        capture_unix = int(capture_time.timestamp())
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_rebooked_original_789",
+                        "order_id": "order_rebooked_date_789",
+                        "status": "captured",
+                        "amount": 1800000,
+                        "currency": "INR",
+                        "created_at": capture_unix,
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post(
+                "/api/payments/webhook/",
+                data=webhook_body,
+                content_type="application/json",
+                HTTP_X_RAZORPAY_SIGNATURE="valid_mocked_signature",
+            )
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.json().get("status"), "reallocated")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+        self.assertEqual(payment.transaction_id, "pay_rebooked_original_789")
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.EXPIRED)
+
+    @patch("razorpay.Client")
+    def test_payment_captured_after_deadline_rejected_not_valid_reservation(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+
+        # Acceptance was 26 hours ago, deadline passed 2 hours ago
+        acceptance_time = timezone.now() - datetime.timedelta(hours=26)
+        deadline = acceptance_time + datetime.timedelta(hours=24)
+
+        event_dt = datetime.datetime(2027, 10, 22, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Late Payment Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=acceptance_time,
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_late_webhook_456",
+        )
+
+        # The payment was captured at the gateway 1 hour AFTER the deadline:
+        late_capture_time = deadline + datetime.timedelta(hours=1)
+        late_capture_unix = int(late_capture_time.timestamp())
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_late_invalid_456",
+                        "order_id": "order_late_webhook_456",
+                        "status": "captured",
+                        "amount": 1800000,
+                        "currency": "INR",
+                        "created_at": late_capture_unix,
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post(
+                "/api/payments/webhook/",
+                data=webhook_body,
+                content_type="application/json",
+                HTTP_X_RAZORPAY_SIGNATURE="valid_mocked_signature",
+            )
+        # Should be rejected with 409
+        self.assertEqual(res.status_code, 409)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.EXPIRED)
+
+    def test_create_razorpay_order_rejects_expired_booking(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+
+        event_dt = datetime.datetime(2027, 10, 24, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Order Attempt on Expired Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.EXPIRED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=28),
+            agreed_price=Decimal("18000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.FAILED,
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/payments/bookings/{booking.id}/create-order/",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 409)
+        self.assertIn("expired", res.json().get("error", "").lower())
+
+    def test_expired_reservation_releases_artist_date(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.views import is_artist_date_occupied
+
+        event_dt = datetime.datetime(2027, 10, 28, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Released Date Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.EXPIRED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=28),
+            agreed_price=Decimal("18000.00"),
+        )
+
+        occupied, reason, _ = is_artist_date_occupied(self.artist, datetime.date(2027, 10, 28))
+        self.assertFalse(occupied)
+
+    def test_management_command_expire_unpaid_reservations(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from django.core.management import call_command
+        from io import StringIO
+
+        event_dt = datetime.datetime(2027, 10, 29, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Command Expire Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=26),
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        out = StringIO()
+        call_command("expire_unpaid_reservations", f"--booking-id={booking.id}", stdout=out)
+        self.assertIn("Expiry check complete", out.getvalue())
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.EXPIRED)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+
+    def test_repeated_expiry_execution_idempotent_no_duplicate_notifications(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Notification
+        from app.views import check_and_expire_reservations
+
+        event_dt = datetime.datetime(2027, 10, 25, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Idempotent Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=28),
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        # First run expires
+        res1 = check_and_expire_reservations(booking=booking)
+        self.assertEqual(res1["expired"], 1)
+
+        initial_notif_count = Notification.objects.filter(user=self.customer).count()
+
+        # Second run should be idempotent
+        res2 = check_and_expire_reservations(booking=booking)
+        self.assertEqual(res2["expired"], 0)
+
+        second_notif_count = Notification.objects.filter(user=self.customer).count()
+        self.assertEqual(initial_notif_count, second_notif_count)
 
 
+class Phase5PaymentLifecycleAndRefundTests(TestCase):
+    def setUp(self):
+        import datetime
+        from zoneinfo import ZoneInfo
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Category, ArtistProfile, Booking, Payment, Refund, ProcessedWebhookEvent, Notification
+
+        self.client = Client()
+        self.kolkata = ZoneInfo("Asia/Kolkata")
+
+        self.category, _ = Category.objects.get_or_create(
+            name="Orchestra",
+            defaults={"description": "Classical and Fusion Orchestra"},
+        )
+        self.artist_user = User.objects.create_user(
+            username="artist_phase5",
+            email="artist5@example.com",
+            password="securepassword123",
+        )
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.category,
+            stage_name="Grand Philharmonic",
+            bio="Orchestra Ensemble",
+            location="Hyderabad",
+            is_active=True,
+        )
+
+        self.customer = User.objects.create_user(
+            username="cust_phase5",
+            email="cust5@example.com",
+            password="securepassword123",
+        )
+
+    # 1. Successful full refund
+    @patch("razorpay.Client")
+    def test_successful_full_refund(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund, Notification
+        from app.views import initiate_payment_refund
+
+        event_dt = datetime.datetime(2027, 11, 5, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Grand Gala",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("50000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("54000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("4000.00"),
+            artist_amount=Decimal("46000.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_p5_success_1",
+            transaction_id="pay_p5_success_1",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_p5_full_123",
+            "entity": "refund",
+            "amount": 5400000,
+            "currency": "INR",
+            "payment_id": "pay_p5_success_1",
+            "status": "processed",
+        }
+
+        success, refund, err = initiate_payment_refund(payment, reason="Customer requested full refund", client=mock_instance)
+        self.assertTrue(success)
+        self.assertIsNone(err)
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.status, Refund.Status.PROCESSED)
+        self.assertEqual(refund.razorpay_refund_id, "rfnd_p5_full_123")
+        self.assertEqual(refund.amount, Decimal("54000.00"))
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+        # Check customer notification
+        notif = Notification.objects.filter(user=self.customer, title="Refund Processed").first()
+        self.assertIsNotNone(notif)
+        self.assertIn("₹54000.00", notif.message)
+
+    # 2. Refund API failure
+    @patch("razorpay.Client")
+    def test_refund_api_failure(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        import razorpay.errors
+        from app.models import Payment, Refund
+        from app.views import initiate_payment_refund
+
+        event_dt = datetime.datetime(2027, 11, 6, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Failed Refund Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("20000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("21600.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_p5_fail_1",
+            transaction_id="pay_p5_fail_1",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.side_effect = razorpay.errors.GatewayError("Gateway timeout connecting to bank")
+
+        success, refund, err = initiate_payment_refund(payment, reason="API Failure Test", client=mock_instance)
+        self.assertFalse(success)
+        self.assertIsNotNone(err)
+        self.assertIn("Gateway timeout", err)
+
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.status, Refund.Status.FAILED)
+        self.assertIn("Gateway timeout", refund.failure_reason)
+
+        payment.refresh_from_db()
+        # Payment must NOT be marked refunded prematurely!
+        self.assertEqual(payment.status, Payment.Status.SUCCESS)
+
+    # 3. Duplicate refund request
+    @patch("razorpay.Client")
+    def test_duplicate_refund_request(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+        from app.views import initiate_payment_refund
+
+        event_dt = datetime.datetime(2027, 11, 7, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Duplicate Refund Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("30000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("32400.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_p5_dup_1",
+            transaction_id="pay_p5_dup_1",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_p5_dup_123",
+            "amount": 3240000,
+            "status": "processed",
+        }
+
+        # First request
+        success1, refund1, _ = initiate_payment_refund(payment, reason="First call", client=mock_instance)
+        self.assertTrue(success1)
+        self.assertEqual(mock_instance.payment.refund.call_count, 1)
+
+        # Second request with identical payment
+        success2, refund2, _ = initiate_payment_refund(payment, reason="Duplicate call", client=mock_instance)
+        self.assertTrue(success2)
+        # MUST NOT call Razorpay API a second time!
+        self.assertEqual(mock_instance.payment.refund.call_count, 1)
+        self.assertEqual(refund1.id, refund2.id)
+
+    # 4. Duplicate payment-captured webhook
+    @patch("razorpay.Client")
+    def test_duplicate_payment_captured_webhook(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, ProcessedWebhookEvent, Notification
+
+        event_dt = datetime.datetime(2027, 11, 8, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Dup Webhook Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=2),
+            agreed_price=Decimal("15000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("16200.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_dup_capture_1",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_dup_capture_1",
+                        "order_id": "order_dup_capture_1",
+                        "status": "captured",
+                        "amount": 1620000,
+                        "currency": "INR",
+                        "created_at": int(timezone.now().timestamp()),
+                    }
+                }
+            }
+        })
+
+        headers = {
+            "HTTP_X_RAZORPAY_SIGNATURE": "valid_signature",
+            "HTTP_X_RAZORPAY_EVENT_ID": "evt_capture_dup_unique_999",
+        }
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            # First webhook delivery
+            res1 = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", **headers)
+            self.assertEqual(res1.status_code, 200)
+            self.assertEqual(res1.json().get("status"), "ok")
+
+            initial_notif_count = Notification.objects.filter(user=self.customer).count()
+
+            # Second identical webhook delivery (same X-Razorpay-Event-Id)
+            res2 = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", **headers)
+            self.assertEqual(res2.status_code, 200)
+            self.assertEqual(res2.json().get("status"), "ignored")
+
+            # Notification count must NOT increase!
+            second_notif_count = Notification.objects.filter(user=self.customer).count()
+            self.assertEqual(initial_notif_count, second_notif_count)
+
+    # 5. Duplicate refund webhook
+    @patch("razorpay.Client")
+    def test_duplicate_refund_webhook(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund, ProcessedWebhookEvent
+
+        event_dt = datetime.datetime(2027, 11, 9, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Dup Refund Webhook Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.EXPIRED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=28),
+            agreed_price=Decimal("15000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("16200.00"),
+            status=Payment.Status.FAILED,
+            razorpay_order_id="order_dup_refund_1",
+            transaction_id="pay_dup_refund_1",
+        )
+        refund = Refund.objects.create(
+            payment=payment,
+            booking=booking,
+            razorpay_refund_id="rfnd_dup_webhook_1",
+            amount=Decimal("16200.00"),
+            status=Refund.Status.PENDING,
+            idempotency_key="rfnd_pay_dup_refund_1_1620000",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "refund.processed",
+            "payload": {
+                "refund": {
+                    "entity": {
+                        "id": "rfnd_dup_webhook_1",
+                        "payment_id": "pay_dup_refund_1",
+                        "amount": 1620000,
+                        "status": "processed",
+                    }
+                }
+            }
+        })
+
+        headers = {
+            "HTTP_X_RAZORPAY_SIGNATURE": "valid_signature",
+            "HTTP_X_RAZORPAY_EVENT_ID": "evt_refund_dup_unique_888",
+        }
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res1 = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", **headers)
+            self.assertEqual(res1.status_code, 200)
+
+            refund.refresh_from_db()
+            self.assertEqual(refund.status, Refund.Status.PROCESSED)
+
+            payment.refresh_from_db()
+            self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+            # Second identical refund webhook
+            res2 = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", **headers)
+            self.assertEqual(res2.status_code, 200)
+            self.assertEqual(res2.json().get("status"), "ignored")
+
+    # 6. Refund status update from webhook
+    @patch("razorpay.Client")
+    def test_refund_status_update_from_webhook(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+
+        event_dt = datetime.datetime(2027, 11, 10, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Webhook Status Update Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("10000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("10800.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_status_update_1",
+            transaction_id="pay_status_update_1",
+        )
+        refund = Refund.objects.create(
+            payment=payment,
+            booking=booking,
+            razorpay_refund_id="rfnd_status_update_1",
+            amount=Decimal("10800.00"),
+            status=Refund.Status.PENDING,
+            idempotency_key="rfnd_pay_status_update_1_1080000",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "refund.processed",
+            "payload": {
+                "refund": {
+                    "entity": {
+                        "id": "rfnd_status_update_1",
+                        "payment_id": "pay_status_update_1",
+                        "amount": 1080000,
+                        "status": "processed",
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", HTTP_X_RAZORPAY_SIGNATURE="valid_signature")
+            self.assertEqual(res.status_code, 200)
+
+        refund.refresh_from_db()
+        self.assertEqual(refund.status, Refund.Status.PROCESSED)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+    # 7. Delayed payment after date reallocation triggers an actual refund request
+    @patch("razorpay.Client")
+    def test_delayed_payment_after_date_reallocation_triggers_actual_refund_request(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+
+        acceptance_time = timezone.now() - datetime.timedelta(hours=25)
+        deadline = acceptance_time + datetime.timedelta(hours=24)
+
+        event_dt = datetime.datetime(2027, 11, 15, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Reallocated Date Show P5",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.EXPIRED,
+            accepted_at=acceptance_time,
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("19440.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_reallocated_p5",
+        )
+
+        # Another customer confirmed this date
+        other_user = User.objects.create_user(username="cust_other_p5", password="password123")
+        rebooked = Booking.objects.create(
+            customer=other_user,
+            artist=self.artist,
+            event_type="New Show P5",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("20000.00"),
+        )
+        Payment.objects.create(
+            booking=rebooked,
+            amount=Decimal("21600.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_other_p5",
+            transaction_id="pay_other_p5",
+        )
+
+        capture_time = deadline - datetime.timedelta(hours=1)
+        capture_unix = int(capture_time.timestamp())
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_reallocated_actual_1",
+            "amount": 1944000,
+            "status": "processed",
+        }
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_reallocated_actual_1",
+                        "order_id": "order_reallocated_p5",
+                        "status": "captured",
+                        "amount": 1944000,
+                        "currency": "INR",
+                        "created_at": capture_unix,
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", HTTP_X_RAZORPAY_SIGNATURE="valid_sig")
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.json().get("status"), "reallocated")
+
+        # Must have triggered actual refund call!
+        self.assertTrue(mock_instance.payment.refund.called)
+
+        # Refund record exists!
+        rf = Refund.objects.filter(payment=payment).first()
+        self.assertIsNotNone(rf)
+        self.assertEqual(rf.razorpay_refund_id, "rfnd_reallocated_actual_1")
+
+    # 8. Payment captured after deadline triggers refund handling
+    @patch("razorpay.Client")
+    def test_payment_captured_after_deadline_triggers_refund_handling(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+
+        acceptance_time = timezone.now() - datetime.timedelta(hours=26)
+        deadline = acceptance_time + datetime.timedelta(hours=24)
+
+        event_dt = datetime.datetime(2027, 11, 18, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Post Deadline Capture Show P5",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=acceptance_time,
+            agreed_price=Decimal("12000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("12960.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_late_capture_p5",
+        )
+
+        late_capture_unix = int((deadline + datetime.timedelta(hours=1)).timestamp())
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_late_capture_p5",
+            "amount": 1296000,
+            "status": "processed",
+        }
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_late_capture_p5",
+                        "order_id": "order_late_capture_p5",
+                        "status": "captured",
+                        "amount": 1296000,
+                        "currency": "INR",
+                        "created_at": late_capture_unix,
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", HTTP_X_RAZORPAY_SIGNATURE="valid_sig")
+        self.assertEqual(res.status_code, 409)
+
+        # Must have initiated refund
+        self.assertTrue(mock_instance.payment.refund.called)
+        rf = Refund.objects.filter(payment=payment).first()
+        self.assertIsNotNone(rf)
+        self.assertEqual(rf.razorpay_refund_id, "rfnd_late_capture_p5")
+
+    # 9. Successful payment cannot be overwritten by a failed event
+    @patch("razorpay.Client")
+    def test_successful_payment_cannot_be_overwritten_by_failed_event(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment
+
+        event_dt = datetime.datetime(2027, 11, 20, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Overwrite Protect Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("15000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("16200.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_success_no_overwrite",
+            transaction_id="pay_success_no_overwrite",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "payment.failed",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_success_no_overwrite",
+                        "order_id": "order_success_no_overwrite",
+                        "status": "failed",
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", HTTP_X_RAZORPAY_SIGNATURE="valid_sig")
+            self.assertEqual(res.status_code, 200)
+
+        # Status MUST remain SUCCESS
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.SUCCESS)
+
+    # 10. Refunded payment cannot be processed again
+    @patch("razorpay.Client")
+    def test_refunded_payment_cannot_be_processed_again(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Payment
+
+        event_dt = datetime.datetime(2027, 11, 22, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Refund Terminal Show",
+            event_date=event_dt,
+            event_location="Hyderabad",
+            status=Booking.Status.EXPIRED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=28),
+            agreed_price=Decimal("20000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("21600.00"),
+            status=Payment.Status.REFUNDED,
+            razorpay_order_id="order_already_refunded_terminal",
+            transaction_id="pay_already_refunded_terminal",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_already_refunded_terminal",
+                        "order_id": "order_already_refunded_terminal",
+                        "status": "captured",
+                        "amount": 2160000,
+                        "currency": "INR",
+                        "created_at": int(timezone.now().timestamp()),
+                    }
+                }
+            }
+        })
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            res = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", HTTP_X_RAZORPAY_SIGNATURE="valid_sig")
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.json().get("status"), "ignored")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
 
 
+class Phase6BookingCancellationAndReschedulingTests(TestCase):
+    def setUp(self):
+        import datetime
+        from zoneinfo import ZoneInfo
+        from decimal import Decimal
+        from django.utils import timezone
+        from django.contrib.auth.models import User
+        from app.models import (
+            Category,
+            ArtistProfile,
+            Booking,
+            Payment,
+            Refund,
+            BookingCancellation,
+            ReschedulingRequest,
+            ArtistAvailability,
+            Notification,
+        )
+
+        self.client = Client()
+        self.kolkata = ZoneInfo("Asia/Kolkata")
+
+        self.category, _ = Category.objects.get_or_create(
+            name="Fusion Band",
+            defaults={"description": "Fusion and Rock Band"},
+        )
+        self.artist_user = User.objects.create_user(
+            username="artist_p6",
+            email="artist_p6@example.com",
+            password="securepassword123",
+        )
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.category,
+            stage_name="Pulse Fusion",
+            bio="Dynamic rock fusion band",
+            location="Bangalore",
+            is_active=True,
+        )
+
+        self.other_artist_user = User.objects.create_user(
+            username="other_artist_p6",
+            email="other_artist_p6@example.com",
+            password="securepassword123",
+        )
+        self.other_artist = ArtistProfile.objects.create(
+            user=self.other_artist_user,
+            category=self.category,
+            stage_name="Solo Strings",
+            bio="Violinist",
+            location="Bangalore",
+            is_active=True,
+        )
+
+        self.customer = User.objects.create_user(
+            username="cust_p6",
+            email="cust_p6@example.com",
+            password="securepassword123",
+        )
+
+        self.other_customer = User.objects.create_user(
+            username="other_cust_p6",
+            email="other_cust_p6@example.com",
+            password="securepassword123",
+        )
+
+    # 1. Customer cancelling own pending booking
+    def test_01_customer_cancelling_own_pending_booking(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, Payment, Refund, BookingCancellation
+
+        event_dt = timezone.now() + datetime.timedelta(days=10)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Corporate Gala",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.PENDING,
+            agreed_price=Decimal("10000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("10000.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Event cancelled by management"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.CANCELLED)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+
+        # No refund record created for unpaid booking
+        self.assertEqual(Refund.objects.filter(booking=booking).count(), 0)
+
+        # BookingCancellation record created
+        cancellation = BookingCancellation.objects.filter(booking=booking).first()
+        self.assertIsNotNone(cancellation)
+        self.assertEqual(cancellation.cancelled_by, BookingCancellation.CancelledBy.CUSTOMER)
+        self.assertEqual(cancellation.refund_amount, Decimal("0.00"))
+
+    # 2. Customer cancelling own paid booking
+    @patch("razorpay.Client")
+    def test_02_customer_cancelling_own_paid_booking(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Booking, Payment, Refund, BookingCancellation
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_p6_cust_paid_123",
+            "entity": "refund",
+            "amount": 1000000,
+            "currency": "INR",
+            "status": "processed",
+        }
+
+        # Event is 12 days in the future (> 7 days -> 100% refund)
+        event_dt = timezone.now() + datetime.timedelta(days=12)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Grand Anniversary",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=2),
+            agreed_price=Decimal("10000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("10000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("800.00"),
+            artist_amount=Decimal("9200.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_p6_paid_1",
+            transaction_id="pay_p6_paid_1",
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Venue issue"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], Booking.Status.CANCELLED)
+        self.assertEqual(data["refund_status"], "processed")
+        self.assertEqual(data["refund_amount"], "10000.00")
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.CANCELLED)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+        refund = Refund.objects.filter(booking=booking).first()
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.status, Refund.Status.PROCESSED)
+        self.assertEqual(refund.amount, Decimal("10000.00"))
+        self.assertEqual(refund.razorpay_refund_id, "rfnd_p6_cust_paid_123")
+
+        cancellation = BookingCancellation.objects.filter(booking=booking).first()
+        self.assertIsNotNone(cancellation)
+        self.assertEqual(cancellation.refund_percentage, Decimal("100.00"))
+        self.assertEqual(cancellation.refund_amount, Decimal("10000.00"))
+
+    # 3. Unauthorized customer cancellation
+    def test_03_unauthorized_customer_cancellation(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking
+
+        event_dt = timezone.now() + datetime.timedelta(days=10)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Private Party",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("8000.00"),
+        )
+
+        # Other customer attempts to cancel
+        self.client.force_login(self.other_customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Malicious attempt"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 403)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.ACCEPTED)
+
+        # Anonymous user attempts to cancel
+        self.client.logout()
+        res_anon = self.client.post(
+            f"/api/customer/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Anon"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_anon.status_code, 401)
+
+    # 4. Artist cancelling own booking
+    def test_04_artist_cancelling_own_booking(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, Payment, BookingCancellation
+
+        event_dt = timezone.now() + datetime.timedelta(days=8)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Club Night",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("12000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("12000.00"),
+            status=Payment.Status.PENDING,
+        )
+
+        self.client.force_login(self.artist_user)
+        res = self.client.post(
+            f"/api/artist/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Artist emergency illness"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.CANCELLED)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+
+        cancellation = BookingCancellation.objects.filter(booking=booking).first()
+        self.assertIsNotNone(cancellation)
+        self.assertEqual(cancellation.cancelled_by, BookingCancellation.CancelledBy.ARTIST)
+
+    # 5. Artist cancelling another artist's booking
+    def test_05_artist_cancelling_another_artists_booking(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking
+
+        event_dt = timezone.now() + datetime.timedelta(days=8)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Festival Show",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("15000.00"),
+        )
+
+        # Other artist attempts to cancel
+        self.client.force_login(self.other_artist_user)
+        res = self.client.post(
+            f"/api/artist/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Unauthorized"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 403)
+
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.ACCEPTED)
+
+    # 6. Full refund for artist cancellation
+    @patch("razorpay.Client")
+    def test_06_full_refund_for_artist_cancellation(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Booking, Payment, Refund, BookingCancellation
+        from app.views import is_artist_date_occupied
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_p6_art_full_999",
+            "entity": "refund",
+            "amount": 2500000,
+            "currency": "INR",
+            "status": "processed",
+        }
+
+        # Event is only 1 day away (normally 0% for customer, but 100% for artist cancellation!)
+        event_dt = timezone.now() + datetime.timedelta(days=1)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Urgent Cancel Show",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=5),
+            agreed_price=Decimal("25000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("25000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("2000.00"),
+            artist_amount=Decimal("23000.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_p6_art_full",
+            transaction_id="pay_p6_art_full",
+        )
+
+        self.client.force_login(self.artist_user)
+        res = self.client.post(
+            f"/api/artist/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Band equipment damage"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["refund_amount"], "25000.00")
+        self.assertEqual(data["refund_percentage"], "100.00")
+
+        refund = Refund.objects.filter(booking=booking).first()
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.amount, Decimal("25000.00"))
+        self.assertEqual(refund.status, Refund.Status.PROCESSED)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+        # Date is released
+        cal_date = timezone.localtime(event_dt, timezone=self.kolkata).date()
+        occupied, _, _ = is_artist_date_occupied(self.artist, cal_date)
+        self.assertFalse(occupied)
+
+    # 7. Correct customer refund calculation for each policy period
+    @patch("razorpay.Client")
+    def test_07_correct_customer_refund_calculation_for_each_policy_period(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Booking, Payment
+        from app.cancellation_policy import calculate_cancellation_refund
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_period_mock",
+            "entity": "refund",
+            "amount": 500000,
+            "currency": "INR",
+            "status": "processed",
+        }
+
+        now = timezone.now()
+
+        # Period A: > 7 days -> 100% refund
+        booking_a = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Period A Show",
+            event_date=now + datetime.timedelta(days=10),
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("10000.00"),
+        )
+        payment_a = Payment.objects.create(
+            booking=booking_a,
+            amount=Decimal("10000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_period_a",
+        )
+        calc_a = calculate_cancellation_refund(booking_a, cancelled_by="customer", cancel_time=now)
+        self.assertEqual(calc_a["refund_percentage"], Decimal("100.00"))
+        self.assertEqual(calc_a["refund_amount"], Decimal("10000.00"))
+        self.assertEqual(calc_a["retained_amount"], Decimal("0.00"))
+
+        # Period B: 3 - 7 days -> 50% refund
+        booking_b = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Period B Show",
+            event_date=now + datetime.timedelta(days=5),
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("10000.00"),
+        )
+        payment_b = Payment.objects.create(
+            booking=booking_b,
+            amount=Decimal("10000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_period_b",
+        )
+        calc_b = calculate_cancellation_refund(booking_b, cancelled_by="customer", cancel_time=now)
+        self.assertEqual(calc_b["refund_percentage"], Decimal("50.00"))
+        self.assertEqual(calc_b["refund_amount"], Decimal("5000.00"))
+        self.assertEqual(calc_b["retained_amount"], Decimal("5000.00"))
+        self.assertEqual(calc_b["platform_fee"], Decimal("400.00"))
+        self.assertEqual(calc_b["artist_payout"], Decimal("4600.00"))
+
+        # Period C: < 3 days -> 0% refund
+        booking_c = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Period C Show",
+            event_date=now + datetime.timedelta(days=1),
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("10000.00"),
+        )
+        payment_c = Payment.objects.create(
+            booking=booking_c,
+            amount=Decimal("10000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_period_c",
+        )
+        calc_c = calculate_cancellation_refund(booking_c, cancelled_by="customer", cancel_time=now)
+        self.assertEqual(calc_c["refund_percentage"], Decimal("0.00"))
+        self.assertEqual(calc_c["refund_amount"], Decimal("0.00"))
+        self.assertEqual(calc_c["retained_amount"], Decimal("10000.00"))
+        self.assertEqual(calc_c["platform_fee"], Decimal("800.00"))
+        self.assertEqual(calc_c["artist_payout"], Decimal("9200.00"))
+
+        # Execute cancellation for Period B via API (50% refund)
+        self.client.force_login(self.customer)
+        res_b = self.client.post(
+            f"/api/customer/bookings/{booking_b.id}/cancel/",
+            data=json.dumps({"reason": "Need to cancel"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_b.status_code, 200)
+        self.assertEqual(res_b.json()["refund_amount"], "5000.00")
+        self.assertEqual(res_b.json()["refund_percentage"], "50.00")
+
+    # 8. No refund for eligible zero-refund cancellation
+    @patch("razorpay.Client")
+    def test_08_no_refund_for_eligible_zero_refund_cancellation(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        from app.models import Booking, Payment, Refund, BookingCancellation
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+
+        # Event is tomorrow (< 3 days -> 0% refund)
+        event_dt = timezone.now() + datetime.timedelta(days=1)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Tomorrow Evening Gala",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=4),
+            agreed_price=Decimal("18000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("18000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1440.00"),
+            artist_amount=Decimal("16560.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id="order_zero_refund_1",
+            transaction_id="pay_zero_refund_1",
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Last minute conflict"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["refund_amount"], "0.00")
+        self.assertEqual(data["refund_status"], "none")
+
+        # Razorpay refund API was never called
+        self.assertFalse(mock_instance.payment.refund.called)
+
+        # No Refund row created
+        self.assertEqual(Refund.objects.filter(booking=booking).count(), 0)
+
+        # Payment remains SUCCESS (retained)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.SUCCESS)
+
+        # BookingCancellation records full retention
+        cancellation = BookingCancellation.objects.filter(booking=booking).first()
+        self.assertEqual(cancellation.retained_amount, Decimal("18000.00"))
+        self.assertEqual(cancellation.artist_payout, Decimal("16560.00"))
+        self.assertEqual(cancellation.platform_fee, Decimal("1440.00"))
+
+    # 9. Refund API failure and safe retry
+    @patch("razorpay.Client")
+    def test_09_refund_api_failure_and_safe_retry(self, mock_client_cls):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from unittest.mock import MagicMock
+        import razorpay.errors
+        from app.models import Booking, Payment, Refund
+
+        # First call fails
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.side_effect = razorpay.errors.GatewayError("Bank connection timed out")
+
+        event_dt = timezone.now() + datetime.timedelta(days=12)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Retry Refund Show",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now() - datetime.timedelta(hours=2),
+            agreed_price=Decimal("12000.00"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=Decimal("12000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_fail_and_retry",
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/cancel/",
+            data=json.dumps({"reason": "Change of plans"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["refund_status"], "failed")
+
+        # Booking is cancelled, refund is in FAILED state
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, Booking.Status.CANCELLED)
+        rf = Refund.objects.filter(booking=booking).first()
+        self.assertIsNotNone(rf)
+        self.assertEqual(rf.status, Refund.Status.FAILED)
+
+        # Now mock succeeds on retry
+        mock_instance.payment.refund.side_effect = None
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_retry_succeeded_888",
+            "status": "processed",
+            "amount": 1200000,
+        }
+
+        res_retry = self.client.post(f"/api/bookings/{booking.id}/refund/retry/")
+        self.assertEqual(res_retry.status_code, 200)
+
+        rf.refresh_from_db()
+        self.assertEqual(rf.status, Refund.Status.PROCESSED)
+        self.assertEqual(rf.razorpay_refund_id, "rfnd_retry_succeeded_888")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+    # 10. Rescheduling request creation
+    def test_10_rescheduling_request_creation(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, ReschedulingRequest
+
+        orig_dt = timezone.now() + datetime.timedelta(days=10)
+        new_dt = timezone.now() + datetime.timedelta(days=20)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Wedding Reception",
+            event_date=orig_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("30000.00"),
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/reschedule/",
+            data=json.dumps({
+                "new_event_date": new_dt.isoformat(),
+                "reason": "Family convenience",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertEqual(data["status"], ReschedulingRequest.Status.PENDING)
+
+        req = ReschedulingRequest.objects.filter(booking=booking).first()
+        self.assertIsNotNone(req)
+        self.assertEqual(req.status, ReschedulingRequest.Status.PENDING)
+        self.assertEqual(req.reason, "Family convenience")
+
+    # 11. Artist approving a rescheduling request
+    def test_11_artist_approving_a_rescheduling_request(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, ReschedulingRequest
+        from app.views import is_artist_date_occupied
+
+        orig_dt = timezone.now() + datetime.timedelta(days=10)
+        new_dt = timezone.now() + datetime.timedelta(days=22)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Cocktail Night",
+            event_date=orig_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("15000.00"),
+        )
+        resched_req = ReschedulingRequest.objects.create(
+            booking=booking,
+            customer=self.customer,
+            artist=self.artist,
+            original_event_date=orig_dt,
+            new_event_date=new_dt,
+            reason="Venue availability",
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+        self.client.force_login(self.artist_user)
+        res = self.client.post(
+            f"/api/artist/rescheduling-requests/{resched_req.id}/respond/",
+            data=json.dumps({"action": "approve", "reason": "Confirmed availability"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # Booking event_date is now new_dt
+        booking.refresh_from_db()
+        self.assertEqual(booking.event_date.date(), new_dt.date())
+
+        resched_req.refresh_from_db()
+        self.assertEqual(resched_req.status, ReschedulingRequest.Status.APPROVED)
+
+        # Original date is released
+        orig_cal = timezone.localtime(orig_dt, timezone=self.kolkata).date()
+        occupied_orig, _, _ = is_artist_date_occupied(self.artist, orig_cal)
+        self.assertFalse(occupied_orig)
+
+        # New date is occupied
+        new_cal = timezone.localtime(new_dt, timezone=self.kolkata).date()
+        occupied_new, _, _ = is_artist_date_occupied(self.artist, new_cal)
+        self.assertTrue(occupied_new)
+
+    # 12. Artist rejecting a rescheduling request
+    def test_12_artist_rejecting_a_rescheduling_request(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, ReschedulingRequest
+
+        orig_dt = timezone.now() + datetime.timedelta(days=10)
+        new_dt = timezone.now() + datetime.timedelta(days=25)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="College Fest",
+            event_date=orig_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("20000.00"),
+        )
+        resched_req = ReschedulingRequest.objects.create(
+            booking=booking,
+            customer=self.customer,
+            artist=self.artist,
+            original_event_date=orig_dt,
+            new_event_date=new_dt,
+            reason="Exam schedule",
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+        self.client.force_login(self.artist_user)
+        res = self.client.post(
+            f"/api/artist/rescheduling-requests/{resched_req.id}/respond/",
+            data=json.dumps({"action": "reject", "reason": "Already committed to other studio recording"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # Original date remains intact
+        booking.refresh_from_db()
+        self.assertEqual(booking.event_date.date(), orig_dt.date())
+
+        resched_req.refresh_from_db()
+        self.assertEqual(resched_req.status, ReschedulingRequest.Status.REJECTED)
+        self.assertEqual(resched_req.artist_response, "Already committed to other studio recording")
+
+    # 13. Rescheduling to a manually blocked date
+    def test_13_rescheduling_to_a_manually_blocked_date(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, ArtistAvailability
+
+        orig_dt = timezone.now() + datetime.timedelta(days=10)
+        blocked_dt = timezone.now() + datetime.timedelta(days=15)
+        blocked_cal = timezone.localtime(blocked_dt, timezone=self.kolkata).date()
+
+        ArtistAvailability.objects.create(
+            artist=self.artist,
+            date=blocked_cal,
+            is_available=False,
+            reason="Personal holiday",
+        )
+
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Corporate Show",
+            event_date=orig_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("15000.00"),
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/reschedule/",
+            data=json.dumps({"new_event_date": blocked_dt.isoformat(), "reason": "Shift date"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 409)
+        self.assertIn("Personal holiday", res.json()["error"])
+
+    # 14. Rescheduling to an occupied date
+    def test_14_rescheduling_to_an_occupied_date(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, Payment
+
+        orig_dt = timezone.now() + datetime.timedelta(days=10)
+        busy_dt = timezone.now() + datetime.timedelta(days=18)
+
+        # Another booking is accepted and paid on busy_dt
+        busy_booking = Booking.objects.create(
+            customer=self.other_customer,
+            artist=self.artist,
+            event_type="Existing Confirmed Show",
+            event_date=busy_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("25000.00"),
+        )
+        Payment.objects.create(
+            booking=busy_booking,
+            amount=Decimal("25000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_busy_date",
+        )
+
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Shift Attempt Show",
+            event_date=orig_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("12000.00"),
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            f"/api/customer/bookings/{booking.id}/reschedule/",
+            data=json.dumps({"new_event_date": busy_dt.isoformat(), "reason": "Please shift"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 409)
+
+    # 15. Concurrent rescheduling approvals
+    def test_15_concurrent_rescheduling_approvals(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, ReschedulingRequest
+
+        target_dt = timezone.now() + datetime.timedelta(days=30)
+
+        # Booking 1
+        booking_1 = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Show 1",
+            event_date=timezone.now() + datetime.timedelta(days=8),
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("10000.00"),
+        )
+        req_1 = ReschedulingRequest.objects.create(
+            booking=booking_1,
+            customer=self.customer,
+            artist=self.artist,
+            original_event_date=booking_1.event_date,
+            new_event_date=target_dt,
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+        # Booking 2
+        booking_2 = Booking.objects.create(
+            customer=self.other_customer,
+            artist=self.artist,
+            event_type="Show 2",
+            event_date=timezone.now() + datetime.timedelta(days=12),
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("12000.00"),
+        )
+        req_2 = ReschedulingRequest.objects.create(
+            booking=booking_2,
+            customer=self.other_customer,
+            artist=self.artist,
+            original_event_date=booking_2.event_date,
+            new_event_date=target_dt,
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+        self.client.force_login(self.artist_user)
+
+        # Approve Request 1 -> succeeds
+        res_1 = self.client.post(
+            f"/api/artist/rescheduling-requests/{req_1.id}/respond/",
+            data=json.dumps({"action": "approve"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_1.status_code, 200)
+
+        # Now attempt to approve Request 2 for the same date -> rejected with 409 Conflict
+        res_2 = self.client.post(
+            f"/api/artist/rescheduling-requests/{req_2.id}/respond/",
+            data=json.dumps({"action": "approve"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_2.status_code, 409)
+
+        # Booking 2 event date must remain unchanged
+        booking_2.refresh_from_db()
+        self.assertNotEqual(booking_2.event_date.date(), target_dt.date())
+
+    # 16. Original date remains reserved while rescheduling is pending
+    def test_16_original_date_remains_reserved_while_rescheduling_is_pending(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking, Payment, ReschedulingRequest
+        from app.views import is_artist_date_occupied
+
+        orig_dt = timezone.now() + datetime.timedelta(days=10)
+        new_dt = timezone.now() + datetime.timedelta(days=25)
+
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Reserved Check Show",
+            event_date=orig_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("20000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("20000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_reserved_check",
+        )
+
+        # Pending reschedule request
+        ReschedulingRequest.objects.create(
+            booking=booking,
+            customer=self.customer,
+            artist=self.artist,
+            original_event_date=orig_dt,
+            new_event_date=new_dt,
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+        orig_cal = timezone.localtime(orig_dt, timezone=self.kolkata).date()
+        new_cal = timezone.localtime(new_dt, timezone=self.kolkata).date()
+
+        # Original date is STILL occupied
+        occupied_orig, _, _ = is_artist_date_occupied(self.artist, orig_cal)
+        self.assertTrue(occupied_orig)
+
+        # Proposed new date is NOT occupied
+        occupied_new, _, _ = is_artist_date_occupied(self.artist, new_cal)
+        self.assertFalse(occupied_new)
+
+    # 17. Duplicate cancellation and rescheduling requests
+    def test_17_duplicate_cancellation_and_rescheduling_requests(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking
+
+        event_dt = timezone.now() + datetime.timedelta(days=15)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Dupe Test Show",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+            agreed_price=Decimal("10000.00"),
+        )
+
+        self.client.force_login(self.customer)
+
+        # Rescheduling request 1
+        new_dt = timezone.now() + datetime.timedelta(days=25)
+        res_r1 = self.client.post(
+            f"/api/customer/bookings/{booking.id}/reschedule/",
+            data=json.dumps({"new_event_date": new_dt.isoformat()}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_r1.status_code, 201)
+
+        # Duplicate rescheduling request while previous is pending
+        res_r2 = self.client.post(
+            f"/api/customer/bookings/{booking.id}/reschedule/",
+            data=json.dumps({"new_event_date": (new_dt + datetime.timedelta(days=2)).isoformat()}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_r2.status_code, 400)
+        self.assertIn("already pending", res_r2.json()["error"])
+
+        # Cancel booking 1st time
+        res_c1 = self.client.post(f"/api/customer/bookings/{booking.id}/cancel/")
+        self.assertEqual(res_c1.status_code, 200)
+
+        # Duplicate cancellation
+        res_c2 = self.client.post(f"/api/customer/bookings/{booking.id}/cancel/")
+        self.assertEqual(res_c2.status_code, 400)
+        self.assertIn("already cancelled", res_c2.json()["error"])
+
+    # 18. Completed bookings cannot be cancelled
+    def test_18_completed_bookings_cannot_be_cancelled(self):
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from app.models import Booking
+
+        event_dt = timezone.now() - datetime.timedelta(days=2)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Completed Musical Night",
+            event_date=event_dt,
+            event_location="Bangalore",
+            status=Booking.Status.COMPLETED,
+            agreed_price=Decimal("20000.00"),
+        )
+
+        # Customer attempts to cancel completed booking
+        self.client.force_login(self.customer)
+        res_cust = self.client.post(f"/api/customer/bookings/{booking.id}/cancel/")
+        self.assertEqual(res_cust.status_code, 400)
+        self.assertIn("completed", res_cust.json()["error"])
+
+        # Artist attempts to cancel completed booking
+        self.client.force_login(self.artist_user)
+        res_art = self.client.post(f"/api/artist/bookings/{booking.id}/cancel/")
+        self.assertEqual(res_art.status_code, 400)
+        self.assertIn("completed", res_art.json()["error"])
+
+        # Customer attempts to reschedule completed booking
+        self.client.force_login(self.customer)
+        res_resched = self.client.post(
+            f"/api/customer/bookings/{booking.id}/reschedule/",
+            data=json.dumps({"new_event_date": (timezone.now() + datetime.timedelta(days=10)).isoformat()}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_resched.status_code, 400)
+        self.assertIn("completed", res_resched.json()["error"])
