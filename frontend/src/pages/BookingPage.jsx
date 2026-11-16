@@ -1,8 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import BookingCalendarPicker from '../components/BookingCalendarPicker';
-import { fetchArtistDetail, createBooking } from '../js/auth';
+import {
+  fetchArtistDetail,
+  createBooking,
+  fetchArtistAvailability,
+  fetchPublicArtistAvailability,
+} from '../js/auth';
 import '../css/BookingPage.css';
 
 const EVENT_TYPE_OPTIONS = [
@@ -57,6 +62,58 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
   const [fieldError, setFieldError] = useState({ field: '', message: '' });
   const [bookingSuccessData, setBookingSuccessData] = useState(null);
 
+  // Artist availability state
+  const [unavailableDates, setUnavailableDates] = useState(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState('');
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    return '2026-11';
+  });
+  const availabilityReqIdRef = useRef(0);
+  const currentMonthRef = useRef(currentMonth);
+  currentMonthRef.current = currentMonth;
+
+  // Fetch artist availability for a given month with stale response guard
+  const loadAvailability = useCallback(async (monthStr, targetArtistId) => {
+    const aid = targetArtistId || artist?.id || artistId || 9;
+    if (!aid || !monthStr) return;
+
+    const reqId = ++availabilityReqIdRef.current;
+    setAvailabilityLoading(true);
+    setAvailabilityError('');
+
+    try {
+      const data = await fetchPublicArtistAvailability(aid, monthStr);
+      // Guard against stale responses: only update if this request is still the active one
+      if (reqId === availabilityReqIdRef.current) {
+        setUnavailableDates(data.unavailable_dates || []);
+        setAvailabilityError('');
+      }
+    } catch (err) {
+      if (reqId === availabilityReqIdRef.current) {
+        console.warn('Failed to load artist availability:', err);
+        // Do not silently display all dates as available when the API request fails
+        setUnavailableDates(null);
+        setAvailabilityError(err.message || 'Unable to load artist schedule. Please try again.');
+      }
+    } finally {
+      if (reqId === availabilityReqIdRef.current) {
+        setAvailabilityLoading(false);
+      }
+    }
+  }, [artist?.id, artistId]);
+
+  const handleMonthChange = useCallback((monthStr) => {
+    setCurrentMonth(monthStr);
+    loadAvailability(monthStr);
+  }, [loadAvailability]);
+
+  // Initial availability fetch
+  useEffect(() => {
+    const aid = artistId || 9;
+    loadAvailability(currentMonthRef.current, aid);
+  }, [artistId, loadAvailability]);
+
   // Authentication check: unauthenticated customers must be redirected to login
   useEffect(() => {
     if (!user) {
@@ -81,6 +138,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
         const data = await fetchArtistDetail(targetId);
         if (isMounted) {
           setArtist(data);
+          loadAvailability(currentMonthRef.current, data.id);
           setFormData((prev) => ({
             ...prev,
             budget: data.starting_price ? String(parseInt(data.starting_price, 10)) : prev.budget || '18000',
@@ -195,6 +253,16 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       return;
     }
 
+    if (Array.isArray(unavailableDates) && unavailableDates.includes(formData.event_date)) {
+      pointOutField('eventDateTimeSection', 'This artist already has a booking or active reservation on this date. Please select another date.');
+      return;
+    }
+
+    if (availabilityError) {
+      pointOutField('eventDateTimeSection', 'Unable to verify artist schedule. Please retry checking availability.');
+      return;
+    }
+
     if (!formData.event_location.trim()) {
       pointOutField('eventLocation', 'Please enter the venue / location.');
       return;
@@ -257,7 +325,14 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       const result = await createBooking(payload);
       setBookingSuccessData(result);
     } catch (err) {
-      setSubmitError(err.message || 'Failed to submit booking request. Please check inputs and try again.');
+      const errorMsg = err.message || 'Failed to submit booking request. Please check inputs and try again.';
+      setSubmitError(errorMsg);
+
+      // Task 4: After a booking submission returns HTTP 409, refresh availability for the currently displayed month and show the existing inline error.
+      if (err.status === 409 || errorMsg.toLowerCase().includes('already has a booking') || errorMsg.toLowerCase().includes('active reservation') || errorMsg.toLowerCase().includes('occupied')) {
+        pointOutField('eventDateTimeSection', errorMsg);
+        loadAvailability(currentMonthRef.current);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -432,9 +507,38 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
                       <span>{fieldError.message}</span>
                     </div>
                   )}
+                  {availabilityError && (
+                    <div className="booking-alert-banner" style={{ marginBottom: 12 }} role="alert">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                      <span>{availabilityError}</span>
+                      <button
+                        type="button"
+                        onClick={() => loadAvailability(currentMonthRef.current)}
+                        style={{
+                          marginLeft: 'auto',
+                          background: 'none',
+                          border: 'none',
+                          color: '#FF5722',
+                          textDecoration: 'underline',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
                   <BookingCalendarPicker
                     selectedDate={formData.event_date}
                     selectedTime={formData.event_time}
+                    unavailableDates={unavailableDates}
+                    isLoadingAvailability={availabilityLoading}
+                    availabilityError={availabilityError}
+                    onMonthChange={handleMonthChange}
                     onDateChange={(newDate) => {
                       setFormData((prev) => ({ ...prev, event_date: newDate }));
                       if (submitError) setSubmitError('');

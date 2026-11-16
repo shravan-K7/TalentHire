@@ -183,7 +183,9 @@ export async function createBooking(bookingData) {
 
   const data = await readResponse(response)
   if (!response.ok) {
-    throw new Error(data.error || 'Unable to submit booking request.')
+    const err = new Error(data.error || 'Unable to submit booking request.')
+    err.status = response.status
+    throw err
   }
   return data
 }
@@ -681,7 +683,10 @@ export async function deleteArtistPortfolio(itemId) {
   return data
 }
 
-export async function fetchArtistAvailability() {
+export async function fetchArtistAvailability(artistId, month) {
+  if (artistId && month) {
+    return fetchPublicArtistAvailability(artistId, month)
+  }
   const response = await fetch('/api/artist/availability/', {
     method: 'GET',
     credentials: 'include',

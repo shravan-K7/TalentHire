@@ -549,7 +549,8 @@ function CustomerDashboard({
       setRescheduleUnavailableDates(avail.unavailable_dates || []);
     } catch (err) {
       console.warn("Failed to fetch artist availability:", err);
-      setRescheduleUnavailableDates([]);
+      setRescheduleUnavailableDates(null);
+      setRescheduleError("Failed to fetch artist schedule. Please try again.");
     } finally {
       setRescheduleLoadingAvail(false);
     }
@@ -1973,7 +1974,7 @@ function CustomerDashboard({
                         </button>
                         <h2 className="cd-detail-title">
                           Booking ID:{" "}
-                          <span className="cd-highlight-id">#{b.id}8892</span>
+                          <span className="cd-highlight-id">#BK-{b.id}</span>
                         </h2>
                       </div>
 
@@ -1987,16 +1988,16 @@ function CustomerDashboard({
                     {/* Time & Schedule Grid */}
                     <div className="cd-detail-times-grid">
                       <div className="cd-detail-time-box">
-                        <span className="cd-time-label">Checking Time</span>
+                        <span className="cd-time-label">Event Date & Time</span>
                         <span className="cd-time-value">
-                          12:00 AM - 11:00 PM
+                          {b.event_date || "Date TBD"}
                         </span>
                       </div>
 
                       <div className="cd-detail-time-box">
-                        <span className="cd-time-label">Time</span>
+                        <span className="cd-time-label">Performance Duration</span>
                         <span className="cd-time-value">
-                          10:00 AM - 12:00 PM
+                          {b.performance_duration || "To be discussed"}
                         </span>
                       </div>
                     </div>
@@ -2016,7 +2017,11 @@ function CustomerDashboard({
                       <div className="cd-event-summary-item">
                         <span className="cd-summary-label">Agreed Price</span>
                         <span className="cd-summary-value price">
-                          ₹{b.agreed_price || "25,000"}
+                          {b.agreed_price
+                            ? `₹${Number(b.agreed_price).toLocaleString("en-IN")}`
+                            : b.customer_budget
+                            ? `₹${Number(b.customer_budget).toLocaleString("en-IN")} (Estimated)`
+                            : "TBD"}
                         </span>
                       </div>
                       {b.customer_phone && (
@@ -3519,6 +3524,8 @@ function CustomerDashboard({
                   selectedDate={rescheduleDate}
                   selectedTime={rescheduleTime}
                   unavailableDates={rescheduleUnavailableDates}
+                  isLoadingAvailability={rescheduleLoadingAvail}
+                  availabilityError={rescheduleError}
                   onMonthChange={(monthStr) => {
                     const artistId =
                       rescheduleModalBooking.artist_id ||

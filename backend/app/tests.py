@@ -4321,3 +4321,199 @@ class Phase6BookingCancellationAndReschedulingTests(TestCase):
         )
         self.assertEqual(res_resched.status_code, 400)
         self.assertIn("completed", res_resched.json()["error"])
+
+
+class BookingDateTimeTimezoneRegressionTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.customer = User.objects.create_user(
+            username="tz_customer",
+            email="tz_customer@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="tz_artist",
+            email="tz_artist@example.com",
+            password="securepassword123",
+        )
+        cat, _ = Category.objects.get_or_create(name="Live Bands")
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=cat,
+            stage_name="The Kolkata Melody",
+            location="Kolkata",
+            starting_price=30000,
+        )
+
+    def test_create_booking_date_and_time_stored_as_utc_from_kolkata(self):
+        """
+        Customer selects 30 November 2026 at 7:00 PM (19:00) Asia/Kolkata.
+        - Event date and time must be interpreted in Asia/Kolkata timezone.
+        - Stored UTC timestamp must be 2026-11-30 13:30:00+00:00.
+        - Converting back to Asia/Kolkata yields 2026-11-30 19:00:00 (7:00 PM).
+        """
+        import datetime
+        from zoneinfo import ZoneInfo
+        from django.utils import timezone
+
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "College Event",
+                "event_date": "2026-11-30",
+                "event_time": "19:00",
+                "event_location": "Science City Auditorium, Kolkata",
+                "performance_duration": "2 hours",
+                "expected_audience_size": 500,
+                "agreed_price": 30000,
+                "message": "Annual college fest performance.",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        booking_id = res.json()["booking_id"]
+
+        booking = Booking.objects.get(id=booking_id)
+        # Verify UTC stored timestamp
+        utc_dt = booking.event_date.astimezone(datetime.timezone.utc)
+        expected_utc = datetime.datetime(2026, 11, 30, 13, 30, tzinfo=datetime.timezone.utc)
+        self.assertEqual(utc_dt, expected_utc)
+
+        # Verify Asia/Kolkata local time
+        kolkata_tz = ZoneInfo("Asia/Kolkata")
+        local_dt = timezone.localtime(booking.event_date, timezone=kolkata_tz)
+        self.assertEqual(local_dt.year, 2026)
+        self.assertEqual(local_dt.month, 11)
+        self.assertEqual(local_dt.day, 30)
+        self.assertEqual(local_dt.hour, 19)
+        self.assertEqual(local_dt.minute, 0)
+        self.assertEqual(local_dt.strftime("%I:%M %p"), "07:00 PM")
+
+    def test_create_booking_iso_datetime_compatible(self):
+        """
+        Existing clients sending full ISO datetime strings remain compatible.
+        """
+        import datetime
+        from django.utils import timezone
+
+        self.client.force_login(self.customer)
+        # Naive ISO string (assumed Asia/Kolkata)
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Corporate Gala",
+                "event_date": "2027-12-15T19:00:00",
+                "event_time": "19:00",
+                "event_location": "ITC Sonar, Kolkata",
+                "performance_duration": "3 hours",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        booking = Booking.objects.get(id=res.json()["booking_id"])
+        expected_utc = datetime.datetime(2027, 12, 15, 13, 30, tzinfo=datetime.timezone.utc)
+        self.assertEqual(booking.event_date.astimezone(datetime.timezone.utc), expected_utc)
+
+        # Timezone-aware ISO string (+05:30)
+        res2 = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Sangeet Ceremony",
+                "event_date": "2027-12-16T19:00:00+05:30",
+                "event_time": "19:00",
+                "event_location": "JW Marriott, Kolkata",
+                "performance_duration": "2 hours",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res2.status_code, 201)
+        booking2 = Booking.objects.get(id=res2.json()["booking_id"])
+        expected_utc2 = datetime.datetime(2027, 12, 16, 13, 30, tzinfo=datetime.timezone.utc)
+        self.assertEqual(booking2.event_date.astimezone(datetime.timezone.utc), expected_utc2)
+
+    def test_create_booking_invalid_date_or_time_rejected(self):
+        """
+        Invalid date or time values are rejected with 400 Bad Request.
+        """
+        self.client.force_login(self.customer)
+
+        # Invalid time
+        res_bad_time = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Wedding",
+                "event_date": "2027-11-30",
+                "event_time": "25:99",
+                "event_location": "Kolkata",
+                "performance_duration": "2 hours",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res_bad_time.status_code, 400)
+        self.assertIn("time", res_bad_time.json()["error"].lower())
+
+        # Invalid date
+        res_bad_date = self.client.post(
+            "/api/bookings/",
+            data=json.dumps({
+                "artist_id": self.artist.id,
+                "event_type": "Wedding",
+                "event_date": "invalid-date",
+                "event_time": "19:00",
+                "event_location": "Kolkata",
+                "performance_duration": "2 hours",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res_bad_date.status_code, 400)
+        self.assertIn("date", res_bad_date.json()["error"].lower())
+
+    def test_customer_and_artist_dashboards_return_kolkata_local_time(self):
+        """
+        Both customer and artist dashboards return local Asia/Kolkata event_date (7:00 PM),
+        not UTC midnight or 12:00 AM.
+        """
+        import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from zoneinfo import ZoneInfo
+
+        kolkata_tz = ZoneInfo("Asia/Kolkata")
+        # 30 Nov 2026, 7:00 PM IST is 1:30 PM UTC
+        event_dt_utc = datetime.datetime(2026, 11, 30, 13, 30, tzinfo=datetime.timezone.utc)
+
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="College Event",
+            event_date=event_dt_utc,
+            event_location="Science City, Kolkata",
+            performance_duration="2 hours",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("30000.00"),
+        )
+
+        # 1. Customer Dashboard
+        self.client.force_login(self.customer)
+        res_cust = self.client.get("/api/customer/dashboard/")
+        self.assertEqual(res_cust.status_code, 200)
+        cust_bookings = res_cust.json()["bookings"]
+        target_cust = next((b for b in cust_bookings if b["id"] == booking.id), None)
+        self.assertIsNotNone(target_cust)
+        self.assertEqual(target_cust["event_date"], "Nov 30, 2026 07:00 PM")
+        self.assertIn("2026-11-30T19:00:00+05:30", target_cust["event_date_iso"])
+
+        # 2. Artist Dashboard
+        self.client.force_login(self.artist_user)
+        res_art = self.client.get("/api/artist/dashboard/")
+        self.assertEqual(res_art.status_code, 200)
+        art_bookings = res_art.json()["bookings"]
+        target_art = next((b for b in art_bookings if b["id"] == booking.id), None)
+        self.assertIsNotNone(target_art)
+        self.assertEqual(target_art["event_date"], "Nov 30, 2026 07:00 PM")
+        self.assertIn("2026-11-30T19:00:00+05:30", target_art["event_date_iso"])

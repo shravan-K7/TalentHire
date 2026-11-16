@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import re
+from zoneinfo import ZoneInfo
 
 import razorpay
 from decimal import Decimal, ROUND_HALF_UP
@@ -1174,30 +1175,55 @@ def create_booking_view(request):
     from django.utils import timezone
     import datetime
 
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
     combined_dt = None
-    dt_direct = parse_datetime(event_date_str)
-    if dt_direct:
-        if timezone.is_naive(dt_direct):
-            combined_dt = timezone.make_aware(
-                dt_direct, timezone.get_current_timezone()
-            )
-        else:
-            combined_dt = dt_direct
 
-    if not combined_dt:
-        parsed_d = parse_date(event_date_str)
+    # Check whether event_date_str is a full ISO datetime string (contains date and time component)
+    # Note: parse_datetime("YYYY-MM-DD") parses date-only strings as midnight UTC,
+    # so we must only use parse_datetime if the string explicitly contains a time component ('T' or ' ' with ':')
+    has_time_component = ("T" in event_date_str) or (" " in event_date_str and ":" in event_date_str)
+
+    if has_time_component:
+        try:
+            dt_direct = parse_datetime(event_date_str)
+        except (ValueError, TypeError):
+            dt_direct = None
+
+        if dt_direct is not None:
+            if timezone.is_naive(dt_direct):
+                combined_dt = timezone.make_aware(dt_direct, kolkata_tz)
+            else:
+                combined_dt = dt_direct
+        else:
+            return JsonResponse(
+                {"error": "Invalid event date format. Please select a valid date."},
+                status=400,
+            )
+
+    if combined_dt is None:
+        try:
+            parsed_d = parse_date(event_date_str)
+        except (ValueError, TypeError):
+            parsed_d = None
+
         if not parsed_d:
             return JsonResponse(
                 {"error": "Invalid event date format. Please select a valid date."},
                 status=400,
             )
 
-        parsed_t = parse_time(event_time_str)
+        try:
+            parsed_t = parse_time(event_time_str)
+        except (ValueError, TypeError):
+            parsed_t = None
+
         if not parsed_t:
             try:
                 parts = [int(p) for p in event_time_str.split(":")]
-                if len(parts) >= 2:
+                if len(parts) == 2:
                     parsed_t = datetime.time(parts[0], parts[1])
+                elif len(parts) == 3:
+                    parsed_t = datetime.time(parts[0], parts[1], parts[2])
             except (ValueError, TypeError):
                 pass
 
@@ -1209,7 +1235,7 @@ def create_booking_view(request):
 
         combined_dt = timezone.make_aware(
             datetime.datetime.combine(parsed_d, parsed_t),
-            timezone.get_current_timezone(),
+            kolkata_tz,
         )
 
     # Reject invalid or past event dates instead of silently replacing them with a default date
@@ -1252,8 +1278,6 @@ def create_booking_view(request):
                 status=400,
             )
 
-    from zoneinfo import ZoneInfo
-    kolkata_tz = ZoneInfo("Asia/Kolkata")
     local_event_date = timezone.localtime(combined_dt, timezone=kolkata_tz).date()
 
     with transaction.atomic():
@@ -1410,6 +1434,8 @@ def customer_dashboard_view(request):
                 }
             )
 
+        kolkata_tz = ZoneInfo("Asia/Kolkata")
+        b_dt_local = timezone.localtime(b.event_date, timezone=kolkata_tz) if b.event_date else None
         booking_item = {
             "id": b.id,
             "artist_id": b.artist.id,
@@ -1422,14 +1448,15 @@ def customer_dashboard_view(request):
             if b.artist.profile_image
             else "",
             "event_type": b.event_type,
-            "event_date": b.event_date.strftime("%b %d, %Y %I:%M %p")
-            if b.event_date
+            "event_date": b_dt_local.strftime("%b %d, %Y %I:%M %p")
+            if b_dt_local
             else "",
-            "event_date_iso": b.event_date.isoformat() if b.event_date else "",
+            "event_date_iso": b_dt_local.isoformat() if b_dt_local else "",
             "event_location": b.event_location,
             "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
+            "customer_budget": str(b.customer_budget) if b.customer_budget is not None else None,
             "agreed_price": str(b.agreed_price) if b.agreed_price is not None else None,
             "status": b.status,
             "message": b.message,
@@ -2678,6 +2705,8 @@ def artist_dashboard_view(request):
             )
 
         customer_profile = getattr(b.customer, "customer_profile", None)
+        kolkata_tz = ZoneInfo("Asia/Kolkata")
+        b_dt_local = timezone.localtime(b.event_date, timezone=kolkata_tz) if b.event_date else None
         booking_item = {
             "id": b.id,
             "customer_id": b.customer.id,
@@ -2689,14 +2718,15 @@ def artist_dashboard_view(request):
             if (customer_profile and customer_profile.profile_image)
             else "",
             "event_type": b.event_type,
-            "event_date": b.event_date.strftime("%b %d, %Y %I:%M %p")
-            if b.event_date
+            "event_date": b_dt_local.strftime("%b %d, %Y %I:%M %p")
+            if b_dt_local
             else "",
-            "event_date_iso": b.event_date.isoformat() if b.event_date else "",
+            "event_date_iso": b_dt_local.isoformat() if b_dt_local else "",
             "event_location": b.event_location,
             "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
+            "customer_budget": str(b.customer_budget) if b.customer_budget is not None else None,
             "agreed_price": str(b.agreed_price) if b.agreed_price else "0.00",
             "status": b.status,
             "message": b.message,

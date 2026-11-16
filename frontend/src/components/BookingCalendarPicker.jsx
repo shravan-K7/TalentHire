@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 // Time slot configuration matching the requested design
 const TIME_SLOT_SECTIONS = [
@@ -68,7 +68,14 @@ export default function BookingCalendarPicker({
   onTimeChange,
   unavailableDates = null,
   onMonthChange,
+  isLoadingAvailability = false,
+  availabilityError = null,
+  isLoading = false,
+  error = null,
 }) {
+  const loading = isLoadingAvailability || isLoading;
+  const err = availabilityError || error;
+
   // Parse initial selected date for calendar navigation
   const initialDateObj = (() => {
     if (selectedDate) {
@@ -88,10 +95,14 @@ export default function BookingCalendarPicker({
   const viewMonth = viewDate.getMonth();
 
   // Notify parent on month change or viewDate change
+  const lastNotifiedMonthRef = useRef('');
   useEffect(() => {
     if (onMonthChange) {
       const monthStr = `${viewYear}-${pad2(viewMonth + 1)}`;
-      onMonthChange(monthStr);
+      if (lastNotifiedMonthRef.current !== monthStr) {
+        lastNotifiedMonthRef.current = monthStr;
+        onMonthChange(monthStr);
+      }
     }
   }, [viewYear, viewMonth, onMonthChange]);
 
@@ -139,19 +150,25 @@ export default function BookingCalendarPicker({
   // Unavailable dates rule
   function isDateUnavailable(year, month, day) {
     const formatted = toDateString(year, month, day);
+
+    // If an error occurred or availability is still loading / not loaded,
+    // do not assume dates are free: treat as unavailable
+    if (err) {
+      return true;
+    }
+    if (loading || unavailableDates === null) {
+      return true;
+    }
+
     if (Array.isArray(unavailableDates)) {
       return unavailableDates.includes(formatted);
     }
-    // Fallback if unavailableDates not passed
-    if (year === 2026 && month === 10) {
-      if (day === 14 || day === 21 || day === 28) {
-        return true;
-      }
-    }
-    return false;
+
+    return true;
   }
 
   function handleSelectDay(day) {
+    if (loading || unavailableDates === null || err) return;
     const targetDate = new Date(viewYear, viewMonth, day);
     if (targetDate < todayMidnight) return; // Cannot select past
     if (isDateUnavailable(viewYear, viewMonth, day)) return; // Cannot select unavailable
@@ -200,6 +217,10 @@ export default function BookingCalendarPicker({
     }
     return 'Please select a date & time';
   })();
+
+  // Selected date availability status
+  const isSelectedDateUnavailable =
+    selYear !== -1 && isDateUnavailable(selYear, selMonth, selDay);
 
   return (
     <div className="booking-datetime-picker" aria-label="Event date and time picker">
@@ -272,7 +293,9 @@ export default function BookingCalendarPicker({
                 classNames += ' is-today';
               }
 
-              if (isUnavailable) {
+              if (loading || unavailableDates === null) {
+                classNames += ' is-loading';
+              } else if (isUnavailable) {
                 classNames += ' is-unavailable';
               } else if (isPast) {
                 classNames += ' is-past';
@@ -280,7 +303,7 @@ export default function BookingCalendarPicker({
                 classNames += ' is-available';
               }
 
-              const isDisabled = isPast || isUnavailable;
+              const isDisabled = isPast || isUnavailable || loading || unavailableDates === null || !!err;
 
               return (
                 <button
@@ -289,7 +312,7 @@ export default function BookingCalendarPicker({
                   className={classNames}
                   disabled={isDisabled}
                   onClick={() => handleSelectDay(day)}
-                  aria-label={`${monthTitle} ${day}${isToday ? ', Today' : ''}${isSelected ? ', Selected' : ''}${isUnavailable ? ', Unavailable' : ''}`}
+                  aria-label={`${monthTitle} ${day}${isToday ? ', Today' : ''}${isSelected ? ', Selected' : ''}${isUnavailable ? ', Unavailable' : ''}${loading || unavailableDates === null ? ', Checking availability' : ''}`}
                   aria-pressed={isSelected}
                 >
                   {day}
@@ -364,10 +387,27 @@ export default function BookingCalendarPicker({
       {/* Bottom Readout Status Strip */}
       <div className="booking-datetime-footer">
         <div className="booking-datetime-summary">{bottomReadout}</div>
-        <div className="booking-datetime-status">
-          <span className="booking-status-indicator" />
-          <span>Artist is available</span>
-        </div>
+        {loading || unavailableDates === null ? (
+          <div className="booking-datetime-status is-loading" aria-live="polite">
+            <span className="booking-status-indicator is-loading" />
+            <span>Checking availability...</span>
+          </div>
+        ) : err ? (
+          <div className="booking-datetime-status is-error" aria-live="assertive">
+            <span className="booking-status-indicator is-error" />
+            <span style={{ color: '#F44336' }}>Failed to load schedule</span>
+          </div>
+        ) : isSelectedDateUnavailable ? (
+          <div className="booking-datetime-status is-unavailable" aria-live="polite">
+            <span className="booking-status-indicator is-unavailable" />
+            <span style={{ color: '#FF9800' }}>Date unavailable</span>
+          </div>
+        ) : (
+          <div className="booking-datetime-status" aria-live="polite">
+            <span className="booking-status-indicator" />
+            <span>Artist is available</span>
+          </div>
+        )}
       </div>
     </div>
   );

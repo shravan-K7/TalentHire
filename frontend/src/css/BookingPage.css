@@ -427,6 +427,13 @@ select.booking-control option {
   opacity: 0.6;
 }
 
+/* Loading Dates */
+.booking-cal-day-cell.is-loading {
+  color: #555555 !important;
+  cursor: wait;
+  opacity: 0.45;
+}
+
 /* Calendar Legend */
 .booking-cal-legend {
   display: flex;
@@ -608,6 +615,27 @@ select.booking-control option {
   border-radius: 50%;
   background: #4CAF50;
   box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+}
+
+.booking-status-indicator.is-loading {
+  background: #FFC107 !important;
+  box-shadow: 0 0 6px rgba(255, 193, 7, 0.6) !important;
+  animation: pulse-cal-indicator 1.2s infinite ease-in-out;
+}
+
+.booking-status-indicator.is-error {
+  background: #F44336 !important;
+  box-shadow: 0 0 6px rgba(244, 67, 54, 0.6) !important;
+}
+
+.booking-status-indicator.is-unavailable {
+  background: #FF9800 !important;
+  box-shadow: 0 0 6px rgba(255, 152, 0, 0.6) !important;
+}
+
+@keyframes pulse-cal-indicator {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
 }
 
 /* ==========================================================================
