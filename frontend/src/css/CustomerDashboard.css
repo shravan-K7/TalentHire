@@ -909,19 +909,22 @@
 
 .cd-status-pill.confirmed,
 .cd-status-pill.accepted,
-.cd-status-pill.paid {
+.cd-status-pill.paid,
+.cd-status-pill.status-success {
   background: rgba(76, 175, 80, 0.18);
   color: #4CAF50;
   border: 1px solid rgba(76, 175, 80, 0.4);
 }
 
-.cd-status-pill.pending {
+.cd-status-pill.pending,
+.cd-status-pill.status-pending {
   background: rgba(255, 152, 0, 0.18);
   color: #FF9800;
   border: 1px solid rgba(255, 152, 0, 0.4);
 }
 
-.cd-status-pill.completed {
+.cd-status-pill.completed,
+.cd-status-pill.status-completed {
   background: rgba(103, 58, 183, 0.22);
   color: #B39DDB;
   border: 1px solid rgba(103, 58, 183, 0.45);
@@ -929,10 +932,21 @@
 
 .cd-status-pill.cancelled,
 .cd-status-pill.rejected,
-.cd-status-pill.refunded {
+.cd-status-pill.refunded,
+.cd-status-pill.status-refunded,
+.cd-status-pill.status-failed {
   background: rgba(244, 67, 54, 0.18);
   color: #EF5350;
   border: 1px solid rgba(244, 67, 54, 0.4);
+}
+
+.cd-status-pill.partially-refunded,
+.cd-status-pill.partially_refunded,
+.cd-status-pill.status-partially_refunded,
+.cd-status-pill.status-partially-refunded {
+  background: rgba(255, 152, 0, 0.18);
+  color: #FFB74D;
+  border: 1px solid rgba(255, 152, 0, 0.4);
 }
 
 .cd-status-pill.large {

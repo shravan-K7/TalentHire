@@ -29,6 +29,8 @@ function formatBookingStatus(status) {
   if (status === "completed") return "Completed";
   if (status === "cancelled") return "Cancelled";
   if (status === "rejected") return "Rejected";
+  if (status === "refunded") return "Refunded";
+  if (status === "partially_refunded") return "Partially Refunded";
   return typeof status === "string" && status.length > 0
     ? status.charAt(0).toUpperCase() + status.slice(1)
     : "Pending";
@@ -2187,6 +2189,11 @@ function CustomerDashboard({
                             p.status === "SUCCESS";
                           const isPending =
                             p.status === "pending" || p.status === "PENDING";
+                          const isPartiallyRefunded =
+                            p.status === "partially_refunded" ||
+                            p.status === "PARTIALLY_REFUNDED";
+                          const isRefunded =
+                            p.status === "refunded" || p.status === "REFUNDED";
                           const relatedBooking = bookings.find(
                             (b) => b.id === p.booking_id,
                           );
@@ -2208,13 +2215,27 @@ function CustomerDashboard({
                               <td className="td-amount">₹{p.amount}</td>
                               <td className="td-status">
                                 <span
-                                  className={`cd-status-pill ${isPaid ? "paid" : isPending ? "pending" : "refunded"}`}
+                                  className={`cd-status-pill ${
+                                    isPaid
+                                      ? "paid"
+                                      : isPending
+                                        ? "pending"
+                                        : isPartiallyRefunded
+                                          ? "partially-refunded"
+                                          : isRefunded
+                                            ? "refunded"
+                                            : p.status
+                                  }`}
                                 >
                                   {isPaid
                                     ? "Paid"
                                     : isPending
                                       ? "Pending"
-                                      : p.status}
+                                      : isPartiallyRefunded
+                                        ? "Partially Refunded"
+                                        : isRefunded
+                                          ? "Refunded"
+                                          : p.status}
                                 </span>
                               </td>
                               <td className="td-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>

@@ -4517,3 +4517,323 @@ class BookingDateTimeTimezoneRegressionTests(TestCase):
         self.assertIsNotNone(target_art)
         self.assertEqual(target_art["event_date"], "Nov 30, 2026 07:00 PM")
         self.assertIn("2026-11-30T19:00:00+05:30", target_art["event_date_iso"])
+
+
+class PaymentPartialAndFullRefundTests(TestCase):
+    """
+    Regression test suite verifying Payment lifecycle distinguishing full refunds from partial refunds.
+    Covers:
+    1. Full refund: ₹55,000 payment, ₹55,000 refunded -> status refunded.
+    2. Partial refund: ₹55,000 payment, ₹27,500 refunded -> status partially_refunded.
+    3. Multiple partial refunds totaling ₹55,000 -> status refunded.
+    4. Duplicate refund webhook -> no duplicate refund or incorrect status.
+    5. Failed refund -> payment must not be marked refunded.
+    """
+
+    def setUp(self):
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from app.models import ArtistProfile, CustomerProfile, Category, Booking, Payment, Refund
+        from zoneinfo import ZoneInfo
+        import datetime
+
+        self.kolkata = ZoneInfo("Asia/Kolkata")
+        self.category = Category.objects.create(name="PartialRefundMusic", description="Music category")
+
+        self.artist_user = User.objects.create_user(
+            username="artist_refund_test",
+            email="artist_refund_test@example.com",
+            password="testpassword123",
+            first_name="Refund",
+            last_name="Artist",
+        )
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.category,
+            stage_name="Refund Test DJ",
+            bio="DJ specialized in refund lifecycle tests",
+            location="Kolkata",
+            starting_price=Decimal("5000.00"),
+            years_of_experience=5,
+        )
+
+        self.customer = User.objects.create_user(
+            username="customer_refund_test",
+            email="customer_refund_test@example.com",
+            password="testpassword123",
+            first_name="Refund",
+            last_name="Customer",
+        )
+        self.customer_profile = CustomerProfile.objects.create(
+            user=self.customer,
+            phone="+919876543210",
+            location="Kolkata",
+        )
+
+    def _create_booking_and_payment(self, amount=None, txn_id="pay_test_55k_1", order_id="order_test_55k_1"):
+        from decimal import Decimal
+        import datetime
+        from app.models import Booking, Payment
+
+        pay_amount = amount or Decimal("55000.00")
+        event_dt = datetime.datetime(2027, 12, 1, 18, 0, tzinfo=self.kolkata)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Grand Gala",
+            event_date=event_dt,
+            event_location="Kolkata",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("50925.93"),
+        )
+        payment = Payment.objects.create(
+            booking=booking,
+            amount=pay_amount,
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("4400.00"),
+            artist_amount=Decimal("50600.00"),
+            status=Payment.Status.SUCCESS,
+            razorpay_order_id=order_id,
+            transaction_id=txn_id,
+        )
+        return booking, payment
+
+    # 1. Full refund: ₹55,000 payment, ₹55,000 refunded -> refunded
+    @patch("razorpay.Client")
+    def test_full_refund_marks_payment_as_refunded(self, mock_client_cls):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+        from app.views import initiate_payment_refund
+
+        booking, payment = self._create_booking_and_payment(amount=Decimal("55000.00"), txn_id="pay_full_55k")
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_full_55000",
+            "entity": "refund",
+            "amount": 5500000,
+            "currency": "INR",
+            "status": "processed",
+        }
+
+        success, refund, err = initiate_payment_refund(
+            payment=payment,
+            amount=Decimal("55000.00"),
+            reason="Full event cancellation refund",
+            client=mock_instance,
+        )
+        self.assertTrue(success)
+        self.assertIsNone(err)
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.status, Refund.Status.PROCESSED)
+        self.assertEqual(refund.amount, Decimal("55000.00"))
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+
+    # 2. Partial refund: ₹55,000 payment, ₹27,500 refunded -> partially_refunded
+    @patch("razorpay.Client")
+    def test_partial_refund_marks_payment_as_partially_refunded(self, mock_client_cls):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+        from app.views import initiate_payment_refund
+
+        booking, payment = self._create_booking_and_payment(amount=Decimal("55000.00"), txn_id="pay_part_55k")
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_part_27500",
+            "entity": "refund",
+            "amount": 2750000,
+            "currency": "INR",
+            "status": "processed",
+        }
+
+        success, refund, err = initiate_payment_refund(
+            payment=payment,
+            amount=Decimal("27500.00"),
+            reason="50% cancellation refund",
+            client=mock_instance,
+        )
+        self.assertTrue(success)
+        self.assertIsNone(err)
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.status, Refund.Status.PROCESSED)
+        self.assertEqual(refund.amount, Decimal("27500.00"))
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.PARTIALLY_REFUNDED)
+
+    # 3. Multiple partial refunds totaling ₹55,000 -> refunded
+    @patch("razorpay.Client")
+    def test_multiple_partial_refunds_totaling_full_amount_marks_refunded(self, mock_client_cls):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+        from app.views import initiate_payment_refund
+
+        booking, payment = self._create_booking_and_payment(amount=Decimal("55000.00"), txn_id="pay_multi_55k")
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+
+        # First partial refund of ₹27,500
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_part_split_1",
+            "entity": "refund",
+            "amount": 2750000,
+            "currency": "INR",
+            "status": "processed",
+        }
+        success1, refund1, err1 = initiate_payment_refund(
+            payment=payment,
+            amount=Decimal("27500.00"),
+            reason="First partial refund (50%)",
+            idempotency_key="rfnd_split_step1",
+            client=mock_instance,
+        )
+        self.assertTrue(success1)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.PARTIALLY_REFUNDED)
+
+        # Second partial refund of ₹27,500 (completes ₹55,000 total)
+        mock_instance.payment.refund.return_value = {
+            "id": "rfnd_part_split_2",
+            "entity": "refund",
+            "amount": 2750000,
+            "currency": "INR",
+            "status": "processed",
+        }
+        success2, refund2, err2 = initiate_payment_refund(
+            payment=payment,
+            amount=Decimal("27500.00"),
+            reason="Second partial refund (remaining 50%)",
+            idempotency_key="rfnd_split_step2",
+            client=mock_instance,
+        )
+        self.assertTrue(success2)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.REFUNDED)
+        self.assertEqual(Refund.objects.filter(payment=payment, status=Refund.Status.PROCESSED).count(), 2)
+
+    # 4. Duplicate refund webhook -> no duplicate refund or incorrect status
+    @patch("razorpay.Client")
+    def test_duplicate_refund_webhook_does_not_corrupt_status(self, mock_client_cls):
+        import json
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        from app.models import Payment, Refund
+
+        booking, payment = self._create_booking_and_payment(
+            amount=Decimal("55000.00"),
+            txn_id="pay_webhook_dup_55k",
+            order_id="order_webhook_dup_55k",
+        )
+
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.utility.verify_webhook_signature.return_value = True
+
+        webhook_body = json.dumps({
+            "event": "refund.processed",
+            "payload": {
+                "refund": {
+                    "entity": {
+                        "id": "rfnd_webhook_dup_27500",
+                        "payment_id": "pay_webhook_dup_55k",
+                        "amount": 2750000,
+                        "status": "processed",
+                    }
+                },
+                "payment": {
+                    "entity": {
+                        "id": "pay_webhook_dup_55k",
+                        "order_id": "order_webhook_dup_55k",
+                        "amount": 5500000,
+                    }
+                }
+            }
+        })
+        headers = {
+            "HTTP_X_RAZORPAY_SIGNATURE": "valid_signature",
+            "HTTP_X_RAZORPAY_EVENT_ID": "evt_refund_part_dup_999",
+        }
+
+        with self.settings(RAZORPAY_WEBHOOK_SECRET="test_webhook_secret"):
+            # First webhook delivery
+            res1 = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", **headers)
+            self.assertEqual(res1.status_code, 200)
+
+            payment.refresh_from_db()
+            self.assertEqual(payment.status, Payment.Status.PARTIALLY_REFUNDED)
+            self.assertEqual(Refund.objects.filter(payment=payment).count(), 1)
+            rf1 = Refund.objects.filter(payment=payment).first()
+            self.assertEqual(rf1.amount, Decimal("27500.00"))
+            self.assertEqual(rf1.status, Refund.Status.PROCESSED)
+
+            # Duplicate identical webhook delivery
+            res2 = self.client.post("/api/payments/webhook/", data=webhook_body, content_type="application/json", **headers)
+            self.assertEqual(res2.status_code, 200)
+            self.assertEqual(res2.json().get("status"), "ignored")
+
+            # Status and records remain untouched
+            payment.refresh_from_db()
+            self.assertEqual(payment.status, Payment.Status.PARTIALLY_REFUNDED)
+            self.assertEqual(Refund.objects.filter(payment=payment).count(), 1)
+
+    # 5. Failed refund -> payment must not be marked refunded
+    @patch("razorpay.Client")
+    def test_failed_refund_does_not_mark_payment_refunded(self, mock_client_cls):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+        import razorpay.errors
+        from app.models import Payment, Refund
+        from app.views import initiate_payment_refund
+
+        booking, payment = self._create_booking_and_payment(amount=Decimal("55000.00"), txn_id="pay_fail_55k")
+        mock_instance = MagicMock()
+        mock_client_cls.return_value = mock_instance
+        mock_instance.payment.refund.side_effect = razorpay.errors.GatewayError("Bank server unavailable")
+
+        success, refund, err = initiate_payment_refund(
+            payment=payment,
+            amount=Decimal("27500.00"),
+            reason="Partial refund attempt failing at gateway",
+            client=mock_instance,
+        )
+        self.assertFalse(success)
+        self.assertIsNotNone(err)
+        self.assertIsNotNone(refund)
+        self.assertEqual(refund.status, Refund.Status.FAILED)
+
+        # Payment MUST remain SUCCESS and NOT marked REFUNDED or PARTIALLY_REFUNDED
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.SUCCESS)
+
+    # 6. Customer and Artist dashboards correctly expose partially_refunded status
+    def test_customer_and_artist_dashboard_show_partially_refunded_status(self):
+        from decimal import Decimal
+        from app.models import Payment
+
+        booking, payment = self._create_booking_and_payment(amount=Decimal("55000.00"), txn_id="pay_dash_part_55k")
+        payment.status = Payment.Status.PARTIALLY_REFUNDED
+        payment.save(update_fields=["status"])
+
+        # Customer Dashboard
+        self.client.force_login(self.customer)
+        res_cust = self.client.get("/api/customer/dashboard/")
+        self.assertEqual(res_cust.status_code, 200)
+        cust_payments = res_cust.json().get("payments", [])
+        p_cust = next((p for p in cust_payments if p["id"] == payment.id), None)
+        self.assertIsNotNone(p_cust)
+        self.assertEqual(p_cust["status"], "partially_refunded")
+
+        # Artist Dashboard
+        self.client.force_login(self.artist_user)
+        res_art = self.client.get("/api/artist/dashboard/")
+        self.assertEqual(res_art.status_code, 200)
+        art_payments = res_art.json().get("payments", [])
+        p_art = next((p for p in art_payments if p["id"] == payment.id), None)
+        self.assertIsNotNone(p_art)
+        self.assertEqual(p_art["status"], "partially_refunded")

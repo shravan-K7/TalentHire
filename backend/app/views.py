@@ -16,6 +16,7 @@ from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError, models
+from django.db.models import Sum
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -1426,7 +1427,7 @@ def customer_dashboard_view(request):
                 {
                     "id": f"pay-{payment.id}",
                     "type": "payment",
-                    "title": f"Payment {payment.status.title()}",
+                    "title": f"Payment {payment.status.replace('_', ' ').title()}",
                     "description": f"₹{payment.amount} for {b.artist.stage_name}",
                     "timestamp": payment.created_at.isoformat(),
                     "formatted_time": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
@@ -2696,7 +2697,7 @@ def artist_dashboard_view(request):
                 {
                     "id": f"pay-{payment.id}",
                     "type": "payment",
-                    "title": f"Payment {payment.status.title()}",
+                    "title": f"Payment {payment.status.replace('_', ' ').title()}",
                     "description": f"₹{payment.artist_amount or payment.amount} for {b.event_type} from {b.customer.get_full_name() or b.customer.username}",
                     "timestamp": payment.created_at.isoformat(),
                     "formatted_time": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
@@ -3615,6 +3616,30 @@ def dispatch_refund_notifications(refund):
             )
 
 
+def update_payment_refund_status(payment):
+    """
+    Computes cumulative successful refunds for a payment and updates its status:
+    - If cumulative successful refunds >= payment.amount: status = REFUNDED
+    - If cumulative successful refunds > 0: status = PARTIALLY_REFUNDED
+    - Otherwise (0 successful refunds): preserves existing status
+    """
+    total_refunded = (
+        Refund.objects.filter(payment=payment, status=Refund.Status.PROCESSED)
+        .aggregate(total=Sum("amount"))["total"]
+        or Decimal("0.00")
+    )
+    new_status = None
+    if total_refunded >= payment.amount:
+        new_status = Payment.Status.REFUNDED
+    elif total_refunded > Decimal("0.00"):
+        new_status = Payment.Status.PARTIALLY_REFUNDED
+
+    if new_status and payment.status != new_status:
+        payment.status = new_status
+        payment.save(update_fields=["status", "updated_at"])
+    return payment.status
+
+
 def initiate_payment_refund(payment, amount=None, reason="", idempotency_key=None, client=None):
     """
     Initiates an actual refund through Razorpay's refund API for a captured payment.
@@ -3689,15 +3714,14 @@ def initiate_payment_refund(payment, amount=None, reason="", idempotency_key=Non
 
             if rf_status == "processed":
                 locked_refund.status = Refund.Status.PROCESSED
+                locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
                 locked_payment = Payment.objects.select_for_update().get(id=payment.id)
-                if locked_payment.status == Payment.Status.SUCCESS:
-                    locked_payment.status = Payment.Status.REFUNDED
-                    locked_payment.save(update_fields=["status", "updated_at"])
+                update_payment_refund_status(locked_payment)
                 dispatch_refund_notifications(locked_refund)
             else:
                 locked_refund.status = Refund.Status.PENDING
+                locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
 
-            locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
             return True, locked_refund, None
 
     except RAZORPAY_API_ERRORS as ex:
@@ -3718,14 +3742,13 @@ def initiate_payment_refund(payment, amount=None, reason="", idempotency_key=Non
                                     locked_refund.razorpay_refund_id = str(rf_id)
                                 if rf_st == "processed":
                                     locked_refund.status = Refund.Status.PROCESSED
+                                    locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
                                     locked_payment = Payment.objects.select_for_update().get(id=payment.id)
-                                    if locked_payment.status == Payment.Status.SUCCESS:
-                                        locked_payment.status = Payment.Status.REFUNDED
-                                        locked_payment.save(update_fields=["status", "updated_at"])
+                                    update_payment_refund_status(locked_payment)
                                     dispatch_refund_notifications(locked_refund)
                                 else:
                                     locked_refund.status = Refund.Status.PENDING
-                                locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
+                                    locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
                                 return True, locked_refund, None
         except Exception as check_ex:
             logger.warning("Could not reconcile refunds with Razorpay for payment %s: %s", payment.transaction_id, check_ex)
@@ -3754,14 +3777,13 @@ def initiate_payment_refund(payment, amount=None, reason="", idempotency_key=Non
                                     locked_refund.razorpay_refund_id = str(rf_id)
                                 if rf_st == "processed":
                                     locked_refund.status = Refund.Status.PROCESSED
+                                    locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
                                     locked_payment = Payment.objects.select_for_update().get(id=payment.id)
-                                    if locked_payment.status == Payment.Status.SUCCESS:
-                                        locked_payment.status = Payment.Status.REFUNDED
-                                        locked_payment.save(update_fields=["status", "updated_at"])
+                                    update_payment_refund_status(locked_payment)
                                     dispatch_refund_notifications(locked_refund)
                                 else:
                                     locked_refund.status = Refund.Status.PENDING
-                                locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
+                                    locked_refund.save(update_fields=["razorpay_refund_id", "status", "updated_at"])
                                 return True, locked_refund, None
         except Exception as check_ex:
             logger.warning("Could not reconcile refunds with Razorpay for payment %s: %s", payment.transaction_id, check_ex)
@@ -4266,7 +4288,7 @@ def verify_razorpay_payment_view(request):
             status=400,
         )
 
-    if payment.status == Payment.Status.REFUNDED:
+    if payment.status in (Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED):
         return JsonResponse(
             {"error": "This payment has already been refunded."},
             status=400,
@@ -4579,11 +4601,11 @@ def razorpay_webhook_view(request):
                 )
                 return JsonResponse({"error": "Different payment ID for already-paid booking."}, status=409)
 
-            # A refunded payment cannot return to SUCCESS
-            if payment.status == Payment.Status.REFUNDED:
-                logger.warning("Captured event received for already refunded payment #%s.", payment.id)
+            # A refunded or partially refunded payment cannot return to SUCCESS
+            if payment.status in (Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED):
+                logger.warning("Captured event received for already refunded/partially refunded payment #%s.", payment.id)
                 ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
-                return JsonResponse({"status": "ignored", "message": "Payment has already been refunded.", "payment_status": "refunded"})
+                return JsonResponse({"status": "ignored", "message": "Payment has already been refunded.", "payment_status": payment.status})
 
             # Validate currency and amount
             expected_amount = int(payment.amount * 100)
@@ -4673,7 +4695,7 @@ def razorpay_webhook_view(request):
             if order_id:
                 payment = Payment.objects.select_for_update().filter(razorpay_order_id=order_id).first()
                 if payment:
-                    if payment.status in (Payment.Status.SUCCESS, Payment.Status.REFUNDED):
+                    if payment.status in (Payment.Status.SUCCESS, Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED):
                         logger.warning(
                             "Ignoring payment.failed webhook for payment #%s because current status is %s",
                             payment.id, payment.status
@@ -4708,7 +4730,11 @@ def razorpay_webhook_view(request):
             if refund_id:
                 refund = Refund.objects.select_for_update().filter(razorpay_refund_id=refund_id).first()
             if not refund and payment:
-                refund = Refund.objects.select_for_update().filter(payment=payment).first()
+                refund = Refund.objects.select_for_update().filter(
+                    payment=payment,
+                    status=Refund.Status.PENDING,
+                    razorpay_refund_id__isnull=True,
+                ).first()
 
             if refund:
                 refund.status = Refund.Status.PROCESSED
@@ -4729,11 +4755,10 @@ def razorpay_webhook_view(request):
                 )
 
             if payment:
-                payment.status = Payment.Status.REFUNDED
-                payment.save(update_fields=["status", "updated_at"])
+                update_payment_refund_status(payment)
                 if refund:
                     dispatch_refund_notifications(refund)
-                logger.info("Payment %s status updated to REFUNDED", payment_id)
+                logger.info("Payment %s status updated to %s", payment.id, payment.status)
 
             ProcessedWebhookEvent.objects.get_or_create(event_id=event_id, defaults={"event_type": event_type})
 

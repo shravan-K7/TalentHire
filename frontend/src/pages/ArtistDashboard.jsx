@@ -24,6 +24,8 @@ function formatBookingStatus(status) {
   if (status === "completed") return "Completed";
   if (status === "cancelled") return "Cancelled";
   if (status === "rejected") return "Declined";
+  if (status === "refunded") return "Refunded";
+  if (status === "partially_refunded") return "Partially Refunded";
   return typeof status === "string" && status.length > 0
     ? status.charAt(0).toUpperCase() + status.slice(1)
     : "Pending";

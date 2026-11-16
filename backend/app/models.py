@@ -154,6 +154,7 @@ class Payment(models.Model):
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
         REFUNDED = "refunded", "Refunded"
+        PARTIALLY_REFUNDED = "partially_refunded", "Partially Refunded"
 
     booking = models.OneToOneField(
         Booking,
