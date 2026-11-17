@@ -26,6 +26,7 @@ function formatBookingStatus(status) {
   if (status === "rejected") return "Declined";
   if (status === "refunded") return "Refunded";
   if (status === "partially_refunded") return "Partially Refunded";
+  if (status === "unavailable") return "Unavailable";
   return typeof status === "string" && status.length > 0
     ? status.charAt(0).toUpperCase() + status.slice(1)
     : "Pending";
@@ -89,6 +90,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     final_price: "",
   });
   const [responding, setResponding] = useState(false);
+  const [respondError, setRespondError] = useState("");
 
   const [portfolioModalOpen, setPortfolioModalOpen] = useState(false);
   const [portfolioForm, setPortfolioForm] = useState({
@@ -367,12 +369,34 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     }
   }
 
+  function openRespondModal(action, booking) {
+    setRespondError("");
+    setRespondModal({
+      open: true,
+      action,
+      booking,
+      reason: "",
+      final_price: "",
+    });
+  }
+
+  function closeRespondModal() {
+    setRespondError("");
+    setRespondModal({
+      open: false,
+      action: "accept",
+      booking: null,
+      reason: "",
+      final_price: "",
+    });
+  }
+
   // Handle Booking Response (Accept / Reject)
   async function handleConfirmBookingResponse() {
     console.log("Respond modal state:", respondModal);
     console.log("Final price:", respondModal.final_price);
 
-    if (!respondModal.booking) return;
+    if (!respondModal.booking || responding) return;
 
     // Validate before setting loading state
     if (
@@ -381,11 +405,12 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
         !Number.isFinite(Number(respondModal.final_price)) ||
         Number(respondModal.final_price) <= 0)
     ) {
-      alert("Please enter a valid final performance price.");
+      setRespondError("Please enter a valid final performance price.");
       return;
     }
 
     setResponding(true);
+    setRespondError("");
 
     try {
       const res = await respondArtistBooking(respondModal.booking.id, {
@@ -397,6 +422,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             : undefined,
       });
       showToast(res.message || "Booking status updated.");
+      setRespondError("");
       setRespondModal({
         open: false,
         action: "accept",
@@ -414,7 +440,19 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       }
       await loadDashboard();
     } catch (err) {
-      showToast(err.message || "Failed to update booking status.");
+      console.error("Booking response error:", err);
+      const isConflict =
+        err.status === 409 ||
+        (err.message &&
+          err.message.toLowerCase().includes("already has a booking"));
+      const errorMsg =
+        err.message ||
+        (isConflict
+          ? "This artist already has a booking or active reservation on this date. Please select another date."
+          : "Failed to update booking status.");
+
+      setRespondError(errorMsg);
+      showToast(errorMsg);
     } finally {
       setResponding(false);
     }
@@ -1274,15 +1312,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                             <button
                               type="button"
                               className="cd-btn-primary cd-btn-sm"
-                              onClick={() => {
-                                setRespondModal({
-                                  open: true,
-                                  action: "accept",
-                                  booking: b,
-                                  reason: "",
-                                  final_price: "",
-                                });
-                              }}
+                              onClick={() => openRespondModal("accept", b)}
                             >
                               Respond
                             </button>
@@ -2720,15 +2750,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                             <button
                               type="button"
                               className="cd-btn-primary cd-btn-sm"
-                              onClick={() => {
-                                setRespondModal({
-                                  open: true,
-                                  action: "accept",
-                                  booking: b,
-                                  reason: "",
-                                  final_price: "",
-                                });
-                              }}
+                              onClick={() => openRespondModal("accept", b)}
                             >
                               Accept
                             </button>
@@ -2736,15 +2758,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                               type="button"
                               className="cd-btn-ghost cd-btn-sm"
                               style={{ color: "#EF5350" }}
-                              onClick={() => {
-                                setRespondModal({
-                                  open: true,
-                                  action: "reject",
-                                  booking: b,
-                                  reason: "",
-                                  final_price: "",
-                                });
-                              }}
+                              onClick={() => openRespondModal("reject", b)}
                             >
                               Decline
                             </button>
@@ -3045,15 +3059,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         <button
                           type="button"
                           className="cd-btn-primary"
-                          onClick={() => {
-                            setRespondModal({
-                              open: true,
-                              action: "accept",
-                              booking: selectedBooking,
-                              reason: "",
-                              final_price: "",
-                            });
-                          }}
+                          onClick={() => openRespondModal("accept", selectedBooking)}
                         >
                           Accept Booking Request
                         </button>
@@ -3061,15 +3067,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           type="button"
                           className="cd-btn-secondary"
                           style={{ borderColor: "#EF5350", color: "#EF5350" }}
-                          onClick={() => {
-                            setRespondModal({
-                              open: true,
-                              action: "reject",
-                              booking: selectedBooking,
-                              reason: "",
-                              final_price: "",
-                            });
-                          }}
+                          onClick={() => openRespondModal("reject", selectedBooking)}
                         >
                           Decline Request
                         </button>
@@ -3789,15 +3787,8 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               <button
                 type="button"
                 className="cd-modal-close"
-                onClick={() =>
-                  setRespondModal({
-                    open: false,
-                    action: "accept",
-                    booking: null,
-                    reason: "",
-                    final_price: "",
-                  })
-                }
+                disabled={responding}
+                onClick={closeRespondModal}
                 aria-label="Close"
               >
                 <svg
@@ -3817,6 +3808,16 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             </div>
 
             <div className="cd-modal-body">
+              {respondError && (
+                <div
+                  className="cd-alert cd-alert-error"
+                  role="alert"
+                  style={{ marginBottom: "16px" }}
+                >
+                  {respondError}
+                </div>
+              )}
+
               <p
                 style={{
                   margin: 0,
@@ -3845,8 +3846,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     placeholder="Enter your final performance price"
                     value={respondModal.final_price}
                     onChange={(e) => {
-                      console.log("Input changed:", e.target.value);
-
+                      setRespondError("");
                       setRespondModal((p) => ({
                         ...p,
                         final_price: e.target.value,
@@ -3884,9 +3884,10 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                       : "e.g. Date already booked for another show, Unable to travel..."
                   }
                   value={respondModal.reason}
-                  onChange={(e) =>
-                    setRespondModal((p) => ({ ...p, reason: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setRespondError("");
+                    setRespondModal((p) => ({ ...p, reason: e.target.value }));
+                  }}
                 />
               </div>
             </div>
@@ -3912,15 +3913,8 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               <button
                 type="button"
                 className="cd-btn-secondary"
-                onClick={() =>
-                  setRespondModal({
-                    open: false,
-                    action: "accept",
-                    booking: null,
-                    reason: "",
-                    final_price: "",
-                  })
-                }
+                disabled={responding}
+                onClick={closeRespondModal}
               >
                 Cancel
               </button>

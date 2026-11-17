@@ -31,6 +31,7 @@ function formatBookingStatus(status) {
   if (status === "rejected") return "Rejected";
   if (status === "refunded") return "Refunded";
   if (status === "partially_refunded") return "Partially Refunded";
+  if (status === "unavailable") return "Unavailable";
   return typeof status === "string" && status.length > 0
     ? status.charAt(0).toUpperCase() + status.slice(1)
     : "Pending";
@@ -806,7 +807,9 @@ function CustomerDashboard({
     return (
       b.status === "completed" ||
       b.status === "cancelled" ||
-      b.status === "rejected"
+      b.status === "rejected" ||
+      b.status === "expired" ||
+      b.status === "unavailable"
     );
   });
 
@@ -1917,6 +1920,19 @@ function CustomerDashboard({
                                 </svg>
                               </button>
                             </div>
+
+                            {b.status === "unavailable" && b.response_message && (
+                              <div
+                                style={{
+                                  gridColumn: "1 / -1",
+                                  fontSize: "0.84rem",
+                                  color: "#EF5350",
+                                  marginTop: "6px",
+                                }}
+                              >
+                                {b.response_message}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1984,6 +2000,17 @@ function CustomerDashboard({
                         {formatBookingStatus(b.status)}
                       </span>
                     </div>
+
+                    {b.status === "unavailable" && (
+                      <div
+                        className="cd-alert cd-alert-error"
+                        role="alert"
+                        style={{ marginTop: "16px", marginBottom: "16px" }}
+                      >
+                        {b.response_message ||
+                          "This artist is no longer available on your selected date because another booking was confirmed."}
+                      </div>
+                    )}
 
                     <div className="cd-detail-card-divider" />
 

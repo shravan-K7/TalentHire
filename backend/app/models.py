@@ -92,6 +92,7 @@ class Booking(models.Model):
         CANCELLED = "cancelled", "Cancelled"
         COMPLETED = "completed", "Completed"
         EXPIRED = "expired", "Expired"
+        UNAVAILABLE = "unavailable", "Unavailable"
 
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL,

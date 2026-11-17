@@ -33,7 +33,7 @@
   padding: 14px 22px;
   border-radius: 8px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
-  z-index: 2000;
+  z-index: 4000;
   font-size: 0.92rem;
   font-weight: 500;
   animation: cdSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
@@ -934,7 +934,9 @@
 .cd-status-pill.rejected,
 .cd-status-pill.refunded,
 .cd-status-pill.status-refunded,
-.cd-status-pill.status-failed {
+.cd-status-pill.status-failed,
+.cd-status-pill.unavailable,
+.cd-status-pill.status-unavailable {
   background: rgba(244, 67, 54, 0.18);
   color: #EF5350;
   border: 1px solid rgba(244, 67, 54, 0.4);

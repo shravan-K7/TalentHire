@@ -600,7 +600,10 @@ export async function respondArtistBooking(bookingId, { action, reason = '', fin
   const data = await readResponse(response)
 
   if (!response.ok) {
-    throw new Error(data.error || 'Failed to respond to booking request.')
+    const err = new Error(data.error || 'Failed to respond to booking request.')
+    err.status = response.status
+    err.data = data
+    throw err
   }
 
   return data
