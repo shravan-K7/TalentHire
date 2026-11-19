@@ -1,0 +1,1005 @@
+/* ==========================================================================
+   TalentHire Customer – My Bookings Dashboard Stylesheet
+   Pixel-Accurate reproduction of Reference Screenshot
+   Charcoal Dark Theme | Orange Accent: #FF5722
+   Full Responsive Layout: Desktop, Laptop, Tablet, Mobile
+   Zero emojis, Clean Typography, Subtle Shadows & Borders
+   ========================================================================== */
+
+.th-bookings-dashboard {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  color: #F7F7F7;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+/* --------------------------------------------------------------------------
+   1. MAIN HEADER
+   -------------------------------------------------------------------------- */
+.th-bookings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+  gap: 16px;
+}
+
+.th-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.th-header-title {
+  margin: 0;
+  font-size: 1.85rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.th-header-subtitle {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #8E8E93;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.th-btn-find-artists {
+  background: #FF5722;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 9999px;
+  padding: 10px 24px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 14px rgba(255, 87, 34, 0.25);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.th-btn-find-artists:hover {
+  background: #F4511E;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255, 87, 34, 0.35);
+}
+
+.th-btn-find-artists:active {
+  transform: translateY(0);
+}
+
+/* --------------------------------------------------------------------------
+   2. HORIZONTAL STATISTICS CARDS (6 CARDS IN A ROW)
+   -------------------------------------------------------------------------- */
+.th-stats-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.th-stat-card {
+  background: #19191B;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  user-select: none;
+}
+
+/* Top accent colored borders */
+.th-stat-card.total {
+  border-top: 3px solid #E5E5EA;
+}
+
+.th-stat-card.pending {
+  border-top: 3px solid #FFAB00;
+}
+
+.th-stat-card.confirmed {
+  border-top: 3px solid #00E676;
+}
+
+.th-stat-card.in_progress {
+  border-top: 3px solid #2979FF;
+}
+
+.th-stat-card.completed {
+  border-top: 3px solid #B388FF;
+}
+
+.th-stat-card.cancelled {
+  border-top: 3px solid #FF1744;
+}
+
+.th-stat-card:hover {
+  transform: translateY(-2px);
+  background: #202023;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.th-stat-card.active-stat {
+  background: #222226;
+  border-color: rgba(255, 87, 34, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 87, 34, 0.25);
+}
+
+.th-stat-num {
+  font-size: 1.85rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #FFFFFF;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.th-stat-num.total {
+  color: #F5F5F7;
+}
+
+.th-stat-num.pending {
+  color: #FFAB00;
+}
+
+.th-stat-num.confirmed {
+  color: #00E676;
+}
+
+.th-stat-num.in_progress {
+  color: #2979FF;
+}
+
+.th-stat-num.completed {
+  color: #B388FF;
+}
+
+.th-stat-num.cancelled {
+  color: #FF1744;
+}
+
+.th-stat-label {
+  font-size: 0.78rem;
+  color: #8E8E93;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   3. BOOKING FILTERS AND SORTING ROW
+   -------------------------------------------------------------------------- */
+.th-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  gap: 16px;
+}
+
+.th-filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.th-filter-tab {
+  background: transparent;
+  color: #8E8E93;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.th-filter-tab:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.th-filter-tab.active {
+  background: #FF5722;
+  color: #FFFFFF;
+  border-color: #FF5722;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(255, 87, 34, 0.3);
+}
+
+.th-sort-dropdown-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.th-sort-select {
+  background: #19191B;
+  color: #F7F7F7;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.th-sort-select:hover,
+.th-sort-select:focus {
+  border-color: #FF5722;
+}
+
+.th-sort-select option {
+  background: #1F1F22;
+  color: #F7F7F7;
+}
+
+/* --------------------------------------------------------------------------
+   4. BOOKING CARDS LIST
+   -------------------------------------------------------------------------- */
+.th-bookings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.th-booking-card {
+  background: #1A1A1C;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 18px 22px;
+  display: grid;
+  grid-template-columns: minmax(240px, 1.4fr) minmax(280px, 2fr) minmax(180px, 1.1fr);
+  align-items: center;
+  gap: 24px;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  position: relative;
+}
+
+.th-booking-card:hover {
+  background: #1F1F22;
+  border-color: rgba(255, 87, 34, 0.28);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+   LEFT SECTION: ARTIST AND EVENT INFORMATION
+   -------------------------------------------------------------------------- */
+.th-card-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.th-artist-avatar-box {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.th-artist-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.th-artist-avatar-initials {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: 0.02em;
+}
+
+.th-artist-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.th-booking-code {
+  font-size: 0.78rem;
+  color: #8E8E93;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.th-artist-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex-wrap: wrap;
+  line-height: 1.25;
+}
+
+.th-artist-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.th-artist-category {
+  font-size: 0.8rem;
+  color: #8E8E93;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.th-event-datetime {
+  font-size: 0.82rem;
+  color: #C7C7CC;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+.th-event-location {
+  font-size: 0.8rem;
+  color: #8E8E93;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------------------
+   MIDDLE SECTION: 4-STAGE PROGRESS TRACKER
+   -------------------------------------------------------------------------- */
+.th-card-middle {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+}
+
+.th-tracker-container {
+  position: relative;
+  width: 100%;
+}
+
+.th-tracker-track-wrap {
+  position: relative;
+  width: 100%;
+  height: 24px;
+  display: flex;
+  align-items: center;
+}
+
+/* Line container spanning from center of first node (12px) to center of last node (100% - 12px) */
+.th-tracker-line-container {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Background line connecting all nodes */
+.th-tracker-bg-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  z-index: 1;
+}
+
+/* Active filled progress line (Orange) */
+.th-tracker-fill-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: #FF5722;
+  z-index: 2;
+  transition: width 0.3s ease;
+}
+
+.th-tracker-nodes-row {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 3;
+}
+
+.th-tracker-node-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 24px;
+}
+
+/* 3 Node States: Completed, Current, Upcoming */
+.th-tracker-circle {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease, background 0.2s ease;
+  box-sizing: border-box;
+}
+
+/* 1. Completed Node */
+.th-tracker-circle.completed {
+  background: #FF5722;
+  box-shadow: 0 0 8px rgba(255, 87, 34, 0.4);
+}
+
+/* 2. Current Node (Outer Orange Ring + Inner Dot) */
+.th-tracker-circle.current {
+  width: 18px;
+  height: 18px;
+  background: #1A1A1C;
+  border: 2px solid #FF5722;
+  box-shadow: 0 0 10px rgba(255, 87, 34, 0.5);
+}
+
+.th-tracker-circle-inner-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #FF5722;
+}
+
+/* 3. Upcoming Node (Neutral Grey) */
+.th-tracker-circle.upcoming {
+  width: 12px;
+  height: 12px;
+  background: #242426;
+  border: 2px solid #555558;
+}
+
+/* 4. Cancelled / Rejected Node */
+.th-tracker-circle.cancelled {
+  background: #FF1744;
+  box-shadow: 0 0 8px rgba(255, 23, 68, 0.4);
+}
+
+/* Labels below indicators */
+.th-tracker-labels-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  width: 100%;
+}
+
+.th-tracker-label {
+  font-size: 0.72rem;
+  color: #6E6E73;
+  text-align: center;
+  width: 72px;
+  line-height: 1.25;
+  white-space: normal;
+  transition: color 0.15s ease;
+}
+
+.th-tracker-label.active {
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+.th-tracker-label.done {
+  color: #D1D1D6;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   RIGHT SECTION: STATUS AND ACTIONS
+   -------------------------------------------------------------------------- */
+.th-card-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 170px;
+}
+
+/* Status Badges */
+.th-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.th-status-badge.pending {
+  background: rgba(255, 171, 0, 0.15);
+  color: #FFAB00;
+  border: 1px solid rgba(255, 171, 0, 0.35);
+}
+
+.th-status-badge.awaiting_payment {
+  background: rgba(0, 176, 255, 0.15);
+  color: #00B0FF;
+  border: 1px solid rgba(0, 176, 255, 0.35);
+}
+
+.th-status-badge.confirmed {
+  background: rgba(0, 230, 118, 0.15);
+  color: #00E676;
+  border: 1px solid rgba(0, 230, 118, 0.35);
+}
+
+.th-status-badge.in_progress {
+  background: rgba(41, 121, 255, 0.15);
+  color: #2979FF;
+  border: 1px solid rgba(41, 121, 255, 0.35);
+}
+
+.th-status-badge.completed {
+  background: rgba(179, 136, 255, 0.15);
+  color: #B388FF;
+  border: 1px solid rgba(179, 136, 255, 0.35);
+}
+
+.th-status-badge.cancelled {
+  background: rgba(255, 23, 68, 0.15);
+  color: #FF1744;
+  border: 1px solid rgba(255, 23, 68, 0.35);
+}
+
+/* Subtext / Price amounts */
+.th-card-meta-text {
+  font-size: 0.8rem;
+  color: #8E8E93;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.th-card-amount-large {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1.2;
+}
+
+/* Action Buttons Stack */
+.th-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  align-items: stretch;
+}
+
+.th-btn-act {
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 7px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  outline: none;
+  border: 1px solid transparent;
+}
+
+.th-btn-act:focus-visible {
+  outline: 2px solid #FF5722;
+  outline-offset: 2px;
+}
+
+/* Primary Button: Solid Orange (Pay Now) */
+.th-btn-act.primary {
+  background: #FF5722;
+  color: #FFFFFF;
+  border: none;
+  box-shadow: 0 2px 10px rgba(255, 87, 34, 0.3);
+}
+
+.th-btn-act.primary:hover:not(:disabled) {
+  background: #F4511E;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(255, 87, 34, 0.4);
+}
+
+.th-btn-act.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Secondary Button: Dark Charcoal with subtle border */
+.th-btn-act.secondary {
+  background: rgba(255, 255, 255, 0.04);
+  color: #E5E5EA;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.th-btn-act.secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+/* Destructive Button: Red text with subtle border */
+.th-btn-act.danger {
+  background: transparent;
+  color: #FF5252;
+  border: 1px solid rgba(255, 82, 82, 0.3);
+}
+
+.th-btn-act.danger:hover {
+  background: rgba(255, 82, 82, 0.1);
+  color: #FF6E6E;
+  border-color: rgba(255, 82, 82, 0.5);
+}
+
+/* --------------------------------------------------------------------------
+   5. LOADING SKELETON & ERROR STATES
+   -------------------------------------------------------------------------- */
+.th-skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.th-skeleton-card {
+  pointer-events: none;
+  border-color: rgba(255, 255, 255, 0.04);
+}
+
+.th-skeleton-box {
+  background: linear-gradient(90deg, #1F1F22 25%, #2A2A2E 50%, #1F1F22 75%);
+  background-size: 200% 100%;
+  animation: thSkeletonShimmer 1.5s infinite;
+  border-radius: 6px;
+}
+
+@keyframes thSkeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.th-error-card {
+  background: #1A1A1C;
+  border: 1px solid rgba(255, 23, 68, 0.35);
+  border-radius: 12px;
+  padding: 44px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.th-error-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #FF5252;
+}
+
+.th-error-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #8E8E93;
+  max-width: 440px;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   6. EMPTY STATE
+   -------------------------------------------------------------------------- */
+.th-empty-card {
+  background: #1A1A1C;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.th-empty-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.th-empty-desc {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #8E8E93;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   6. PAGINATION FOOTER
+   -------------------------------------------------------------------------- */
+.th-pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.th-pagination-text {
+  font-size: 0.84rem;
+  color: #8E8E93;
+}
+
+.th-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.th-page-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #1F1F22;
+  color: #8E8E93;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.th-page-btn:hover:not(:disabled) {
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.th-page-btn.active {
+  background: #FF5722;
+  color: #FFFFFF;
+  border-color: #FF5722;
+  font-weight: 700;
+}
+
+.th-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --------------------------------------------------------------------------
+   7. RESPONSIVE DESIGN BREAKPOINTS
+   -------------------------------------------------------------------------- */
+
+/* Laptop (1024px to 1199px) */
+@media (max-width: 1199px) {
+  .th-stats-row {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .th-booking-card {
+    grid-template-columns: minmax(220px, 1.3fr) minmax(240px, 1.8fr) minmax(160px, 1fr);
+    gap: 18px;
+    padding: 16px 18px;
+  }
+}
+
+/* Tablet (768px to 1023px) */
+@media (max-width: 1023px) {
+  .th-stats-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .th-booking-card {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .th-card-left {
+    width: 100%;
+  }
+
+  .th-card-middle {
+    max-width: 100%;
+    margin: 4px 0;
+  }
+
+  .th-card-right {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .th-actions-stack {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .th-btn-act {
+    flex: 1;
+    min-width: 120px;
+  }
+}
+
+/* Mobile (Below 768px) */
+@media (max-width: 767px) {
+  .th-bookings-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .th-btn-find-artists {
+    width: 100%;
+    justify-content: center;
+    padding: 12px 20px;
+  }
+
+  /* 2 columns for 6 stats on mobile (3 rows of 2) */
+  .th-stats-row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .th-stat-card {
+    padding: 12px 14px;
+  }
+
+  .th-stat-num {
+    font-size: 1.55rem;
+  }
+
+  .th-stat-label {
+    font-size: 0.74rem;
+  }
+
+  /* Horizontal scrolling filter tabs */
+  .th-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .th-filter-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 6px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .th-filter-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .th-filter-tab {
+    flex-shrink: 0;
+  }
+
+  .th-sort-dropdown-wrap {
+    width: 100%;
+  }
+
+  .th-sort-select {
+    width: 100%;
+  }
+
+  /* Vertical stacked booking card on mobile */
+  .th-booking-card {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px 14px;
+  }
+
+  .th-card-left {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .th-artist-avatar-box {
+    width: 52px;
+    height: 52px;
+  }
+
+  .th-artist-name {
+    font-size: 0.98rem;
+  }
+
+  .th-card-middle {
+    max-width: 100%;
+  }
+
+  .th-tracker-label {
+    font-size: 0.68rem;
+    width: 60px;
+  }
+
+  .th-card-right {
+    width: 100%;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .th-actions-stack {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .th-btn-act {
+    width: 100%;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .th-pagination-row {
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+}
+
+/* Very Small Mobile (320px - 375px) */
+@media (max-width: 375px) {
+  .th-stats-row {
+    grid-template-columns: 1fr;
+  }
+
+  .th-tracker-label {
+    font-size: 0.64rem;
+    width: 52px;
+  }
+}

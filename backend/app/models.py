@@ -1,6 +1,6 @@
 from decimal import Decimal
 from django.conf import settings
-from django.db import models, transaction
+from django.db import models
 
 
 class Category(models.Model):
@@ -62,6 +62,7 @@ class ArtistProfile(models.Model):
         default=0,
     )
     is_verified = models.BooleanField(default=False)
+    rejection_notes = models.TextField(blank=True, default="")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -94,6 +95,12 @@ class Booking(models.Model):
         EXPIRED = "expired", "Expired"
         UNAVAILABLE = "unavailable", "Unavailable"
 
+    class LocationSource(models.TextChoices):
+        AUTOCOMPLETE = "autocomplete", "Autocomplete"
+        MAPS_LINK = "maps_link", "Google Maps Link"
+        MAP_PIN = "map_pin", "Map Pin"
+        MANUAL = "manual", "Manual"
+
     customer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -107,6 +114,26 @@ class Booking(models.Model):
     event_type = models.CharField(max_length=100)
     event_date = models.DateTimeField()
     event_location = models.CharField(max_length=200)
+
+    # Detailed Location Fields
+    event_area = models.CharField(max_length=255, blank=True, default="")
+    event_area_place_id = models.CharField(max_length=255, blank=True, default="")
+    event_address = models.TextField(blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    state = models.CharField(max_length=100, blank=True, default="")
+    country = models.CharField(max_length=100, blank=True, default="India")
+    venue_name = models.CharField(max_length=255, blank=True, default="")
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    area_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    area_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    google_maps_url = models.URLField(max_length=1000, blank=True, default="")
+    location_source = models.CharField(
+        max_length=30,
+        choices=LocationSource.choices,
+        default=LocationSource.MANUAL,
+    )
+    location_instructions = models.TextField(blank=True, default="")
     customer_phone = models.CharField(max_length=20, blank=True, default="")
     message = models.TextField(blank=True)
     response_message = models.TextField(blank=True, default="")

@@ -528,6 +528,42 @@ function Home({ user, onLogout, navigate }) {
         </section>
 
         {/* =================================================================
+            ABOUT TALENTHIRE / WHY CHOOSE US
+            ================================================================= */}
+        <section className="layout-section why-choose-section" id="about">
+          <div className="section-title-wrap">
+            <h2 className="section-main-heading">Why Choose TalentHire?</h2>
+            <p className="section-sub-heading">Connecting you directly with verified performers across India.</p>
+          </div>
+
+          <div className="why-choose-grid">
+            <div className="why-choose-card">
+              <div className="why-choose-icon-circle">✓</div>
+              <h3 className="why-choose-title">Verified Artists</h3>
+              <p className="why-choose-desc">Every profile is reviewed and verified to guarantee professional performance standards.</p>
+            </div>
+
+            <div className="why-choose-card">
+              <div className="why-choose-icon-circle">₹</div>
+              <h3 className="why-choose-title">Transparent Pricing</h3>
+              <p className="why-choose-desc">Clear rates and transparent platform commission model with no hidden surcharges.</p>
+            </div>
+
+            <div className="why-choose-card">
+              <div className="why-choose-icon-circle">🔒</div>
+              <h3 className="why-choose-title">Secure Payments</h3>
+              <p className="why-choose-desc">Safe escrow booking reservation with Razorpay and authoritative refund protection.</p>
+            </div>
+
+            <div className="why-choose-card">
+              <div className="why-choose-icon-circle">📍</div>
+              <h3 className="why-choose-title">Map & Location Ready</h3>
+              <p className="why-choose-desc">Pinpoint venue locations across India with interactive maps and directions.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* =================================================================
             ARE YOU A PERFORMING ARTIST? (CTA BANNER)
             Shown only for logged-in customers (not registered performing artists)
             ================================================================= */}

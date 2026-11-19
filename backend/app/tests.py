@@ -1,7 +1,9 @@
 import json
+from unittest.mock import patch, MagicMock
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from app.models import Category, ArtistProfile, Booking, Payment, ArtistAvailability, Refund
 
 
@@ -209,7 +211,7 @@ class AuthViewTests(TestCase):
         self.assertEqual(res_login.status_code, 200)
         data_login = res_login.json()
         self.assertEqual(data_login["role"], "artist")
-        self.assertEqual(data_login["redirect_to"], "/profile")
+        self.assertEqual(data_login["redirect_to"], "/artist-dashboard")
 
         # Dashboard GET
         res_dash = self.client.get("/api/artist/dashboard/")
@@ -219,6 +221,126 @@ class AuthViewTests(TestCase):
         self.assertEqual(dash_data["artist"]["stage_name"], "Singer Star")
         self.assertIn("stats", dash_data)
         self.assertEqual(dash_data["stats"]["total_bookings"], 0)
+
+    def test_admin_login_redirect_to_admin_dashboard(self):
+        admin_user = User.objects.create_superuser(
+            username="platform_admin",
+            email="platform_admin@example.com",
+            password="adminpassword123",
+            first_name="Platform",
+            last_name="Admin",
+        )
+        res = self.client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "username_or_email": "platform_admin",
+                "password": "adminpassword123",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["role"], "admin")
+        self.assertEqual(data["redirect_to"], "/admin-dashboard")
+        self.assertTrue(data["user"]["is_staff"])
+        self.assertTrue(data["user"]["is_superuser"])
+
+    def test_customer_login_redirect_to_customer_dashboard(self):
+        res = self.client.post(
+            "/api/auth/login/",
+            data=json.dumps({
+                "username_or_email": "testuser",
+                "password": "securepassword123",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["role"], "customer")
+        self.assertEqual(data["redirect_to"], "/customer-dashboard")
+        self.assertFalse(data["user"]["is_staff"])
+        self.assertFalse(data["user"]["is_artist"])
+
+    @override_settings(GOOGLE_CLIENT_ID="mock-google-client-id")
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_admin_redirect(self, mock_verify):
+        User.objects.create_superuser(
+            username="google_admin",
+            email="google_admin@example.com",
+            password="adminpassword123",
+            first_name="Google",
+            last_name="Admin",
+        )
+        mock_verify.return_value = {
+            "email": "google_admin@example.com",
+            "email_verified": True,
+            "given_name": "Google",
+            "family_name": "Admin",
+            "sub": "1234567890",
+        }
+        res = self.client.post(
+            "/api/auth/google/",
+            data=json.dumps({"credential": "mock_google_token", "role": "customer"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["role"], "admin")
+        self.assertEqual(data["redirect_to"], "/admin-dashboard")
+
+    @override_settings(GOOGLE_CLIENT_ID="mock-google-client-id")
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_artist_redirect(self, mock_verify):
+        artist_user = User.objects.create_user(
+            username="google_artist",
+            email="google_artist@example.com",
+            password="securepassword123",
+        )
+        cat, _ = Category.objects.get_or_create(name="Instrumental Solo")
+        ArtistProfile.objects.create(
+            user=artist_user,
+            category=cat,
+            stage_name="Violin Virtuoso",
+            location="Kochi",
+            starting_price=12000,
+            is_verified=True,
+        )
+        mock_verify.return_value = {
+            "email": "google_artist@example.com",
+            "email_verified": True,
+            "given_name": "Violin",
+            "family_name": "Virtuoso",
+            "sub": "2345678901",
+        }
+        res = self.client.post(
+            "/api/auth/google/",
+            data=json.dumps({"credential": "mock_google_token", "role": "artist"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["role"], "artist")
+        self.assertEqual(data["redirect_to"], "/artist-dashboard")
+
+    @override_settings(GOOGLE_CLIENT_ID="mock-google-client-id")
+    @patch("google.oauth2.id_token.verify_oauth2_token")
+    def test_google_login_customer_redirect(self, mock_verify):
+        mock_verify.return_value = {
+            "email": "google_customer@example.com",
+            "email_verified": True,
+            "given_name": "Google",
+            "family_name": "Customer",
+            "sub": "3456789012",
+        }
+        res = self.client.post(
+            "/api/auth/google/",
+            data=json.dumps({"credential": "mock_google_token", "role": "customer"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["role"], "customer")
+        self.assertEqual(data["redirect_to"], "/customer-dashboard")
 
 
 class BookingViewTests(TestCase):
@@ -241,6 +363,7 @@ class BookingViewTests(TestCase):
             stage_name="Dance Troupe Alpha",
             location="Pune",
             starting_price=25000,
+            is_verified=True,
         )
 
     def test_create_booking_unauthenticated(self):
@@ -1494,6 +1617,7 @@ class Phase3BookingCreationAndAcceptanceTests(TestCase):
             stage_name="The Phase 3 Band",
             location="Bengaluru",
             starting_price=20000,
+            is_verified=True,
         )
         self.other_artist = ArtistProfile.objects.create(
             user=self.other_artist_user,
@@ -1501,6 +1625,7 @@ class Phase3BookingCreationAndAcceptanceTests(TestCase):
             stage_name="Other Band",
             location="Bengaluru",
             starting_price=15000,
+            is_verified=True,
         )
 
     def test_customer_create_booking_available_date_success(self):
@@ -4348,6 +4473,7 @@ class BookingDateTimeTimezoneRegressionTests(TestCase):
             stage_name="The Kolkata Melody",
             location="Kolkata",
             starting_price=30000,
+            is_verified=True,
         )
 
     def test_create_booking_date_and_time_stored_as_utc_from_kolkata(self):
@@ -4881,6 +5007,7 @@ class CompetingBookingsUnavailableTests(TestCase):
             location="Kolkata",
             starting_price=Decimal("15000.00"),
             years_of_experience=6,
+            is_verified=True,
         )
 
         # Customer A
@@ -6772,6 +6899,918 @@ class ConcurrencyAndLockOrderTests(TestCase):
 
         self.assertEqual(booking.status, Booking.Status.CANCELLED)
         self.assertEqual(payment.status, Payment.Status.FAILED)
+
+
+class BookingLocationIntegrationTests(TestCase):
+    def setUp(self):
+        from zoneinfo import ZoneInfo
+        from unittest.mock import patch, MagicMock
+        self.client = Client()
+        self.kolkata = ZoneInfo("Asia/Kolkata")
+        self.customer = User.objects.create_user(
+            username="loc_customer",
+            email="loc_cust@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="loc_artist",
+            email="loc_artist@example.com",
+            password="securepassword123",
+        )
+        self.category, _ = Category.objects.get_or_create(
+            name="Singers & Vocalists", defaults={"description": "Singers"}
+        )
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            stage_name="YesKey",
+            category=self.category,
+            starting_price=Decimal("5000.00"),
+            location="Kasaragod",
+            is_active=True,
+            is_verified=True,
+        )
+
+    def test_autocomplete_short_query(self):
+        res = self.client.get("/api/locations/autocomplete/?query=N")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["suggestions"], [])
+        self.assertIn("at least 2 characters", data["error"])
+
+    def test_autocomplete_missing_query(self):
+        res = self.client.get("/api/locations/autocomplete/")
+        self.assertEqual(res.status_code, 400)
+
+    @patch("requests.get")
+    def test_autocomplete_success(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "name": "Nirchal",
+                        "county": "Kasaragod",
+                        "state": "Kerala",
+                        "country": "India",
+                        "countrycode": "IN",
+                        "postcode": "671551",
+                        "osm_key": "place",
+                        "osm_value": "village",
+                    },
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [75.0355416, 12.5857195],
+                    },
+                },
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "name": "Nirchal West",
+                        "county": "Kasaragod",
+                        "state": "Kerala",
+                        "country": "India",
+                        "countrycode": "IN",
+                        "osm_key": "place",
+                        "osm_value": "suburb",
+                    },
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [75.0200000, 12.5800000],
+                    },
+                },
+            ],
+        }
+        mock_get.return_value = mock_resp
+
+        res = self.client.get("/api/locations/autocomplete/?query=Nirchal")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data["suggestions"]), 2)
+        self.assertEqual(data["suggestions"][0]["title"], "Nirchal")
+        self.assertEqual(data["suggestions"][0]["district"], "Kasaragod")
+        self.assertEqual(data["suggestions"][0]["state"], "Kerala")
+        # Ensure converted to Leaflet order: latitude first, longitude second
+        self.assertAlmostEqual(data["suggestions"][0]["latitude"], 12.5857195, places=4)
+        self.assertAlmostEqual(data["suggestions"][0]["longitude"], 75.0355416, places=4)
+
+    @patch("requests.get")
+    def test_autocomplete_rate_limit_handled_gracefully(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.ok = False
+        mock_resp.status_code = 429
+        mock_get.return_value = mock_resp
+
+        res = self.client.get("/api/locations/autocomplete/?query=RateLimitQuery")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["suggestions"], [])
+        self.assertTrue(data.get("provider_unavailable"))
+        self.assertIn("manually", data["error"])
+
+    @patch("requests.get")
+    def test_reverse_geocoding_success(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "name": "Anganwadi",
+                        "street": "Mudithadka Road",
+                        "city": "Badiadka",
+                        "county": "Kasaragod",
+                        "state": "Kerala",
+                        "country": "India",
+                        "postcode": "671551",
+                    },
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [75.0443469, 12.6030829],
+                    },
+                }
+            ],
+        }
+        mock_get.return_value = mock_resp
+
+        res = self.client.get("/api/locations/reverse/?lat=12.6030829&lon=75.0443469")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("city"), "Badiadka")
+        self.assertEqual(data.get("state"), "Kerala")
+
+    def test_reverse_geocoding_missing_params(self):
+        res = self.client.get("/api/locations/reverse/")
+        self.assertEqual(res.status_code, 400)
+
+    def test_location_status_endpoint(self):
+        res = self.client.get("/api/locations/status/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data.get("configured"))
+        self.assertIn("Photon", data.get("provider"))
+        self.assertFalse(data.get("requires_api_key"))
+
+    def test_resolve_google_maps_ssrf_protection(self):
+        # Disallow non-Google domain
+        res = self.client.post(
+            "/api/locations/resolve-map-link/",
+            data=json.dumps({"url": "https://evil-attacker.com/maps"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(res.json()["success"])
+
+        # Disallow non-HTTPS
+        res = self.client.post(
+            "/api/locations/resolve-map-link/",
+            data=json.dumps({"url": "http://maps.google.com/maps"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+
+    @patch("requests.Session.head")
+    @patch("app.services.location_service._is_safe_host_and_ip", return_value=True)
+    def test_resolve_google_maps_link_success(self, mock_safe, mock_head):
+        mock_resp = MagicMock()
+        mock_resp.is_redirect = False
+        mock_resp.status_code = 200
+        mock_head.return_value = mock_resp
+
+        res = self.client.post(
+            "/api/locations/resolve-map-link/",
+            data=json.dumps({
+                "url": "https://maps.google.com/maps?q=12.600687,75.045062"
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertAlmostEqual(data["latitude"], 12.600687, places=5)
+        self.assertAlmostEqual(data["longitude"], 75.045062, places=5)
+
+    def test_create_booking_with_location_data(self):
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d")
+
+        payload = {
+            "artist_id": self.artist.id,
+            "event_type": "Wedding",
+            "event_date": future_date,
+            "event_time": "19:00",
+            "event_area": "Nirchal",
+            "venue_name": "Grand Convention Centre",
+            "google_maps_url": "https://maps.app.goo.gl/example123",
+            "latitude": 12.600687,
+            "longitude": 75.045062,
+            "area_latitude": 12.600000,
+            "area_longitude": 75.040000,
+            "location_source": "autocomplete",
+            "location_instructions": "Near the main road, parking available at gate 2.",
+            "customer_phone": "9876543210",
+            "performance_duration": "2 hours",
+            "expected_audience_size": 250,
+            "customer_budget": "5000",
+            "message": "Sound system and stage needed.",
+        }
+
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        booking_id = data["booking_id"]
+
+        booking = Booking.objects.get(id=booking_id)
+        self.assertEqual(booking.event_area, "Nirchal")
+        self.assertEqual(booking.venue_name, "Grand Convention Centre")
+        self.assertEqual(booking.event_location, "Grand Convention Centre, Nirchal")
+        self.assertAlmostEqual(float(booking.latitude), 12.600687, places=5)
+        self.assertAlmostEqual(float(booking.longitude), 75.045062, places=5)
+        self.assertEqual(booking.location_source, "autocomplete")
+        self.assertEqual(booking.location_instructions, "Near the main road, parking available at gate 2.")
+        self.assertEqual(booking.google_maps_url, "https://maps.app.goo.gl/example123")
+
+    def test_create_booking_invalid_coordinates(self):
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d")
+
+        payload = {
+            "artist_id": self.artist.id,
+            "event_type": "Birthday",
+            "event_date": future_date,
+            "event_time": "18:00",
+            "event_area": "Nirchal",
+            "venue_name": "My Residence",
+            "latitude": 999.0,  # Invalid latitude > 90
+            "longitude": 75.0,
+            "performance_duration": "1 hour",
+            "customer_phone": "9876543210",
+        }
+
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Latitude must be between -90 and 90", res.json()["error"])
+
+    def test_artist_dashboard_includes_location_details(self):
+        future_dt = timezone.now() + datetime.timedelta(days=20)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_type="Anniversary",
+            event_date=future_dt,
+            event_location="Grand Convention Centre, Nirchal",
+            event_area="Nirchal",
+            venue_name="Grand Convention Centre",
+            event_address="Nirchal, Kasaragod, Kerala, India",
+            city="Kasaragod",
+            state="Kerala",
+            country="India",
+            latitude=Decimal("12.600687"),
+            longitude=Decimal("75.045062"),
+            google_maps_url="https://maps.app.goo.gl/example123",
+            location_source=Booking.LocationSource.AUTOCOMPLETE,
+            location_instructions="Use north entrance.",
+            customer_phone="9876543210",
+            performance_duration="3 hours",
+            status=Booking.Status.PENDING,
+        )
+
+        self.client.force_login(self.artist_user)
+        res = self.client.get("/api/artist/dashboard/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        bookings = data.get("bookings", [])
+        found = next((b for b in bookings if b["id"] == booking.id), None)
+        self.assertIsNotNone(found)
+        self.assertEqual(found["event_area"], "Nirchal")
+        self.assertEqual(found["venue_name"], "Grand Convention Centre")
+        self.assertEqual(found["latitude"], "12.600687")
+        self.assertEqual(found["longitude"], "75.045062")
+        self.assertEqual(found["location_instructions"], "Use north entrance.")
+        self.assertEqual(found["google_maps_url"], "https://maps.app.goo.gl/example123")
+
+
+class ArtistCompleteBookingViewTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+        from datetime import time, timedelta
+        from django.utils import timezone
+        from app.models import Notification
+        self.client = Client()
+        self.customer = User.objects.create_user(
+            username="comp_cust",
+            email="comp_cust@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="comp_artist",
+            email="comp_artist@example.com",
+            password="securepassword123",
+        )
+        self.other_artist_user = User.objects.create_user(
+            username="other_artist",
+            email="other_artist@example.com",
+            password="securepassword123",
+        )
+        self.category, _ = Category.objects.get_or_create(
+            name="Singers & Vocalists", defaults={"description": "Singers"}
+        )
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            stage_name="Star Performer",
+            category=self.category,
+            starting_price=Decimal("4000.00"),
+            is_active=True,
+        )
+        self.other_artist = ArtistProfile.objects.create(
+            user=self.other_artist_user,
+            stage_name="Other Performer",
+            category=self.category,
+            starting_price=Decimal("4000.00"),
+            is_active=True,
+        )
+        self.booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist,
+            event_date=timezone.now() + timedelta(days=5),
+            event_type="Concert",
+            event_location="Auditorium",
+            agreed_price=Decimal("4000.00"),
+            customer_phone="9876543210",
+            performance_duration="2 hours",
+            status=Booking.Status.ACCEPTED,
+        )
+
+    def test_complete_booking_unauthenticated(self):
+        res = self.client.post(f"/api/artist/bookings/{self.booking.id}/complete/")
+        self.assertEqual(res.status_code, 401)
+
+    def test_complete_booking_non_artist_forbidden(self):
+        self.client.force_login(self.customer)
+        res = self.client.post(f"/api/artist/bookings/{self.booking.id}/complete/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_complete_booking_unauthorized_artist_not_found(self):
+        self.client.force_login(self.other_artist_user)
+        res = self.client.post(f"/api/artist/bookings/{self.booking.id}/complete/")
+        self.assertEqual(res.status_code, 404)
+
+    def test_complete_booking_invalid_status(self):
+        self.booking.status = Booking.Status.CANCELLED
+        self.booking.save()
+        self.client.force_login(self.artist_user)
+        res = self.client.post(f"/api/artist/bookings/{self.booking.id}/complete/")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Cannot complete a booking with status", res.json()["error"])
+
+    def test_complete_booking_success(self):
+        from app.models import Notification
+        self.client.force_login(self.artist_user)
+        res = self.client.post(f"/api/artist/bookings/{self.booking.id}/complete/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], Booking.Status.COMPLETED)
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.status, Booking.Status.COMPLETED)
+
+        cust_notif = Notification.objects.filter(
+            user=self.customer,
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        ).first()
+        self.assertIsNotNone(cust_notif)
+        self.assertEqual(cust_notif.title, "Performance Completed")
+
+        artist_notif = Notification.objects.filter(
+            user=self.artist_user,
+            notification_type=Notification.NotificationType.PAYMENT,
+        ).first()
+        self.assertIsNotNone(artist_notif)
+        self.assertEqual(artist_notif.title, "Performance Completed")
+
+
+class CustomerSupportInquiryViewTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.customer = User.objects.create_user(
+            username="support_cust",
+            email="support_cust@example.com",
+            password="securepassword123",
+        )
+
+    def test_support_inquiry_unauthenticated(self):
+        res = self.client.post(
+            "/api/customer/support/",
+            data=json.dumps({"subject": "Help", "message": "Need assistance"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 401)
+
+    def test_support_inquiry_invalid_json(self):
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            "/api/customer/support/",
+            data="not-valid-json",
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Invalid request body", res.json()["error"])
+
+    def test_support_inquiry_missing_fields(self):
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            "/api/customer/support/",
+            data=json.dumps({"subject": "", "message": " "}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Subject and message are required", res.json()["error"])
+
+    def test_support_inquiry_success(self):
+        from app.models import Notification
+        self.client.force_login(self.customer)
+        res = self.client.post(
+            "/api/customer/support/",
+            data=json.dumps({
+                "subject": "Payment inquiry regarding booking #102",
+                "message": "I was charged twice by my bank, please verify.",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("Support request submitted successfully", res.json()["message"])
+
+        notif = Notification.objects.filter(
+            user=self.customer,
+            notification_type=Notification.NotificationType.GENERAL,
+        ).first()
+        self.assertIsNotNone(notif)
+        self.assertIn("Payment inquiry", notif.title)
+
+
+class AdminDashboardAPITests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.admin_user = User.objects.create_superuser(
+            username="test_admin",
+            email="admin@talenthire.com",
+            password="adminpassword123",
+        )
+        self.customer = User.objects.create_user(
+            username="regular_cust",
+            email="regular@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="unverified_artist",
+            email="artist@example.com",
+            password="securepassword123",
+        )
+        self.category = Category.objects.create(name="Live Bands", description="Musical Bands")
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            stage_name="The Melody Crew",
+            category=self.category,
+            starting_price=Decimal("12000.00"),
+            is_verified=False,
+            is_active=True,
+        )
+
+    def test_admin_overview_unauthenticated_forbidden(self):
+        res = self.client.get("/api/admin/overview/")
+        self.assertEqual(res.status_code, 401)
+
+    def test_admin_overview_customer_access_forbidden(self):
+        self.client.force_login(self.customer)
+        res = self.client.get("/api/admin/overview/")
+        self.assertEqual(res.status_code, 403)
+
+    def test_admin_overview_success(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/overview/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertIn("kpis", data)
+        self.assertIn("booking_trends", data)
+        self.assertIn("recent_bookings", data)
+        self.assertIn("pending_actions", data)
+        self.assertEqual(data["pending_actions"]["artist_verifications"], 1)
+
+    def test_admin_users_list_and_toggle_status(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/users/?role=customer")
+        self.assertEqual(res.status_code, 200)
+        users = res.json()["users"]
+        self.assertTrue(any(u["username"] == "regular_cust" for u in users))
+
+        # Toggle customer status
+        toggle_res = self.client.post(f"/api/admin/users/{self.customer.id}/toggle-status/")
+        self.assertEqual(toggle_res.status_code, 200)
+        self.customer.refresh_from_db()
+        self.assertFalse(self.customer.is_active)
+
+    def test_admin_artist_verification_queue_and_action(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/artists/verifications/")
+        self.assertEqual(res.status_code, 200)
+        pending = res.json()["pending_verifications"]
+        self.assertTrue(any(a["id"] == self.artist.id for a in pending))
+
+        # Approve verification
+        act_res = self.client.post(
+            f"/api/admin/artists/{self.artist.id}/verify/",
+            data=json.dumps({"action": "approve"}),
+            content_type="application/json",
+        )
+        self.assertEqual(act_res.status_code, 200)
+        self.artist.refresh_from_db()
+        self.assertTrue(self.artist.is_verified)
+
+    def test_admin_categories_crud(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.post(
+            "/api/admin/categories/create/",
+            data=json.dumps({"name": "Instrumental Solo", "description": "Violin, Flute & Sitar"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        cat_id = res.json()["category"]["id"]
+
+        edit_res = self.client.post(
+            f"/api/admin/categories/{cat_id}/edit/",
+            data=json.dumps({"name": "Solo Instrumentalists", "description": "Classical & Modern"}),
+            content_type="application/json",
+        )
+        self.assertEqual(edit_res.status_code, 200)
+        self.assertEqual(edit_res.json()["category"]["name"], "Solo Instrumentalists")
+
+    def test_admin_reports_and_csv_export(self):
+        self.client.force_login(self.admin_user)
+        rep_res = self.client.get("/api/admin/reports/")
+        self.assertEqual(rep_res.status_code, 200)
+        self.assertTrue(rep_res.json()["success"])
+
+        csv_res = self.client.get("/api/admin/reports/export-csv/?type=users")
+        self.assertEqual(csv_res.status_code, 200)
+        self.assertEqual(csv_res["Content-Type"], "text/csv")
+        self.assertIn("regular_cust", csv_res.content.decode("utf-8"))
+
+
+class ArtistVerificationAndRejectionTests(TestCase):
+    """
+    Test suite for:
+      1. Strict Artist Verification Requirement for booking creation
+      2. Rejection of unverified, inactive, and suspended artists
+      3. Persistence of rejection reasons in ArtistProfile.rejection_notes
+      4. Admin verification queue serialization with rejection notes
+      5. Artist profile resubmission lifecycle
+      6. Admin approval clearing rejection notes and granting verification
+      7. Preservation of existing bookings
+    """
+
+    def setUp(self):
+        self.admin_user = User.objects.create_superuser(
+            username="verify_admin",
+            email="verify_admin@example.com",
+            password="adminpassword123",
+            first_name="Super",
+            last_name="Admin",
+        )
+        self.customer = User.objects.create_user(
+            username="booking_customer",
+            email="cust_verify@example.com",
+            password="password123",
+            first_name="Ravi",
+            last_name="Customer",
+        )
+        self.category = Category.objects.create(name="Classical Fusion")
+
+        # 1. Verified & Active Artist
+        self.verified_user = User.objects.create_user(
+            username="verified_performer",
+            email="verified@example.com",
+            password="password123",
+        )
+        self.verified_artist = ArtistProfile.objects.create(
+            user=self.verified_user,
+            category=self.category,
+            stage_name="Maestro Ravi",
+            location="Kochi, Kerala",
+            starting_price=Decimal("15000.00"),
+            is_active=True,
+            is_verified=True,
+        )
+
+        # 2. Unverified & Active Artist
+        self.unverified_user = User.objects.create_user(
+            username="unverified_performer",
+            email="unverified@example.com",
+            password="password123",
+        )
+        self.unverified_artist = ArtistProfile.objects.create(
+            user=self.unverified_user,
+            category=self.category,
+            stage_name="Aspiring Singer",
+            location="Kozhikode, Kerala",
+            starting_price=Decimal("8000.00"),
+            is_active=True,
+            is_verified=False,
+        )
+
+        # 3. Inactive Artist Profile (is_active=False)
+        self.inactive_user = User.objects.create_user(
+            username="inactive_performer",
+            email="inactive@example.com",
+            password="password123",
+        )
+        self.inactive_artist = ArtistProfile.objects.create(
+            user=self.inactive_user,
+            category=self.category,
+            stage_name="Retired Performer",
+            location="Thrissur, Kerala",
+            starting_price=Decimal("5000.00"),
+            is_active=False,
+            is_verified=True,
+        )
+
+        # 4. Suspended User Account (user.is_active=False)
+        self.suspended_user = User.objects.create_user(
+            username="suspended_performer",
+            email="suspended@example.com",
+            password="password123",
+            is_active=False,
+        )
+        self.suspended_artist = ArtistProfile.objects.create(
+            user=self.suspended_user,
+            category=self.category,
+            stage_name="Suspended Performer",
+            location="Thiruvananthapuram, Kerala",
+            starting_price=Decimal("12000.00"),
+            is_active=True,
+            is_verified=True,
+        )
+
+    def test_verified_artist_booking_success(self):
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d")
+        payload = {
+            "artist_id": self.verified_artist.id,
+            "event_type": "Wedding Reception",
+            "event_date": future_date,
+            "event_time": "18:00",
+            "venue_name": "Grand Hall",
+            "event_area": "MG Road, Kochi",
+            "customer_phone": "9876543210",
+            "performance_duration": "2 hours",
+            "customer_budget": "15000.00",
+        }
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertIn("booking_id", res.json())
+
+    def test_unverified_artist_booking_rejected(self):
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d")
+        payload = {
+            "artist_id": self.unverified_artist.id,
+            "event_type": "Birthday Celebration",
+            "event_date": future_date,
+            "event_time": "19:00",
+            "venue_name": "Beach Resort",
+            "event_area": "Calicut Beach",
+            "customer_phone": "9876543210",
+            "performance_duration": "1 hour",
+            "customer_budget": "8000.00",
+        }
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        data = res.json()
+        self.assertIn("error", data)
+        self.assertIn("pending verification", data["error"])
+
+    def test_inactive_artist_booking_rejected(self):
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d")
+        payload = {
+            "artist_id": self.inactive_artist.id,
+            "event_type": "Festival",
+            "event_date": future_date,
+            "event_time": "20:00",
+            "venue_name": "Temple Grounds",
+            "event_area": "Thrissur Round",
+            "customer_phone": "9876543210",
+            "performance_duration": "3 hours",
+            "customer_budget": "5000.00",
+        }
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_suspended_artist_user_booking_rejected(self):
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=15)).strftime("%Y-%m-%d")
+        payload = {
+            "artist_id": self.suspended_artist.id,
+            "event_type": "Corporate Gala",
+            "event_date": future_date,
+            "event_time": "20:00",
+            "venue_name": "Convention Center",
+            "event_area": "Technopark, Trivandrum",
+            "customer_phone": "9876543210",
+            "performance_duration": "2 hours",
+            "customer_budget": "12000.00",
+        }
+        res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 404)
+
+    def test_admin_rejection_reason_persistence_and_notification(self):
+        self.client.force_login(self.admin_user)
+        reason_text = "Please upload higher-resolution portfolio images and audio samples."
+        res = self.client.post(
+            f"/api/admin/artists/{self.unverified_artist.id}/verify/",
+            data=json.dumps({"action": "reject", "reason": reason_text}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.json()["is_verified"])
+
+        self.unverified_artist.refresh_from_db()
+        self.assertFalse(self.unverified_artist.is_verified)
+        self.assertEqual(self.unverified_artist.rejection_notes, reason_text)
+
+        # Verify notification delivered to artist
+        notif = Notification.objects.filter(
+            user=self.unverified_user,
+            title="Verification Update",
+        ).first()
+        self.assertIsNotNone(notif)
+        self.assertIn(reason_text, notif.message)
+
+    def test_admin_verification_queue_displays_rejection_notes(self):
+        self.unverified_artist.rejection_notes = "Missing identity proof and video demo."
+        self.unverified_artist.save()
+
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/artists/verifications/")
+        self.assertEqual(res.status_code, 200)
+        queue = res.json()["pending_verifications"]
+        artist_in_queue = next((a for a in queue if a["id"] == self.unverified_artist.id), None)
+        self.assertIsNotNone(artist_in_queue)
+        self.assertEqual(artist_in_queue["rejection_notes"], "Missing identity proof and video demo.")
+
+    def test_artist_profile_resubmission_and_approval_lifecycle(self):
+        # 1. Admin rejects initial profile
+        self.client.force_login(self.admin_user)
+        res = self.client.post(
+            f"/api/admin/artists/{self.unverified_artist.id}/verify/",
+            data=json.dumps({"action": "reject", "reason": "Insufficient bio details."}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+
+        self.unverified_artist.refresh_from_db()
+        self.assertEqual(self.unverified_artist.rejection_notes, "Insufficient bio details.")
+
+        # 2. Artist logs in, checks profile, sees rejection notes
+        self.client.force_login(self.unverified_user)
+        get_res = self.client.get("/api/artist/profile/")
+        self.assertEqual(get_res.status_code, 200)
+        self.assertEqual(get_res.json()["artist"]["rejection_notes"], "Insufficient bio details.")
+
+        # 3. Artist updates profile (resubmission)
+        update_data = {
+            "stage_name": "Aspiring Singer Updated",
+            "category": self.category.id,
+            "gender": "male",
+            "bio": "Experienced vocal performer with 10+ classical fusion stage shows.",
+            "location": "Kozhikode, Kerala",
+            "phone": "9876543211",
+            "starting_price": "9000.00",
+            "years_of_experience": 4,
+            "performance_types": json.dumps(["Solo", "Duet"]),
+            "travel_availability": "state",
+        }
+        post_res = self.client.post("/api/artist/profile/", data=update_data)
+        if post_res.status_code != 200:
+            print("POST /api/artist/profile/ errors:", post_res.json())
+        self.assertEqual(post_res.status_code, 200)
+        self.unverified_artist.refresh_from_db()
+        self.assertIn("[Resubmitted]", self.unverified_artist.rejection_notes)
+        self.assertIn("Insufficient bio details.", self.unverified_artist.rejection_notes)
+        self.assertFalse(self.unverified_artist.is_verified)
+
+        # 4. Admin reviews queue, sees updated profile with resubmission note
+        self.client.force_login(self.admin_user)
+        queue_res = self.client.get("/api/admin/artists/verifications/")
+        queue = queue_res.json()["pending_verifications"]
+        artist_entry = next((a for a in queue if a["id"] == self.unverified_artist.id), None)
+        self.assertIsNotNone(artist_entry)
+        self.assertIn("[Resubmitted]", artist_entry["rejection_notes"])
+
+        # 5. Admin approves verification
+        approve_res = self.client.post(
+            f"/api/admin/artists/{self.unverified_artist.id}/verify/",
+            data=json.dumps({"action": "approve"}),
+            content_type="application/json",
+        )
+        self.assertEqual(approve_res.status_code, 200)
+        self.assertTrue(approve_res.json()["is_verified"])
+
+        self.unverified_artist.refresh_from_db()
+        self.assertTrue(self.unverified_artist.is_verified)
+        self.assertEqual(self.unverified_artist.rejection_notes, "")
+
+        # 6. Now artist can receive bookings
+        self.client.force_login(self.customer)
+        future_date = (timezone.now() + datetime.timedelta(days=20)).strftime("%Y-%m-%d")
+        booking_payload = {
+            "artist_id": self.unverified_artist.id,
+            "event_type": "Cultural Night",
+            "event_date": future_date,
+            "event_time": "19:30",
+            "venue_name": "Town Hall",
+            "event_area": "Mananchira, Kozhikode",
+            "customer_phone": "9876543210",
+            "performance_duration": "2 hours",
+            "customer_budget": "9000.00",
+        }
+        book_res = self.client.post(
+            "/api/bookings/",
+            data=json.dumps(booking_payload),
+            content_type="application/json",
+        )
+        self.assertEqual(book_res.status_code, 201)
+
+    def test_existing_bookings_preservation(self):
+        # Create an existing booking on verified artist
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        existing_booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.verified_artist,
+            event_type="Anniversary",
+            event_date=event_time,
+            event_location="Kochi Club",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("15000.00"),
+        )
+        Payment.objects.create(
+            booking=existing_booking,
+            amount=Decimal("15000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_preserve_test_123",
+            razorpay_order_id="order_preserve_test_123",
+        )
+
+        # Admin rejects and re-verifies
+        self.client.force_login(self.admin_user)
+        self.client.post(
+            f"/api/admin/artists/{self.verified_artist.id}/verify/",
+            data=json.dumps({"action": "reject", "reason": "Audit re-check"}),
+            content_type="application/json",
+        )
+
+        # Verify existing booking and payment are preserved untouched
+        preserved_booking = Booking.objects.get(id=existing_booking.id)
+        self.assertEqual(preserved_booking.status, Booking.Status.ACCEPTED)
+        self.assertEqual(preserved_booking.agreed_price, Decimal("15000.00"))
+
+        preserved_payment = Payment.objects.get(booking=existing_booking)
+        self.assertEqual(preserved_payment.status, Payment.Status.SUCCESS)
+        self.assertEqual(preserved_payment.transaction_id, "pay_preserve_test_123")
+
+
+
+
 
 
 

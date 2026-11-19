@@ -12,12 +12,49 @@ import ArtistRegistration from "./components/ArtistRegistration";
 import CustomerDashboard from "./pages/CustomerDashboard";
 import ArtistDashboard from "./pages/ArtistDashboard";
 import BookingPage from "./pages/BookingPage";
+import AdminDashboard from "./pages/AdminDashboard";
+import LogoutModal from "./components/LogoutModal";
+
+function LoadingScreen({ message = "Loading..." }) {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "16px",
+        background: "#181818",
+        color: "#F7F7F7",
+        fontFamily: "Inter, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          width: "36px",
+          height: "36px",
+          borderRadius: "50%",
+          border: "3px solid rgba(255, 87, 34, 0.2)",
+          borderTopColor: "#FF5722",
+          animation: "spin 0.8s linear infinite",
+        }}
+      />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <p style={{ margin: 0, fontSize: "0.95rem", color: "#A0A0A0" }}>
+        {message}
+      </p>
+    </main>
+  );
+}
 
 function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   const [sessionError, setSessionError] = useState("");
   const [currentPath, setCurrentPath] = useState(window.location.pathname + window.location.search);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // Sync client-side navigation with browser history
   useEffect(() => {
@@ -87,28 +124,51 @@ function App() {
   function handleLoginSuccess(loggedInUser, isArtist = false, redirectTo = null) {
     setUser(loggedInUser);
     setSessionError("");
-    if (redirectTo === "/admin/" || loggedInUser?.role === "admin") {
-      window.location.href = "/admin/";
+
+    const isAdmin = Boolean(
+      loggedInUser?.role === "admin" ||
+      loggedInUser?.is_staff ||
+      loggedInUser?.is_superuser
+    );
+
+    // 1. Admin accounts: always land on /admin-dashboard
+    if (isAdmin) {
+      if (redirectTo && redirectTo.startsWith("/admin-dashboard")) {
+        navigate(redirectTo);
+      } else {
+        navigate("/admin-dashboard");
+      }
       return;
     }
+
+    // 2. Non-admin users attempting to access admin routes must not be allowed
     const params = new URLSearchParams(window.location.search);
     const urlRedirect = params.get("redirect");
-    if (urlRedirect) {
+    if (urlRedirect && !urlRedirect.startsWith("/admin")) {
       navigate(urlRedirect);
       return;
     }
+
     if (
       redirectTo &&
+      !redirectTo.startsWith("/admin") &&
+      redirectTo !== "/" &&
       redirectTo !== "/profile" &&
       redirectTo !== "/customer-dashboard" &&
-      redirectTo !== "/artist-dashboard" &&
-      redirectTo !== "/artist-register"
+      redirectTo !== "/artist-dashboard"
     ) {
       navigate(redirectTo);
       return;
     }
-    // Land on home page instead of dashboard
-    navigate("/");
+
+    // 3. Artists redirected to their existing artist dashboard
+    if (isArtist || loggedInUser?.role === "artist" || loggedInUser?.is_artist) {
+      navigate("/artist-dashboard");
+      return;
+    }
+
+    // 4. Customers redirected to their existing customer dashboard
+    navigate("/customer-dashboard");
   }
 
   function handleArtistProfileSaved(artistData) {
@@ -123,49 +183,88 @@ function App() {
     navigate("/profile");
   }
 
-  async function handleLogout() {
+  function handleRequestLogout() {
+    setShowLogoutModal(true);
+  }
+
+  function handleCancelLogout() {
+    if (!loggingOut) {
+      setShowLogoutModal(false);
+    }
+  }
+
+  async function handleConfirmLogout() {
+    setLoggingOut(true);
     try {
       await logoutUser();
     } catch (err) {
       console.error("Logout error:", err);
     } finally {
+      setLoggingOut(false);
+      setShowLogoutModal(false);
       setUser(null);
       setSessionError("");
       navigate("/login");
     }
   }
 
+  // Extract path without query parameters or trailing slashes for clean matching
+  const pathWithoutQuery = currentPath.split("?")[0].replace(/\/+$/, "") || "/";
+
+  const isLogin = pathWithoutQuery === "/login";
+  const isRegister = pathWithoutQuery === "/register";
+
   // Check if navigating to dashboard views (handles both Customer & Performing Artist)
   const isDashboard =
-    currentPath === "/profile" ||
-    currentPath === "/profile/" ||
-    currentPath.startsWith("/profile?") ||
-    currentPath === "/customer-profile" ||
-    currentPath === "/customer-profile/" ||
-    currentPath.startsWith("/customer-profile?") ||
-    currentPath === "/customer-dashboard" ||
-    currentPath === "/customer-dashboard/" ||
-    currentPath.startsWith("/customer-dashboard?") ||
-    currentPath === "/artist-dashboard" ||
-    currentPath === "/artist-dashboard/" ||
-    currentPath.startsWith("/artist-dashboard?") ||
-    currentPath === "/dashboard" ||
-    currentPath === "/dashboard/" ||
-    currentPath.startsWith("/dashboard?");
+    pathWithoutQuery === "/profile" ||
+    pathWithoutQuery === "/customer-profile" ||
+    pathWithoutQuery === "/customer-dashboard" ||
+    pathWithoutQuery === "/artist-dashboard" ||
+    pathWithoutQuery === "/dashboard" ||
+    pathWithoutQuery === "/my-bookings" ||
+    pathWithoutQuery === "/bookings";
 
-  // Extract booking artist ID if path is /book-artist/123 or /book-artist?id=123 or /booking
+  const isAdminRoute =
+    pathWithoutQuery === "/admin-dashboard" ||
+    pathWithoutQuery === "/admin" ||
+    pathWithoutQuery.startsWith("/admin/") ||
+    pathWithoutQuery.startsWith("/admin-dashboard/");
+
+  const isArtistRegistration =
+    pathWithoutQuery === "/artist-register" ||
+    pathWithoutQuery === "/artist-registration";
+
+  // Extract booking artist ID and check if currently visiting booking route
+  const matchBookArtist = pathWithoutQuery.match(/^\/(?:book-artist|booking)(?:\/(\d+))?$/);
+  const isBookingRoute = Boolean(matchBookArtist);
+
   let bookArtistId = null;
-  const matchBookArtist = currentPath.match(/^\/book-artist\/(\d+)\/?$/);
-  if (matchBookArtist) {
-    bookArtistId = matchBookArtist[1];
-  } else {
-    const params = new URLSearchParams(window.location.search);
-    if ((currentPath.startsWith("/book-artist") || currentPath.startsWith("/booking")) && params.get("id")) {
-      bookArtistId = params.get("id");
-    } else if (currentPath === "/booking" || currentPath === "/booking/" || currentPath === "/book-artist" || currentPath === "/book-artist/") {
-      bookArtistId = "9";
+  if (isBookingRoute) {
+    if (matchBookArtist[1]) {
+      bookArtistId = matchBookArtist[1];
+    } else {
+      const queryIdx = currentPath.indexOf("?");
+      const searchStr = queryIdx !== -1 ? currentPath.substring(queryIdx) : "";
+      const params = new URLSearchParams(searchStr);
+      bookArtistId = params.get("id") || "9";
     }
   }
+
+  // Extract artist detail ID if path is /artists/123 or /artists?id=123
+  let artistDetailId = null;
+  const matchArtist = pathWithoutQuery.match(/^\/artists\/(\d+)\/?$/);
+  if (matchArtist) {
+    artistDetailId = matchArtist[1];
+  } else {
+    const queryIdx = currentPath.indexOf("?");
+    const searchStr = queryIdx !== -1 ? currentPath.substring(queryIdx) : "";
+    const params = new URLSearchParams(searchStr);
+    if ((pathWithoutQuery === "/artists" || pathWithoutQuery === "/artist") && params.get("id")) {
+      artistDetailId = params.get("id");
+    }
+  }
+
+  const isArtistsList = pathWithoutQuery === "/artists" && !artistDetailId;
 
   // Automatically redirect unauthenticated users visiting protected dashboard views to /login
   useEffect(() => {
@@ -174,62 +273,38 @@ function App() {
     }
   }, [checking, user, isDashboard, navigate]);
 
-  // Automatically redirect unauthenticated users visiting protected booking page to /login
+  // Prevent admins from accidentally landing on customer/artist dashboard views
   useEffect(() => {
-    if (!checking && !user && bookArtistId) {
+    if (!checking && user && isDashboard) {
+      if (user.is_staff || user.is_superuser || user.role === "admin") {
+        queueMicrotask(() => navigate("/admin-dashboard"));
+      }
+    }
+  }, [checking, user, isDashboard, navigate]);
+
+  // Automatically redirect unauthenticated users visiting admin console to /login
+  useEffect(() => {
+    if (!checking && !user && isAdminRoute) {
       queueMicrotask(() => navigate(`/login?redirect=${encodeURIComponent(currentPath)}`));
     }
-  }, [checking, user, bookArtistId, navigate, currentPath]);
+  }, [checking, user, isAdminRoute, navigate, currentPath]);
 
-  if (checking) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#181818",
-          color: "#F7F7F7",
-          gap: "16px",
-          fontFamily: "Inter, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "50%",
-            border: "3px solid rgba(255, 87, 34, 0.2)",
-            borderTopColor: "#FF5722",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        <p style={{ margin: 0, fontSize: "0.95rem", color: "#A0A0A0" }}>
-          Loading TalentHire...
-        </p>
-      </main>
-    );
-  }
-
-  // Extract artist detail ID if path is /artists/123 or /artists?id=123
-  let artistDetailId = null;
-  const matchArtist = currentPath.match(/^\/artists\/(\d+)\/?$/);
-  if (matchArtist) {
-    artistDetailId = matchArtist[1];
-  } else {
-    const params = new URLSearchParams(window.location.search);
-    if ((currentPath === "/artists" || currentPath === "/artist") && params.get("id")) {
-      artistDetailId = params.get("id");
+  // Prevent non-admin users (customers & artists) from accessing admin routes
+  useEffect(() => {
+    if (!checking && user && isAdminRoute) {
+      if (!user.is_staff && !user.is_superuser && user.role !== "admin") {
+        const dest = (user.role === "artist" || user.is_artist) ? "/artist-dashboard" : "/customer-dashboard";
+        queueMicrotask(() => navigate(dest));
+      }
     }
-  }
+  }, [checking, user, isAdminRoute, navigate]);
 
-  const isArtistsList =
-    currentPath === "/artists" ||
-    currentPath === "/artists/" ||
-    currentPath.startsWith("/artists?");
+  // Automatically redirect unauthenticated users visiting protected booking page to /login
+  useEffect(() => {
+    if (!checking && !user && isBookingRoute) {
+      queueMicrotask(() => navigate(`/login?redirect=${encodeURIComponent(currentPath)}`));
+    }
+  }, [checking, user, isBookingRoute, navigate, currentPath]);
 
   return (
     <>
@@ -269,71 +344,124 @@ function App() {
         </aside>
       )}
 
-      {currentPath === "/login" ? (
-        <Login onLogin={handleLoginSuccess} navigate={navigate} />
-      ) : currentPath === "/register" ? (
-        <Register onLogin={handleLoginSuccess} navigate={navigate} />
+      {isAdminRoute ? (
+        checking ? (
+          <LoadingScreen message="Loading admin console..." />
+        ) : !user ? (
+          <LoadingScreen message="Redirecting to sign in..." />
+        ) : (!user.is_staff && !user.is_superuser && user.role !== "admin") ? (
+          (user.role === "artist" || user.is_artist) ? (
+            <ArtistDashboard
+              user={user}
+              onLogout={handleRequestLogout}
+              navigate={navigate}
+              onUserUpdate={(updatedUser) => setUser(updatedUser)}
+            />
+          ) : (
+            <CustomerDashboard
+              user={user}
+              onLogout={handleRequestLogout}
+              navigate={navigate}
+              onUserUpdate={(updatedUser) => setUser(updatedUser)}
+              currentPath={currentPath}
+            />
+          )
+        ) : (
+          <AdminDashboard
+            user={user}
+            onLogout={handleRequestLogout}
+            navigate={navigate}
+          />
+        )
+      ) : isLogin ? (
+        <Login onLogin={handleLoginSuccess} navigate={navigate} currentPath={currentPath} />
+      ) : isRegister ? (
+        <Register onLogin={handleLoginSuccess} navigate={navigate} currentPath={currentPath} />
       ) : isDashboard ? (
-        (user?.role === "artist" || user?.is_artist) ? (
+        checking ? (
+          <LoadingScreen message="Loading profile..." />
+        ) : !user ? (
+          <LoadingScreen message="Redirecting to sign in..." />
+        ) : (user?.is_staff || user?.is_superuser || user?.role === "admin") ? (
+          <AdminDashboard
+            user={user}
+            onLogout={handleRequestLogout}
+            navigate={navigate}
+          />
+        ) : (user?.role === "artist" || user?.is_artist) ? (
           <ArtistDashboard
             user={user}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
             navigate={navigate}
             onUserUpdate={(updatedUser) => setUser(updatedUser)}
           />
         ) : (
           <CustomerDashboard
             user={user}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
             navigate={navigate}
             onUserUpdate={(updatedUser) => setUser(updatedUser)}
             currentPath={currentPath}
           />
         )
-      ) : currentPath === "/artist-register" || currentPath === "/artist-registration" ? (
-        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
-          <Navbar user={user} onLogout={handleLogout} currentPath="/artist-register" navigate={navigate} />
-          <ArtistRegistration
+      ) : isArtistRegistration ? (
+        checking ? (
+          <LoadingScreen message="Loading artist registration..." />
+        ) : (
+          <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
+            <Navbar user={user} currentPath="/artist-register" navigate={navigate} />
+            <ArtistRegistration
+              user={user}
+              onProfileSaved={handleArtistProfileSaved}
+              onCancel={() => navigate("/")}
+              navigate={navigate}
+            />
+          </div>
+        )
+      ) : isBookingRoute ? (
+        checking ? (
+          <LoadingScreen message="Loading booking details..." />
+        ) : !user ? (
+          <LoadingScreen message="Redirecting to sign in..." />
+        ) : (
+          <BookingPage
+            artistId={bookArtistId}
             user={user}
-            onProfileSaved={handleArtistProfileSaved}
-            onCancel={() => navigate("/")}
+            onLogout={handleRequestLogout}
             navigate={navigate}
+            checking={checking}
           />
-          <Chatbot />
-        </div>
-      ) : bookArtistId ? (
-        <BookingPage
-          artistId={bookArtistId}
-          user={user}
-          onLogout={handleLogout}
-          navigate={navigate}
-        />
+        )
       ) : artistDetailId ? (
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
           <ArtistDetails
             artistId={artistDetailId}
             user={user}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
             navigate={navigate}
           />
-          <Chatbot />
         </div>
       ) : isArtistsList ? (
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
           <ArtistsList
             key={currentPath}
             user={user}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
             navigate={navigate}
           />
-          <Chatbot />
         </div>
       ) : (
-        <>
-          <Home user={user} onLogout={handleLogout} navigate={navigate} />
-          <Chatbot />
-        </>
+        <Home user={user} onLogout={handleRequestLogout} navigate={navigate} />
       )}
+
+      {!isLogin && !isRegister && !isAdminRoute && <Chatbot />}
+
+      <LogoutModal
+        isOpen={showLogoutModal}
+        onConfirm={handleConfirmLogout}
+        onCancel={handleCancelLogout}
+        loading={loggingOut}
+      />
     </>
   );
 }

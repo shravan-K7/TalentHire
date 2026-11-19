@@ -1,59 +1,55 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import BookingCalendarPicker from '../components/BookingCalendarPicker';
+import EventDetails from '../components/booking/EventDetails';
+import EventLocation from '../components/booking/EventLocation';
+import PerformanceRequirements from '../components/booking/PerformanceRequirements';
+import BookingSummary from '../components/booking/BookingSummary';
 import {
   fetchArtistDetail,
   createBooking,
-  fetchArtistAvailability,
   fetchPublicArtistAvailability,
 } from '../js/auth';
 import '../css/BookingPage.css';
 
-const EVENT_TYPE_OPTIONS = [
-  'Corporate Event',
-  'Wedding',
-  'Private Party / Birthday',
-  'Music / Cultural Festival',
-  'Sangeet / Reception',
-  'College Event',
-  'Other',
-];
-
-const DURATION_OPTIONS = [
-  '30 minutes',
-  '1 hour',
-  '1.5 hours',
-  '2 hours',
-  '3 hours',
-  '4+ hours',
-  'To be discussed',
-];
-
 const DEFAULT_ARTIST = {
-  id: 9,
-  stage_name: 'Neha Kapoor',
-  category_name: 'Anchors & Emcees',
-  location: 'Pune, Maharashtra',
-  starting_price: 18000,
+  id: '',
+  stage_name: 'Artist',
+  category_name: 'Performer',
+  location: '',
+  starting_price: 0,
   profile_image: null,
 };
 
-function BookingPage({ artistId = '9', user, onLogout, navigate }) {
+export default function BookingPage({ artistId = '4', user, onLogout, navigate, checking = false }) {
   const [artist, setArtist] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState('');
 
-  // Form State matching the layout with initial values per design
+  // Comprehensive Form State matching backend model
   const [formData, setFormData] = useState({
     event_type: '',
     event_date: '2026-11-20',
     event_time: '19:00',
     event_location: '',
+    event_area: '',
+    event_area_place_id: '',
+    event_address: '',
+    city: '',
+    state: '',
+    country: 'India',
+    venue_name: '',
+    latitude: null,
+    longitude: null,
+    area_latitude: null,
+    area_longitude: null,
+    google_maps_url: '',
+    location_source: 'autocomplete',
+    location_instructions: '',
     customer_phone: user?.phone || user?.customer_profile?.phone || '',
     performance_duration: '',
     expected_audience_size: '',
-    budget: '18000',
+    budget: '',
     additional_requirements: '',
   });
 
@@ -66,16 +62,17 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
   const [unavailableDates, setUnavailableDates] = useState(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState('');
-  const [currentMonth, setCurrentMonth] = useState(() => {
-    return '2026-11';
-  });
+  const [currentMonth, setCurrentMonth] = useState('2026-11');
   const availabilityReqIdRef = useRef(0);
   const currentMonthRef = useRef(currentMonth);
-  currentMonthRef.current = currentMonth;
+
+  useEffect(() => {
+    currentMonthRef.current = currentMonth;
+  }, [currentMonth]);
 
   // Fetch artist availability for a given month with stale response guard
   const loadAvailability = useCallback(async (monthStr, targetArtistId) => {
-    const aid = targetArtistId || artist?.id || artistId || 9;
+    const aid = targetArtistId || artist?.id || artistId || 4;
     if (!aid || !monthStr) return;
 
     const reqId = ++availabilityReqIdRef.current;
@@ -84,7 +81,6 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
 
     try {
       const data = await fetchPublicArtistAvailability(aid, monthStr);
-      // Guard against stale responses: only update if this request is still the active one
       if (reqId === availabilityReqIdRef.current) {
         setUnavailableDates(data.unavailable_dates || []);
         setAvailabilityError('');
@@ -92,7 +88,6 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     } catch (err) {
       if (reqId === availabilityReqIdRef.current) {
         console.warn('Failed to load artist availability:', err);
-        // Do not silently display all dates as available when the API request fails
         setUnavailableDates(null);
         setAvailabilityError(err.message || 'Unable to load artist schedule. Please try again.');
       }
@@ -110,50 +105,50 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
 
   // Initial availability fetch
   useEffect(() => {
-    const aid = artistId || 9;
+    if (!user) return;
+    const aid = artistId || 4;
     loadAvailability(currentMonthRef.current, aid);
-  }, [artistId, loadAvailability]);
+  }, [user, artistId, loadAvailability]);
 
-  // Authentication check: unauthenticated customers must be redirected to login
+  // Authentication check
   useEffect(() => {
-    if (!user) {
-      const redirectPath = `/book-artist/${artistId || 9}`;
+    if (!checking && !user) {
+      const targetId = artistId || artist?.id || 4;
+      const redirectPath = `/book-artist/${targetId}`;
       if (navigate) {
         navigate(`/login?redirect=${encodeURIComponent(redirectPath)}`);
       } else {
         window.location.assign(`/login?redirect=${encodeURIComponent(redirectPath)}`);
       }
     }
-  }, [user, artistId, navigate]);
+  }, [checking, user, artistId, artist?.id, navigate]);
 
   // Load artist details
   useEffect(() => {
+    if (!user) return;
     let isMounted = true;
 
     async function loadArtist() {
       setLoading(true);
       setFetchError('');
       try {
-        const targetId = artistId || 9;
+        const targetId = artistId || 4;
         const data = await fetchArtistDetail(targetId);
         if (isMounted) {
           setArtist(data);
           loadAvailability(currentMonthRef.current, data.id);
           setFormData((prev) => ({
             ...prev,
-            budget: data.starting_price ? String(parseInt(data.starting_price, 10)) : prev.budget || '18000',
-            event_location: data.location || prev.event_location,
+            budget: prev.budget || (data.starting_price ? String(parseInt(data.starting_price, 10)) : ''),
             customer_phone: prev.customer_phone || user?.phone || user?.customer_profile?.phone || '',
           }));
         }
       } catch {
         if (isMounted) {
-          // If fetching fails, gracefully use DEFAULT_ARTIST so page renders reliably
           setArtist(DEFAULT_ARTIST);
           setFormData((prev) => ({
             ...prev,
-            budget: String(DEFAULT_ARTIST.starting_price),
-            event_location: DEFAULT_ARTIST.location,
+            budget: prev.budget || String(DEFAULT_ARTIST.starting_price),
             customer_phone: prev.customer_phone || user?.phone || user?.customer_profile?.phone || '',
           }));
         }
@@ -169,7 +164,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     return () => {
       isMounted = false;
     };
-  }, [artistId, user]);
+  }, [artistId, user, loadAvailability]);
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -185,7 +180,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     }
   }
 
-  function handleFocus(fieldId) {
+  function handleFocusField(fieldId) {
     if (fieldError.field === fieldId) {
       setFieldError({ field: '', message: '' });
     }
@@ -207,7 +202,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
   }
 
   function handleBackToArtist() {
-    const targetId = artist?.id || artistId || 9;
+    const targetId = artist?.id || artistId || 4;
     if (navigate) {
       navigate(`/artists/${targetId}`);
     } else {
@@ -219,10 +214,13 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     e.preventDefault();
 
     if (!user) {
+      const targetId = artist?.id || artistId || 4;
+      const redirectPath = `/book-artist/${targetId}`;
+      const loginUrl = `/login?redirect=${encodeURIComponent(redirectPath)}`;
       if (navigate) {
-        navigate('/login');
+        navigate(loginUrl);
       } else {
-        window.location.assign('/login');
+        window.location.assign(loginUrl);
       }
       return;
     }
@@ -230,11 +228,13 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     setSubmitError('');
     setFieldError({ field: '', message: '' });
 
-    // Validations with smooth scroll and point-out
+    // 1. Event Type Validation
     if (!formData.event_type.trim()) {
       pointOutField('eventType', 'Please select an event type.');
       return;
     }
+
+    // 2. Date & Time Validation
     if (!formData.event_date) {
       pointOutField('eventDateTimeSection', 'Please choose the event date from the calendar.');
       return;
@@ -244,7 +244,6 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       return;
     }
 
-    // Validate future date and time
     const combinedStr = `${formData.event_date}T${formData.event_time}:00`;
     const eventDateTime = new Date(combinedStr);
     const now = new Date();
@@ -254,7 +253,7 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     }
 
     if (Array.isArray(unavailableDates) && unavailableDates.includes(formData.event_date)) {
-      pointOutField('eventDateTimeSection', 'This artist already has a booking or active reservation on this date. Please select another date.');
+      pointOutField('eventDateTimeSection', 'This artist is unavailable on this date. Please select another date.');
       return;
     }
 
@@ -263,11 +262,19 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       return;
     }
 
-    if (!formData.event_location.trim()) {
-      pointOutField('eventLocation', 'Please enter the venue / location.');
+    // 3. Location / Area Validation
+    if (!formData.event_area.trim()) {
+      pointOutField('eventAreaInput', 'Please search and select or enter the Location / Area.');
       return;
     }
 
+    // 4. Venue Name Validation
+    if (!formData.venue_name.trim()) {
+      pointOutField('venueNameInput', 'Please enter the venue name or specific place.');
+      return;
+    }
+
+    // 5. Phone Number Validation
     if (!formData.customer_phone.trim()) {
       pointOutField('customerPhone', 'Please enter your contact phone number.');
       return;
@@ -278,23 +285,24 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       return;
     }
 
+    // 6. Performance Duration Validation
     if (!formData.performance_duration.trim()) {
       pointOutField('performanceDuration', 'Please select the performance duration.');
       return;
     }
 
+    // 7. Expected Audience Size Validation
     if (!formData.expected_audience_size) {
       pointOutField('expectedAudienceSize', 'Please enter the expected audience size.');
       return;
     }
-
     const audNum = Number(formData.expected_audience_size);
     if (isNaN(audNum) || audNum <= 0 || !Number.isInteger(audNum)) {
       pointOutField('expectedAudienceSize', 'Expected audience size must be a positive whole number.');
       return;
     }
 
-    // Budget check if entered
+    // 8. Budget Validation
     if (formData.budget) {
       const budNum = Number(formData.budget);
       if (isNaN(budNum) || budNum < 0) {
@@ -306,21 +314,35 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     setSubmitting(true);
 
     try {
+      const combinedLocation = [formData.venue_name.trim(), formData.event_area.trim()].filter(Boolean).join(', ');
+
       const payload = {
-        artist_id: Number(artist?.id || artistId || 9),
+        artist_id: Number(artist?.id || artistId || 4),
         event_type: formData.event_type.trim(),
         event_date: formData.event_date,
         event_time: formData.event_time,
-        event_location: formData.event_location.trim(),
+        event_area: formData.event_area.trim(),
+        event_area_place_id: formData.event_area_place_id || '',
+        event_address: formData.event_address.trim() || combinedLocation,
+        city: formData.city.trim() || formData.event_area.trim(),
+        state: formData.state.trim() || 'Kerala',
+        country: formData.country || 'India',
+        venue_name: formData.venue_name.trim(),
+        event_location: combinedLocation,
+        latitude: formData.latitude !== null && !isNaN(formData.latitude) ? Number(formData.latitude) : null,
+        longitude: formData.longitude !== null && !isNaN(formData.longitude) ? Number(formData.longitude) : null,
+        area_latitude: formData.area_latitude !== null && !isNaN(formData.area_latitude) ? Number(formData.area_latitude) : null,
+        area_longitude: formData.area_longitude !== null && !isNaN(formData.area_longitude) ? Number(formData.area_longitude) : null,
+        google_maps_url: formData.google_maps_url.trim(),
+        location_source: formData.location_source || 'manual',
+        location_instructions: formData.location_instructions.trim(),
         customer_phone: formData.customer_phone.trim(),
         phone: formData.customer_phone.trim(),
         performance_duration: formData.performance_duration.trim(),
         expected_audience_size: Number(formData.expected_audience_size),
-        agreed_price: formData.budget ? Number(formData.budget) : (artist?.starting_price || 18000),
+        agreed_price: formData.budget ? Number(formData.budget) : (artist?.starting_price || 5000),
         message: formData.additional_requirements.trim(),
       };
-
-      console.log("BOOKING PAYLOAD:", payload);
 
       const result = await createBooking(payload);
       setBookingSuccessData(result);
@@ -328,8 +350,19 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       const errorMsg = err.message || 'Failed to submit booking request. Please check inputs and try again.';
       setSubmitError(errorMsg);
 
-      // Task 4: After a booking submission returns HTTP 409, refresh availability for the currently displayed month and show the existing inline error.
-      if (err.status === 409 || errorMsg.toLowerCase().includes('already has a booking') || errorMsg.toLowerCase().includes('active reservation') || errorMsg.toLowerCase().includes('occupied')) {
+      if (err.status === 401 || errorMsg.toLowerCase().includes('sign in') || errorMsg.toLowerCase().includes('log in')) {
+        const targetId = artist?.id || artistId || 4;
+        const redirectPath = `/book-artist/${targetId}`;
+        const loginUrl = `/login?redirect=${encodeURIComponent(redirectPath)}`;
+        if (navigate) {
+          navigate(loginUrl);
+        } else {
+          window.location.assign(loginUrl);
+        }
+        return;
+      }
+
+      if (err.status === 409 || errorMsg.toLowerCase().includes('already has a booking') || errorMsg.toLowerCase().includes('active reservation')) {
         pointOutField('eventDateTimeSection', errorMsg);
         loadAvailability(currentMonthRef.current);
       }
@@ -341,11 +374,40 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
   const currentArtist = artist || DEFAULT_ARTIST;
   const displayStageName = currentArtist.stage_name
     ? currentArtist.stage_name.replace(/\s*\([^)]*\)/, '')
-    : 'Neha Kapoor';
-  const displayCategory =
-    currentArtist.category_name ||
-    (currentArtist.category && currentArtist.category.name) ||
-    'Anchors & Emcees';
+    : 'Artist';
+
+  if (!user) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#181818',
+          color: '#F7F7F7',
+          gap: '16px',
+          fontFamily: 'Inter, sans-serif',
+        }}
+      >
+        <div
+          style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '50%',
+            border: '3px solid rgba(255, 87, 34, 0.2)',
+            borderTopColor: '#FF5722',
+            animation: 'spin 0.8s linear infinite',
+          }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p style={{ margin: 0, fontSize: '0.95rem', color: '#A0A0A0' }}>
+          Please sign in to book this performer. Redirecting to login...
+        </p>
+      </main>
+    );
+  }
 
   return (
     <div className="booking-page-root">
@@ -357,14 +419,14 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
       />
 
       <main className="booking-page-container">
-        {/* Back Link */}
+        {/* Back Link without icons or emojis */}
         <button
           type="button"
           className="booking-back-link"
           onClick={handleBackToArtist}
           aria-label="Back to artist"
         >
-          ← Back to artist
+          Back to artist
         </button>
 
         {/* Page Title & Subtitle */}
@@ -383,14 +445,9 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
           </div>
         )}
 
-        {/* Error State if fetch error and no artist */}
+        {/* Error State */}
         {!loading && fetchError && !artist && (
           <div className="booking-alert-banner" role="alert">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
             <span>{fetchError}</span>
           </div>
         )}
@@ -398,24 +455,19 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
         {/* Success Confirmation Card */}
         {bookingSuccessData && (
           <div className="booking-success-box">
-            <div className="booking-success-icon-wrap">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <h2 className="booking-success-title">Booking Request Sent!</h2>
+            <div className="booking-success-badge">CONFIRMED</div>
+            <h2 className="booking-success-title">Booking Request Sent</h2>
             <p className="booking-success-desc">
               Your request for <strong>{displayStageName}</strong> has been submitted with status{' '}
-              <span style={{ color: '#FF9800', fontWeight: 600 }}>PENDING</span>.
-              The artist will review the event details and confirm schedule availability.
-              Once accepted, you can proceed to payment.
+              <span className="booking-status-tag">PENDING</span>.
+              The artist will review the event details, venue location, and schedule availability.
+              Once accepted, you can proceed with payment.
             </p>
 
             <div className="booking-success-actions">
               <button
                 type="button"
-                className="booking-submit-btn"
-                style={{ width: 'auto', padding: '11px 26px', margin: 0 }}
+                className="booking-submit-btn booking-success-btn"
                 onClick={() => {
                   if (navigate) {
                     navigate('/customer-dashboard');
@@ -450,348 +502,68 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
             <form onSubmit={handleSubmit} noValidate className="booking-form-stack">
               {submitError && (
                 <div className="booking-alert-banner" role="alert">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <line x1="12" y1="16" x2="12.01" y2="16" />
-                  </svg>
                   <span>{submitError}</span>
                 </div>
               )}
 
               {/* Card 1: Event Details */}
-              <div className="booking-card">
-                <h2 className="booking-card-title">Event details</h2>
+              <EventDetails
+                formData={formData}
+                handleChange={handleChange}
+                onDateChange={(val) => {
+                  setFormData((prev) => ({ ...prev, event_date: val }));
+                  if (fieldError.field === 'eventDateTimeSection') {
+                    setFieldError({ field: '', message: '' });
+                  }
+                }}
+                onTimeChange={(val) => {
+                  setFormData((prev) => ({ ...prev, event_time: val }));
+                  if (fieldError.field === 'eventDateTimeSection') {
+                    setFieldError({ field: '', message: '' });
+                  }
+                }}
+                unavailableDates={unavailableDates}
+                onMonthChange={handleMonthChange}
+                isLoadingAvailability={availabilityLoading}
+                availabilityError={availabilityError}
+                fieldError={fieldError}
+                onFocusField={handleFocusField}
+              />
 
-                {/* Event type */}
-                <div className="booking-field">
-                  <label htmlFor="eventType" className="booking-field-label">
-                    Event type <span className="booking-req">*</span>
-                  </label>
-                  <select
-                    id="eventType"
-                    name="event_type"
-                    className={`booking-control ${fieldError.field === 'eventType' ? 'booking-control-highlight' : ''}`}
-                    value={formData.event_type}
-                    onChange={handleChange}
-                    onFocus={() => handleFocus('eventType')}
-                    aria-invalid={fieldError.field === 'eventType' ? 'true' : undefined}
-                    required
-                  >
-                    <option value="" disabled>Select event type</option>
-                    {EVENT_TYPE_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                  {fieldError.field === 'eventType' && (
-                    <div className="booking-field-pointer" role="alert">
-                      <span className="booking-pointer-arrow">👆</span>
-                      <span>{fieldError.message}</span>
-                    </div>
-                  )}
-                </div>
+              {/* Card 2: Event Location */}
+              <EventLocation
+                formData={formData}
+                setFormData={setFormData}
+                fieldError={fieldError}
+                onFocusField={handleFocusField}
+              />
 
-                {/* Event date & start time with custom responsive Calendar and Time slot picker */}
-                <div
-                  id="eventDateTimeSection"
-                  className={`booking-field ${fieldError.field === 'eventDateTimeSection' ? 'booking-field-highlight' : ''}`}
-                >
-                  <label className="booking-field-label">
-                    Event date & start time <span className="booking-req">*</span>
-                  </label>
-                  {fieldError.field === 'eventDateTimeSection' && (
-                    <div className="booking-field-pointer" style={{ marginBottom: 10 }} role="alert">
-                      <span className="booking-pointer-arrow">👇</span>
-                      <span>{fieldError.message}</span>
-                    </div>
-                  )}
-                  {availabilityError && (
-                    <div className="booking-alert-banner" style={{ marginBottom: 12 }} role="alert">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="8" x2="12" y2="12" />
-                        <line x1="12" y1="16" x2="12.01" y2="16" />
-                      </svg>
-                      <span>{availabilityError}</span>
-                      <button
-                        type="button"
-                        onClick={() => loadAvailability(currentMonthRef.current)}
-                        style={{
-                          marginLeft: 'auto',
-                          background: 'none',
-                          border: 'none',
-                          color: '#FF5722',
-                          textDecoration: 'underline',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                        }}
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  )}
-                  <BookingCalendarPicker
-                    selectedDate={formData.event_date}
-                    selectedTime={formData.event_time}
-                    unavailableDates={unavailableDates}
-                    isLoadingAvailability={availabilityLoading}
-                    availabilityError={availabilityError}
-                    onMonthChange={handleMonthChange}
-                    onDateChange={(newDate) => {
-                      setFormData((prev) => ({ ...prev, event_date: newDate }));
-                      if (submitError) setSubmitError('');
-                      if (fieldError.field === 'eventDateTimeSection') setFieldError({ field: '', message: '' });
-                    }}
-                    onTimeChange={(newTime) => {
-                      setFormData((prev) => ({ ...prev, event_time: newTime }));
-                      if (submitError) setSubmitError('');
-                      if (fieldError.field === 'eventDateTimeSection') setFieldError({ field: '', message: '' });
-                    }}
-                  />
-                </div>
+              {/* Card 3: Contact & Performance Requirements */}
+              <PerformanceRequirements
+                formData={formData}
+                handleChange={handleChange}
+                fieldError={fieldError}
+                onFocusField={handleFocusField}
+              />
 
-                {/* Venue / location */}
-                <div className="booking-field">
-                  <label htmlFor="eventLocation" className="booking-field-label">
-                    Venue / location <span className="booking-req">*</span>
-                  </label>
-                  <input
-                    id="eventLocation"
-                    type="text"
-                    name="event_location"
-                    className={`booking-control ${fieldError.field === 'eventLocation' ? 'booking-control-highlight' : ''}`}
-                    value={formData.event_location}
-                    onChange={handleChange}
-                    onFocus={() => handleFocus('eventLocation')}
-                    placeholder="Venue name, city"
-                    aria-invalid={fieldError.field === 'eventLocation' ? 'true' : undefined}
-                    required
-                  />
-                  {fieldError.field === 'eventLocation' && (
-                    <div className="booking-field-pointer" role="alert">
-                      <span className="booking-pointer-arrow">👆</span>
-                      <span>{fieldError.message}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Phone number */}
-                <div className="booking-field" style={{ marginBottom: 0 }}>
-                  <label htmlFor="customerPhone" className="booking-field-label">
-                    Phone number <span className="booking-req">*</span>
-                  </label>
-                  <input
-                    id="customerPhone"
-                    type="tel"
-                    name="customer_phone"
-                    className={`booking-control ${fieldError.field === 'customerPhone' ? 'booking-control-highlight' : ''}`}
-                    value={formData.customer_phone}
-                    onChange={handleChange}
-                    onFocus={() => handleFocus('customerPhone')}
-                    placeholder="e.g. +91 98765 43210"
-                    autoComplete="tel"
-                    aria-invalid={fieldError.field === 'customerPhone' ? 'true' : undefined}
-                    required
-                  />
-                  {fieldError.field === 'customerPhone' ? (
-                    <div className="booking-field-pointer" role="alert">
-                      <span className="booking-pointer-arrow">👆</span>
-                      <span>{fieldError.message}</span>
-                    </div>
-                  ) : (
-                    <span className="booking-field-hint">
-                      The artist will use this phone number to coordinate arrival and event schedule.
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Card 2: Performance Requirements */}
-              <div className="booking-card">
-                <h2 className="booking-card-title">Performance requirements</h2>
-
-                <div className="booking-row-2">
-                  <div className="booking-field">
-                    <label htmlFor="performanceDuration" className="booking-field-label">
-                      Performance duration <span className="booking-req">*</span>
-                    </label>
-                    <select
-                      id="performanceDuration"
-                      name="performance_duration"
-                      className={`booking-control ${fieldError.field === 'performanceDuration' ? 'booking-control-highlight' : ''}`}
-                      value={formData.performance_duration}
-                      onChange={handleChange}
-                      onFocus={() => handleFocus('performanceDuration')}
-                      aria-invalid={fieldError.field === 'performanceDuration' ? 'true' : undefined}
-                      required
-                    >
-                      <option value="" disabled>Select duration</option>
-                      {DURATION_OPTIONS.map((dur) => (
-                        <option key={dur} value={dur}>
-                          {dur}
-                        </option>
-                      ))}
-                    </select>
-                    {fieldError.field === 'performanceDuration' && (
-                      <div className="booking-field-pointer" role="alert">
-                        <span className="booking-pointer-arrow">👆</span>
-                        <span>{fieldError.message}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="booking-field">
-                    <label htmlFor="expectedAudienceSize" className="booking-field-label">
-                      Expected audience size <span className="booking-req">*</span>
-                    </label>
-                    <input
-                      id="expectedAudienceSize"
-                      type="number"
-                      name="expected_audience_size"
-                      className={`booking-control ${fieldError.field === 'expectedAudienceSize' ? 'booking-control-highlight' : ''}`}
-                      value={formData.expected_audience_size}
-                      onChange={handleChange}
-                      onFocus={() => handleFocus('expectedAudienceSize')}
-                      placeholder="e.g. 250"
-                      min="1"
-                      step="1"
-                      aria-invalid={fieldError.field === 'expectedAudienceSize' ? 'true' : undefined}
-                      required
-                    />
-                    {fieldError.field === 'expectedAudienceSize' && (
-                      <div className="booking-field-pointer" role="alert">
-                        <span className="booking-pointer-arrow">👆</span>
-                        <span>{fieldError.message}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="booking-field">
-                  <label htmlFor="budget" className="booking-field-label">
-                    Your budget (₹) <span className="booking-opt">optional</span>
-                  </label>
-                  <input
-                    id="budget"
-                    type="number"
-                    name="budget"
-                    className={`booking-control ${fieldError.field === 'budget' ? 'booking-control-highlight' : ''}`}
-                    value={formData.budget}
-                    onChange={handleChange}
-                    onFocus={() => handleFocus('budget')}
-                    placeholder={currentArtist.starting_price ? String(parseInt(currentArtist.starting_price, 10)) : '18000'}
-                    min="0"
-                    step="500"
-                    aria-invalid={fieldError.field === 'budget' ? 'true' : undefined}
-                  />
-                  {fieldError.field === 'budget' ? (
-                    <div className="booking-field-pointer" role="alert">
-                      <span className="booking-pointer-arrow">👆</span>
-                      <span>{fieldError.message}</span>
-                    </div>
-                  ) : (
-                    <span className="booking-field-hint">
-                      Prefilled with the artist's starting price. Final quote may differ.
-                    </span>
-                  )}
-                </div>
-
-                <div className="booking-field" style={{ marginBottom: 0 }}>
-                  <label htmlFor="additionalRequirements" className="booking-field-label">
-                    Additional requirements <span className="booking-opt">optional</span>
-                  </label>
-                  <textarea
-                    id="additionalRequirements"
-                    name="additional_requirements"
-                    className="booking-control booking-textarea"
-                    value={formData.additional_requirements}
-                    onChange={handleChange}
-                    rows={4}
-                    placeholder="Sound system, instruments, accommodation, travel, dress code or other instructions"
-                  />
-                </div>
-              </div>
-
-              {/* Submit Button & Footnote */}
-              <div>
+              {/* Submit Button */}
+              <div className="booking-submit-wrapper">
                 <button
                   type="submit"
                   className="booking-submit-btn"
                   disabled={submitting}
                 >
-                  {submitting ? 'Sending Booking Request...' : 'Send Booking Request'}
+                  {submitting ? 'Submitting Request...' : 'Send Booking Request'}
                 </button>
-                <div className="booking-required-note">* Required fields</div>
+                <div className="booking-required-notice">* Required fields</div>
               </div>
             </form>
 
-            {/* Right Column: Artist Summary Card & What Happens Next */}
-            <aside className="booking-sidebar" aria-label="Artist Summary and Guide">
-              {/* Artist Card */}
-              <div className="booking-artist-card">
-                <div className="booking-artist-top">
-                  <div className="booking-artist-thumb">
-                    {currentArtist.profile_image ? (
-                      <img
-                        src={currentArtist.profile_image}
-                        alt={displayStageName}
-                      />
-                    ) : (
-                      <div className="booking-artist-thumb-fallback">[photo]</div>
-                    )}
-                  </div>
-
-                  <div className="booking-artist-meta">
-                    <div className="booking-artist-name" title={displayStageName}>
-                      {displayStageName}
-                    </div>
-                    <div className="booking-artist-cat">
-                      {displayCategory}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="booking-artist-divider" />
-
-                <div className="booking-artist-details">
-                  <div className="booking-artist-row">
-                    <span className="booking-artist-label">Location</span>
-                    <span className="booking-artist-val">
-                      {currentArtist.location || 'Pune, Maharashtra'}
-                    </span>
-                  </div>
-                  <div className="booking-artist-row">
-                    <span className="booking-artist-label">Starting price</span>
-                    <span className="booking-artist-price">
-                      ₹{Number(currentArtist.starting_price || 18000).toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* What Happens Next Card */}
-              <div className="booking-next-card">
-                <h3 className="booking-next-title">What happens next</h3>
-                <ol className="booking-steps-list">
-                  <li className="booking-step-item">
-                    <span className="booking-step-num">1</span>
-                    <span className="booking-step-text">Artist reviews your request</span>
-                  </li>
-                  <li className="booking-step-item">
-                    <span className="booking-step-num">2</span>
-                    <span className="booking-step-text">They accept or decline</span>
-                  </li>
-                  <li className="booking-step-item">
-                    <span className="booking-step-num">3</span>
-                    <span className="booking-step-text">
-                      If accepted, you pay securely to confirm
-                    </span>
-                  </li>
-                </ol>
-              </div>
-            </aside>
+            {/* Right Column: Artist Card, Booking Summary, Next Steps */}
+            <BookingSummary
+              artist={currentArtist}
+              formData={formData}
+            />
           </div>
         )}
       </main>
@@ -800,5 +572,3 @@ function BookingPage({ artistId = '9', user, onLogout, navigate }) {
     </div>
   );
 }
-
-export default BookingPage;

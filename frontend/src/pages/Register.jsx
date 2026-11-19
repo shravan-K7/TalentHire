@@ -4,9 +4,18 @@ import Navbar from '../components/Navbar';
 import GoogleSignIn from '../components/GoogleSignIn';
 import '../css/Login.css';
 
-function Register({ onLogin, navigate }) {
+function Register({ onLogin, navigate, currentPath }) {
+  const getSearchParams = useCallback(() => {
+    if (currentPath && currentPath.includes('?')) {
+      return new URLSearchParams(currentPath.substring(currentPath.indexOf('?')));
+    }
+    return new URLSearchParams(window.location.search);
+  }, [currentPath]);
+
   const [formData, setFormData] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = currentPath && currentPath.includes('?')
+      ? new URLSearchParams(currentPath.substring(currentPath.indexOf('?')))
+      : new URLSearchParams(window.location.search);
     const roleParam = params.get('role');
     const initialRole = roleParam === 'artist' || roleParam === 'customer' ? roleParam : '';
     return {
@@ -26,6 +35,8 @@ function Register({ onLogin, navigate }) {
   const [usernameSuggestions, setUsernameSuggestions] = useState([]);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+  const [confirmPasswordTouched, setConfirmPasswordTouched] = useState(false);
 
   const handleGoogleLogin = useCallback((googleUser, meta) => {
     const chosenRole = meta?.role || googleUser?.role || formData.role;
@@ -37,19 +48,14 @@ function Register({ onLogin, navigate }) {
     setError('');
     setMessage('Google registration successful.');
     const isArtist = chosenRole === 'artist';
-
-    if (chosenRole === 'admin' || googleUser?.is_staff) {
-      window.location.href = '/admin/';
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const redirectParam = params.get('redirect');
+    const isAdmin = Boolean(chosenRole === 'admin' || googleUser?.is_staff || googleUser?.is_superuser);
+    const redirectParam = getSearchParams().get('redirect');
 
     if (onLogin) {
-      onLogin(googleUser, isArtist, redirectParam || '/');
+      const destination = redirectParam || (isAdmin ? '/admin-dashboard' : isArtist ? '/artist-dashboard' : '/customer-dashboard');
+      onLogin(googleUser, isArtist, destination);
     }
-  }, [onLogin, formData.role]);
+  }, [onLogin, formData.role, getSearchParams]);
 
   const handleGoogleError = useCallback((errorMessage) => {
     setError(errorMessage);
@@ -63,6 +69,14 @@ function Register({ onLogin, navigate }) {
       [name]: value,
     }));
     if (name === 'role') {
+      setError('');
+    }
+    if (name === 'password') {
+      setPasswordTouched(true);
+      setError('');
+    }
+    if (name === 'confirmPassword') {
+      setConfirmPasswordTouched(true);
       setError('');
     }
     if (name === 'username') {
@@ -137,13 +151,16 @@ function Register({ onLogin, navigate }) {
       return;
     }
 
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
+    setPasswordTouched(true);
+    setConfirmPasswordTouched(true);
 
     if (formData.password.length < 8) {
       setError('Password must contain at least 8 characters.');
+      return;
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match.');
       return;
     }
 
@@ -161,8 +178,7 @@ function Register({ onLogin, navigate }) {
       setError('');
 
       if (data.user) {
-        const params = new URLSearchParams(window.location.search);
-        const redirectParam = params.get('redirect');
+        const redirectParam = getSearchParams().get('redirect');
         onLogin(data.user, formData.role === 'artist', redirectParam || '/');
       }
     } catch (err) {
@@ -172,10 +188,16 @@ function Register({ onLogin, navigate }) {
     }
   }
 
+  const redirectParam = getSearchParams().get('redirect');
+  const isBookingRedirect = Boolean(
+    redirectParam && (redirectParam.startsWith('/book-artist') || redirectParam.startsWith('/booking'))
+  );
+
   function handleGoToLogin(event) {
     if (navigate) {
       event.preventDefault();
-      navigate('/login');
+      const targetRedirect = getSearchParams().get('redirect');
+      navigate(targetRedirect ? `/login?redirect=${encodeURIComponent(targetRedirect)}` : '/login');
     }
   }
 
@@ -212,6 +234,68 @@ function Register({ onLogin, navigate }) {
     };
   }, [formData.username]);
 
+  // Live Password Checker & Strength Calculations
+  const passwordValue = formData.password;
+  const confirmPasswordValue = formData.confirmPassword;
+
+  const passwordCriteria = {
+    hasMinLength: passwordValue.length >= 8,
+    hasUpperLower: /[A-Z]/.test(passwordValue) && /[a-z]/.test(passwordValue),
+    hasNumber: /[0-9]/.test(passwordValue),
+    hasSpecial: /[^A-Za-z0-9]/.test(passwordValue),
+  };
+
+  const metCriteriaCount = Object.values(passwordCriteria).filter(Boolean).length;
+
+  let passwordStrength = {
+    score: 0,
+    level: 'none',
+    label: '',
+  };
+
+  if (passwordValue.length > 0) {
+    if (passwordValue.length < 8) {
+      passwordStrength = {
+        score: 1,
+        level: 'weak',
+        label: 'Too short',
+      };
+    } else if (metCriteriaCount <= 2) {
+      passwordStrength = {
+        score: 2,
+        level: 'fair',
+        label: 'Fair',
+      };
+    } else if (metCriteriaCount === 3) {
+      passwordStrength = {
+        score: 3,
+        level: 'good',
+        label: 'Good',
+      };
+    } else if (metCriteriaCount === 4) {
+      if (passwordValue.length >= 12) {
+        passwordStrength = {
+          score: 4,
+          level: 'very-strong',
+          label: 'Very Strong',
+        };
+      } else {
+        passwordStrength = {
+          score: 4,
+          level: 'strong',
+          label: 'Strong',
+        };
+      }
+    }
+  }
+
+  const isAllPasswordCriteriaMet = passwordCriteria.hasMinLength && metCriteriaCount === 4;
+
+  const isConfirmEntered = confirmPasswordValue.length > 0;
+  const isPasswordEntered = passwordValue.length > 0;
+  const isPasswordMatch = isConfirmEntered && isPasswordEntered && confirmPasswordValue === passwordValue;
+  const isPasswordMismatch = isConfirmEntered && (!isPasswordEntered || confirmPasswordValue !== passwordValue);
+
   return (
     <div className="auth-page">
       <Navbar currentPath="/register" navigate={navigate} />
@@ -222,6 +306,21 @@ function Register({ onLogin, navigate }) {
             <h1 className="auth-title">Create an Account</h1>
             <p className="auth-subtitle">Join TalentHire to discover performers or get booked for events.</p>
           </div>
+
+          {isBookingRedirect && !error && !message && (
+            <div
+              className="auth-alert-status"
+              role="status"
+              style={{
+                background: 'rgba(255, 87, 34, 0.15)',
+                border: '1px solid #FF5722',
+                color: '#FF7043',
+                marginBottom: '16px',
+              }}
+            >
+              Please register or log in to proceed with booking your artist.
+            </div>
+          )}
 
           {error && (
             <div className="auth-alert-error" role="alert">
@@ -387,19 +486,35 @@ function Register({ onLogin, navigate }) {
 
               <div className="form-field">
                 <label htmlFor="password">Password *</label>
-                <div className="password-input-wrapper">
+                <div
+                  className={`password-input-wrapper ${
+                    isAllPasswordCriteriaMet ? 'has-status-icon is-all-met' : ''
+                  }`}
+                >
                   <input
                     id="password"
                     name="password"
                     type={showPassword ? 'text' : 'password'}
                     value={formData.password}
                     onChange={handleChange}
+                    onFocus={() => setPasswordTouched(true)}
                     required
                     disabled={loading}
                     minLength={8}
                     autoComplete="new-password"
                     placeholder="At least 8 characters"
                   />
+                  {isAllPasswordCriteriaMet && (
+                    <span
+                      className="password-status-icon is-valid"
+                      title="All password requirements satisfied"
+                      aria-hidden="true"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="password-toggle-btn"
@@ -439,24 +554,130 @@ function Register({ onLogin, navigate }) {
                     )}
                   </button>
                 </div>
-                <small>Must be at least 8 characters.</small>
+
+                {passwordTouched || formData.password.length > 0 ? (
+                  <div className="password-checker-container" aria-live="polite">
+                    <div className="password-strength-header">
+                      <div
+                        className="password-strength-bars"
+                        role="progressbar"
+                        aria-valuenow={passwordStrength.score}
+                        aria-valuemin={0}
+                        aria-valuemax={4}
+                        aria-label={`Password strength: ${passwordStrength.label || 'None'}`}
+                      >
+                        <div className={`strength-bar ${passwordStrength.score >= 1 ? `active strength-${passwordStrength.level}` : ''}`} />
+                        <div className={`strength-bar ${passwordStrength.score >= 2 ? `active strength-${passwordStrength.level}` : ''}`} />
+                        <div className={`strength-bar ${passwordStrength.score >= 3 ? `active strength-${passwordStrength.level}` : ''}`} />
+                        <div className={`strength-bar ${passwordStrength.score >= 4 ? `active strength-${passwordStrength.level}` : ''}`} />
+                      </div>
+                      {passwordStrength.label && (
+                        <span className={`password-strength-label strength-${passwordStrength.level}`}>
+                          {passwordStrength.label}
+                        </span>
+                      )}
+                    </div>
+
+                    <ul className="password-criteria-list" aria-label="Password requirements">
+                      <li className={`criteria-item ${passwordCriteria.hasMinLength ? 'met' : 'unmet'}`}>
+                        <span className="criteria-icon" aria-hidden="true">
+                          {passwordCriteria.hasMinLength ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <span className="criteria-bullet" />
+                          )}
+                        </span>
+                        <span>At least 8 characters</span>
+                      </li>
+
+                      <li className={`criteria-item ${passwordCriteria.hasUpperLower ? 'met' : 'unmet'}`}>
+                        <span className="criteria-icon" aria-hidden="true">
+                          {passwordCriteria.hasUpperLower ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <span className="criteria-bullet" />
+                          )}
+                        </span>
+                        <span>Uppercase & lowercase letters</span>
+                      </li>
+
+                      <li className={`criteria-item ${passwordCriteria.hasNumber ? 'met' : 'unmet'}`}>
+                        <span className="criteria-icon" aria-hidden="true">
+                          {passwordCriteria.hasNumber ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <span className="criteria-bullet" />
+                          )}
+                        </span>
+                        <span>At least 1 number (0-9)</span>
+                      </li>
+
+                      <li className={`criteria-item ${passwordCriteria.hasSpecial ? 'met' : 'unmet'}`}>
+                        <span className="criteria-icon" aria-hidden="true">
+                          {passwordCriteria.hasSpecial ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <span className="criteria-bullet" />
+                          )}
+                        </span>
+                        <span>At least 1 special character (!@#$%...)</span>
+                      </li>
+                    </ul>
+                  </div>
+                ) : (
+                  <small>Must be at least 8 characters.</small>
+                )}
               </div>
 
               <div className="form-field">
                 <label htmlFor="confirmPassword">Confirm Password *</label>
-                <div className="password-input-wrapper">
+                <div
+                  className={`password-input-wrapper ${
+                    isConfirmEntered ? 'has-status-icon' : ''
+                  } ${
+                    isPasswordMatch ? 'is-match' : isPasswordMismatch ? 'is-mismatch' : ''
+                  }`}
+                >
                   <input
                     id="confirmPassword"
                     name="confirmPassword"
                     type={showConfirmPassword ? 'text' : 'password'}
                     value={formData.confirmPassword}
                     onChange={handleChange}
+                    onFocus={() => setConfirmPasswordTouched(true)}
                     required
                     disabled={loading}
                     minLength={8}
                     autoComplete="new-password"
                     placeholder="Re-enter your password"
                   />
+                  {isConfirmEntered && (
+                    <span
+                      className={`password-status-icon ${isPasswordMatch ? 'is-match' : 'is-mismatch'}`}
+                      title={isPasswordMatch ? 'Passwords match' : 'Passwords do not match'}
+                      aria-hidden="true"
+                    >
+                      {isPasswordMatch ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="15" y1="9" x2="9" y2="15" />
+                          <line x1="9" y1="9" x2="15" y2="15" />
+                        </svg>
+                      )}
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="password-toggle-btn"
@@ -496,6 +717,41 @@ function Register({ onLogin, navigate }) {
                     )}
                   </button>
                 </div>
+
+                {isConfirmEntered ? (
+                  <div
+                    className={`password-match-msg ${isPasswordMatch ? 'matched' : 'mismatched'}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="password-match-icon" aria-hidden="true">
+                      {isPasswordMatch ? (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      ) : (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                      )}
+                    </span>
+                    <span>
+                      {!isPasswordEntered
+                        ? 'Please enter your password first.'
+                        : isPasswordMatch
+                        ? 'Passwords match perfectly.'
+                        : 'Passwords do not match yet.'}
+                    </span>
+                  </div>
+                ) : isPasswordEntered && confirmPasswordTouched ? (
+                  <div className="password-match-msg hint" role="status">
+                    <span>Please re-enter your password above to confirm.</span>
+                  </div>
+                ) : (
+                  <small>Must match the password entered above.</small>
+                )}
               </div>
             </div>
 

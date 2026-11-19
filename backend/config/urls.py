@@ -6,10 +6,16 @@ from app import views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/admin/", include("app.admin_urls")),
     path("api/auth/", include("app.urls")),
     path("api/artists/", views.artists_list_view, name="api_artists_list"),
     path("api/artists/<int:artist_id>/", views.artist_detail_view, name="api_artist_detail"),
     path("api/artists/<int:artist_id>/availability/", views.artist_public_availability_view, name="api_artist_public_availability"),
+    path("api/locations/autocomplete/", views.location_autocomplete_view, name="api_location_autocomplete"),
+    path("api/locations/details/", views.location_details_view, name="api_location_details"),
+    path("api/locations/reverse/", views.location_reverse_view, name="api_location_reverse"),
+    path("api/locations/resolve-map-link/", views.resolve_map_link_view, name="api_resolve_map_link"),
+    path("api/locations/status/", views.location_status_view, name="api_location_status"),
     path("api/bookings/", views.create_booking_view, name="api_create_booking"),
     path("api/customer/dashboard/", views.customer_dashboard_view, name="api_customer_dashboard"),
     path("api/customer/profile/", views.customer_update_profile_view, name="api_customer_update_profile"),

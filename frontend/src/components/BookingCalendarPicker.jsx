@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import '../css/BookingPage.css';
 
 // Time slot configuration matching the requested design
 const TIME_SLOT_SECTIONS = [
@@ -76,20 +77,17 @@ export default function BookingCalendarPicker({
   const loading = isLoadingAvailability || isLoading;
   const err = availabilityError || error;
 
-  // Parse initial selected date for calendar navigation
-  const initialDateObj = (() => {
+  // Initialize calendar view month on mount
+  const [viewDate, setViewDate] = useState(() => {
     if (selectedDate) {
       const parts = selectedDate.split('-').map(Number);
       if (parts.length === 3 && !isNaN(parts[0])) {
-        return new Date(parts[0], parts[1] - 1, parts[2]);
+        return new Date(parts[0], parts[1] - 1, 1);
       }
     }
-    return new Date();
-  })();
-
-  const [viewDate, setViewDate] = useState(
-    new Date(initialDateObj.getFullYear(), initialDateObj.getMonth(), 1)
-  );
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
 
   const viewYear = viewDate.getFullYear();
   const viewMonth = viewDate.getMonth();
@@ -107,11 +105,14 @@ export default function BookingCalendarPicker({
   }, [viewYear, viewMonth, onMonthChange]);
 
   // Today reference
-  const today = new Date();
+  const [today] = useState(() => new Date());
   const todayYear = today.getFullYear();
   const todayMonth = today.getMonth();
   const todayDay = today.getDate();
-  const todayMidnight = new Date(todayYear, todayMonth, todayDay);
+  const todayMidnight = useMemo(
+    () => new Date(todayYear, todayMonth, todayDay),
+    [todayYear, todayMonth, todayDay]
+  );
 
   // Selected date parts
   let selYear = -1;
@@ -236,9 +237,7 @@ export default function BookingCalendarPicker({
               disabled={!canGoPrev}
               aria-label="Previous month"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
+              &lt;
             </button>
 
             <span className="booking-cal-month-title">{monthTitle}</span>
@@ -249,9 +248,7 @@ export default function BookingCalendarPicker({
               onClick={handleNextMonth}
               aria-label="Next month"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
+              &gt;
             </button>
           </div>
 

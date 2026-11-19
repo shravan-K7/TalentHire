@@ -225,6 +225,202 @@
   outline-offset: 1px;
 }
 
+/* Live Password Checker & Strength Meter */
+.password-input-wrapper.has-status-icon input {
+  padding-right: 76px;
+}
+
+.password-status-icon {
+  position: absolute;
+  right: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: fadeIn 0.2s ease;
+}
+
+.password-status-icon.is-match,
+.password-status-icon.is-valid {
+  color: #4CAF50;
+}
+
+.password-status-icon.is-mismatch {
+  color: #FF5722;
+}
+
+.password-input-wrapper.is-match input {
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.password-input-wrapper.is-mismatch input {
+  border-color: #FF5722;
+  box-shadow: 0 0 0 2px rgba(255, 87, 34, 0.2);
+}
+
+.password-input-wrapper.is-all-met input:focus {
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.25);
+}
+
+.password-checker-container {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+.password-strength-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.password-strength-bars {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  height: 5px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.strength-bar {
+  flex: 1;
+  height: 100%;
+  background: #333333;
+  border-radius: 3px;
+  transition: background-color 0.25s ease;
+}
+
+.strength-bar.active.strength-weak {
+  background: #FF5722;
+}
+
+.strength-bar.active.strength-fair {
+  background: #FF9800;
+}
+
+.strength-bar.active.strength-good {
+  background: #8BC34A;
+}
+
+.strength-bar.active.strength-strong {
+  background: #4CAF50;
+}
+
+.strength-bar.active.strength-very-strong {
+  background: #00E676;
+}
+
+.password-strength-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.password-strength-label.strength-weak {
+  color: #FF5722;
+}
+
+.password-strength-label.strength-fair {
+  color: #FF9800;
+}
+
+.password-strength-label.strength-good {
+  color: #8BC34A;
+}
+
+.password-strength-label.strength-strong {
+  color: #4CAF50;
+}
+
+.password-strength-label.strength-very-strong {
+  color: #00E676;
+}
+
+/* Criteria List */
+.password-criteria-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.criteria-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #757575);
+  transition: color 0.2s ease;
+  line-height: 1.3;
+}
+
+.criteria-item.met {
+  color: #81C784;
+}
+
+.criteria-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.criteria-bullet {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #555555;
+  transition: background-color 0.2s ease;
+}
+
+.criteria-item.met .criteria-bullet {
+  background-color: #4CAF50;
+}
+
+/* Match Status for Confirm Password */
+.password-match-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  margin-top: 4px;
+  line-height: 1.35;
+  animation: fadeIn 0.2s ease;
+}
+
+.password-match-msg.matched {
+  color: #4CAF50;
+  font-weight: 500;
+}
+
+.password-match-msg.mismatched {
+  color: #FF5722;
+}
+
+.password-match-msg.hint {
+  color: var(--text-secondary, #B0B0B0);
+}
+
+.password-match-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 /* Live Username Validation Styling */
 .username-input-wrapper {
   position: relative;

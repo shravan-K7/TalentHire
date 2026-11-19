@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import BookingCalendarPicker from "../components/BookingCalendarPicker";
+import CustomerBookingsDashboard from "../components/booking/CustomerBookingsDashboard";
 import {
   fetchCustomerDashboard,
   updateCustomerProfile,
@@ -62,7 +63,11 @@ function CustomerDashboard({
   // Active tab matches the screens in Customer Dashboard
   const [activeTab, setActiveTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("tab") || "profile";
+    const tabFromUrl = params.get("tab");
+    if (tabFromUrl) return tabFromUrl;
+    const path = window.location.pathname.toLowerCase();
+    if (path === "/my-bookings" || path === "/bookings") return "bookings";
+    return "profile";
   });
 
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -166,7 +171,15 @@ function CustomerDashboard({
   useEffect(() => {
     function handlePop() {
       const params = new URLSearchParams(window.location.search);
-      const tabFromUrl = params.get("tab") || "profile";
+      let tabFromUrl = params.get("tab");
+      if (!tabFromUrl) {
+        const path = window.location.pathname.toLowerCase();
+        if (path === "/my-bookings" || path === "/bookings") {
+          tabFromUrl = "bookings";
+        } else {
+          tabFromUrl = "profile";
+        }
+      }
       setActiveTab(tabFromUrl);
     }
     window.addEventListener("popstate", handlePop);
@@ -175,21 +188,25 @@ function CustomerDashboard({
     };
   }, []);
 
-  useEffect(() => {
+  // Sync active tab when currentPath changes
+  const [prevCurrentPath, setPrevCurrentPath] = useState(currentPath);
+  if (currentPath !== prevCurrentPath) {
+    setPrevCurrentPath(currentPath);
     const params = new URLSearchParams(window.location.search);
     const tabFromUrl = params.get("tab");
     if (tabFromUrl && tabFromUrl !== activeTab) {
       setActiveTab(tabFromUrl);
     }
-  }, [currentPath]);
+  }
 
-  // Load Categories & Pre-populate when entering artist registration tab
+  // Load Categories when entering artist registration tab
   useEffect(() => {
+    let isCancelled = false;
     if (activeTab === "artist-register" || activeTab === "register-artist") {
       if (artistCategories.length === 0 && !artistCategoriesLoading) {
-        setArtistCategoriesLoading(true);
         fetchArtistCategories()
           .then((cats) => {
+            if (isCancelled) return;
             setArtistCategories(cats);
             if (cats.length > 0) {
               setArtistForm((prev) => ({
@@ -199,21 +216,21 @@ function CustomerDashboard({
             }
           })
           .catch((err) => {
-            console.error("Failed to load artist categories:", err);
+            if (!isCancelled) {
+              console.error("Failed to load artist categories:", err);
+            }
           })
           .finally(() => {
-            setArtistCategoriesLoading(false);
+            if (!isCancelled) {
+              setArtistCategoriesLoading(false);
+            }
           });
       }
-      if (data?.profile) {
-        setArtistForm((prev) => ({
-          ...prev,
-          location: prev.location || data.profile.location || "",
-          phone: prev.phone || data.profile.phone || "",
-        }));
-      }
     }
-  }, [activeTab, data]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeTab, artistCategories.length, artistCategoriesLoading]);
 
   function handleArtistFormChange(e) {
     const { name, value } = e.target;
@@ -339,6 +356,11 @@ function CustomerDashboard({
         location: prof.location || "",
       });
       setProfileImagePreview(prof.profile_image || "");
+      setArtistForm((prev) => ({
+        ...prev,
+        location: prev.location || prof.location || "",
+        phone: prev.phone || prof.phone || "",
+      }));
     } catch (err) {
       setError(err.message || "Unable to load customer dashboard data.");
     }
@@ -364,6 +386,11 @@ function CustomerDashboard({
             location: prof.location || "",
           });
           setProfileImagePreview(prof.profile_image || "");
+          setArtistForm((prev) => ({
+            ...prev,
+            location: prev.location || prof.location || "",
+            phone: prev.phone || prof.phone || "",
+          }));
           setLoading(false);
         }
       } catch (err) {
@@ -721,8 +748,6 @@ function CustomerDashboard({
 
         // Step 3: Verify payment through Django
         handler: async function (response) {
-          console.log("Razorpay response:", response);
-
           const payload = {
             razorpay_order_id: response.razorpay_order_id,
             razorpay_payment_id: response.razorpay_payment_id,
@@ -798,20 +823,6 @@ function CustomerDashboard({
     .substring(0, 2)
     .toUpperCase();
 
-  // Categorize bookings into Upcoming and Past as shown in Screen 3 of image
-  const upcomingBookings = bookings.filter((b) => {
-    return b.status === "pending" || b.status === "accepted";
-  });
-
-  const pastBookings = bookings.filter((b) => {
-    return (
-      b.status === "completed" ||
-      b.status === "cancelled" ||
-      b.status === "rejected" ||
-      b.status === "expired" ||
-      b.status === "unavailable"
-    );
-  });
 
   if (!user) {
     return (
@@ -1023,12 +1034,57 @@ function CustomerDashboard({
                 <line x1="1" y1="10" x2="23" y2="10" />
               </svg>
               <span>Payment History</span>
-              {payments.length > 0 && (
-                <span className="cd-sidebar-badge">{payments.length}</span>
+            </button>
+
+            {/* 4. Favourites */}
+            <button
+              type="button"
+              className={`cd-sidebar-item ${activeTab === "favorites" ? "active" : ""}`}
+              onClick={() => switchTab("favorites")}
+            >
+              <svg
+                className="cd-sidebar-icon"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </svg>
+              <span>Favourites</span>
+            </button>
+
+            {/* 5. Notifications */}
+            <button
+              type="button"
+              className={`cd-sidebar-item ${activeTab === "notifications" ? "active" : ""}`}
+              onClick={() => switchTab("notifications")}
+            >
+              <svg
+                className="cd-sidebar-icon"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              <span>Notifications</span>
+              {unreadNotifsCount > 0 && (
+                <span className="cd-sidebar-badge">{unreadNotifsCount}</span>
               )}
             </button>
 
-            {/* 4. Settings */}
+            {/* 6. Settings */}
             <button
               type="button"
               className={`cd-sidebar-item ${activeTab === "settings" || activeTab === "edit-profile" ? "active" : ""}`}
@@ -1053,7 +1109,7 @@ function CustomerDashboard({
 
             <div className="cd-sidebar-divider" />
 
-            {/* Register as Performing Artist Button */}
+            {/* 7. Register as Performing Artist Button */}
             <button
               type="button"
               className={`cd-sidebar-item ${activeTab === "artist-register" || activeTab === "register-artist" ? "active" : ""}`}
@@ -1075,33 +1131,7 @@ function CustomerDashboard({
               <span>Register as Artist</span>
             </button>
 
-            {/* Quick Secondary Links */}
-            <button
-              type="button"
-              className={`cd-sidebar-item ${activeTab === "favorites" ? "active" : ""}`}
-              onClick={() => switchTab("favorites")}
-            >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-              </svg>
-              <span>Favourites</span>
-              {data?.favorites?.length > 0 && (
-                <span className="cd-sidebar-badge">
-                  {data.favorites.length}
-                </span>
-              )}
-            </button>
-
+            {/* 8. Help & Support */}
             <button
               type="button"
               className={`cd-sidebar-item ${activeTab === "support" ? "active" : ""}`}
@@ -1155,56 +1185,58 @@ function CustomerDashboard({
             RIGHT MAIN CONTENT AREA
             ========================================================================= */}
         <main className="cd-main-panel">
-          {/* Top Bar inside content view */}
-          <div className="cd-content-topbar">
-            <div className="cd-screen-heading-wrap">
-              <h1 className="cd-screen-title">{screenTitle}</h1>
-            </div>
+          {/* Top Bar inside content view (hidden on bookings dashboard to preserve exact reference layout) */}
+          {activeTab !== "bookings" && (
+            <div className="cd-content-topbar">
+              <div className="cd-screen-heading-wrap">
+                <h1 className="cd-screen-title">{screenTitle}</h1>
+              </div>
 
-            <div className="cd-topbar-actions">
-              <span className="cd-topbar-badge">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                {data?.security?.account_verification_status ||
-                  "Verified Customer"}
-              </span>
+              <div className="cd-topbar-actions">
+                <span className="cd-topbar-badge">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  {data?.security?.account_verification_status ||
+                    "Verified Customer"}
+                </span>
 
-              <button
-                type="button"
-                className="cd-btn-outline small cd-topbar-action-btn"
-                onClick={() =>
-                  navigate
-                    ? navigate("/artists")
-                    : (window.location.href = "/artists")
-                }
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <button
+                  type="button"
+                  className="cd-btn-outline small cd-topbar-action-btn"
+                  onClick={() =>
+                    navigate
+                      ? navigate("/artists")
+                      : (window.location.href = "/artists")
+                  }
                 >
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <span>Find Artists</span>
-              </button>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <span>Find Artists</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* =======================================================================
               SCREEN 1: CUSTOMER PROFILE PAGE (Exact layout from reference image)
@@ -1295,7 +1327,7 @@ function CustomerDashboard({
                         </svg>
                       </span>
                       <span className="cd-contact-text">
-                        {profile.phone || "023-455-7789"}
+                        {profile.phone || "Not provided"}
                       </span>
                     </div>
 
@@ -1316,7 +1348,7 @@ function CustomerDashboard({
                         </svg>
                       </span>
                       <span className="cd-contact-text">
-                        {profile.email || user.email || "customer@gmail.com"}
+                        {profile.email || user.email || "Not provided"}
                       </span>
                     </div>
                   </div>
@@ -1342,8 +1374,7 @@ function CustomerDashboard({
                         </svg>
                       </span>
                       <span className="cd-contact-text cd-address-text">
-                        {profile.location ||
-                          "344 Main Street, Somewhere, 125 Street, 915256"}
+                        {profile.location || "Location not provided"}
                       </span>
                     </div>
                   </div>
@@ -1545,7 +1576,7 @@ function CustomerDashboard({
                       id="phone"
                       type="text"
                       className="cd-form-input"
-                      placeholder="023-455-7789"
+                      placeholder="Enter phone number"
                       value={profileForm.phone}
                       onChange={(e) =>
                         setProfileForm((prev) => ({
@@ -1565,7 +1596,7 @@ function CustomerDashboard({
                       id="location"
                       type="text"
                       className="cd-form-input"
-                      placeholder="344 Main Street, Somewhere..."
+                      placeholder="Enter street, city, state..."
                       value={profileForm.location}
                       onChange={(e) =>
                         setProfileForm((prev) => ({
@@ -1603,344 +1634,24 @@ function CustomerDashboard({
               SCREEN 3: MY BOOKINGS PAGE (Exact layout from reference image)
               ======================================================================= */}
           {activeTab === "bookings" && (
-            <div className="cd-view-container cd-bookings-view">
-              <div className="cd-bookings-header-row">
-                <h2 className="cd-bookings-main-title">Bookings</h2>
-                <button
-                  type="button"
-                  className="cd-btn-primary cd-btn-find-artists"
-                  onClick={() =>
-                    navigate
-                      ? navigate("/artists")
-                      : (window.location.href = "/artists")
-                  }
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="11" cy="11" r="8" />
-                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                  </svg>
-                  Find Artists
-                </button>
-              </div>
-
-              {bookings.length === 0 ? (
-                <div className="cd-empty-card">
-                  <h3>No Bookings Yet</h3>
-                  <p>
-                    You haven't requested any artists yet. Explore our top-tier
-                    performers to get started!
-                  </p>
-                  <button
-                    type="button"
-                    className="cd-btn-primary"
-                    onClick={() =>
-                      navigate
-                        ? navigate("/artists")
-                        : (window.location.href = "/artists")
-                    }
-                  >
-                    Explore Talent
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {/* Section: Upcoming Bookings */}
-                  <div className="cd-bookings-group">
-                    <h3 className="cd-bookings-group-heading">Upcoming</h3>
-                    {upcomingBookings.length === 0 ? (
-                      <p className="cd-no-items-text">
-                        No upcoming bookings scheduled.
-                      </p>
-                    ) : (
-                      <div className="cd-bookings-list">
-                        {upcomingBookings.map((b) => (
-                          <div key={b.id} className="cd-booking-row-card">
-                            <div className="cd-booking-id-block">
-                              <span className="cd-booking-code">
-                                105-{String(b.id).padStart(4, "0")} Date
-                              </span>
-                              <span className="cd-booking-artist-sub">
-                                {b.artist_name} ({b.category_name})
-                              </span>
-                            </div>
-
-                            <div className="cd-booking-date-block">
-                              <span className="cd-booking-date-text">
-                                {b.event_date || "TBD"}
-                              </span>
-                              <span className="cd-booking-location-text">
-                                {b.event_location}
-                              </span>
-                            </div>
-
-                            <div className="cd-booking-status-block">
-                              <span className={`cd-status-pill ${b.status}`}>
-                                {formatBookingStatus(b.status)}
-                              </span>
-                            </div>
-
-                            <div className="cd-booking-actions-block">
-                              {/* Quick Act / View Details button */}
-                              <button
-                                type="button"
-                                className="cd-btn-quick-act"
-                                onClick={() => {
-                                  setSelectedBooking(b);
-                                  switchTab("booking-detail");
-                                }}
-                              >
-                                View Details
-                              </button>
-
-                              {b.status === "accepted" &&
-                                b.payment?.status === "pending" && (
-                                  <button
-                                    type="button"
-                                    className="cd-btn-primary"
-                                    onClick={() => handlePayNow(b)}
-                                    disabled={paymentLoadingId === b.id}
-                                  >
-                                    {paymentLoadingId === b.id
-                                      ? "Processing..."
-                                      : "Pay Now"}
-                                  </button>
-                                )}
-
-                              {/* Reschedule Button for Accepted Bookings */}
-                              {b.status === "accepted" && (
-                                <button
-                                  type="button"
-                                  className="cd-btn-secondary cd-btn-sm"
-                                  style={{ padding: "5px 10px", fontSize: "0.8rem" }}
-                                  onClick={() => openRescheduleModal(b)}
-                                  title="Request Rescheduling"
-                                >
-                                  Reschedule
-                                </button>
-                              )}
-
-                              {/* Rescheduling History Icon */}
-                              <button
-                                type="button"
-                                className="cd-action-icon-btn"
-                                title="Rescheduling History"
-                                onClick={() => openHistoryModal(b)}
-                              >
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <circle cx="12" cy="12" r="10" />
-                                  <polyline points="12 6 12 12 16 14" />
-                                </svg>
-                              </button>
-
-                              {/* Receipt Icon */}
-                              {/* Rescheduling History Icon */}
-                              <button
-                                type="button"
-                                className="cd-action-icon-btn"
-                                title="Rescheduling History"
-                                onClick={() => openHistoryModal(b)}
-                              >
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <circle cx="12" cy="12" r="10" />
-                                  <polyline points="12 6 12 12 16 14" />
-                                </svg>
-                              </button>
-
-                              <button
-                                type="button"
-                                className="cd-action-icon-btn"
-                                title="Download Receipt"
-                                onClick={() => handleOpenReceipt(b)}
-                              >
-                                <svg
-                                  width="17"
-                                  height="17"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <polyline points="14 2 14 8 20 8" />
-                                  <line x1="16" y1="13" x2="8" y2="13" />
-                                  <line x1="16" y1="17" x2="8" y2="17" />
-                                  <polyline points="10 9 9 9 8 9" />
-                                </svg>
-                              </button>
-
-                              {/* Cancel Icon for Eligible Bookings */}
-                              {(b.status === "pending" || b.status === "accepted") && (
-                                <button
-                                  type="button"
-                                  className="cd-action-icon-btn danger"
-                                  title="Cancel Booking"
-                                  onClick={() => openCancelModal(b)}
-                                >
-                                  <svg
-                                    width="17"
-                                    height="17"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <line x1="18" y1="6" x2="6" y2="18" />
-                                    <line x1="6" y1="6" x2="18" y2="18" />
-                                  </svg>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Section: Past Bookings */}
-                  <div className="cd-bookings-group">
-                    <h3 className="cd-bookings-group-heading">Past</h3>
-                    {pastBookings.length === 0 ? (
-                      <p className="cd-no-items-text">
-                        No past bookings found.
-                      </p>
-                    ) : (
-                      <div className="cd-bookings-list">
-                        {pastBookings.map((b) => (
-                          <div key={b.id} className="cd-booking-row-card past">
-                            <div className="cd-booking-id-block">
-                              <span className="cd-booking-code">
-                                105-{String(b.id).padStart(4, "0")} Date
-                              </span>
-                              <span className="cd-booking-artist-sub">
-                                {b.artist_name} ({b.category_name})
-                              </span>
-                            </div>
-
-                            <div className="cd-booking-date-block">
-                              <span className="cd-booking-date-text">
-                                {b.event_date || "Past Event"}
-                              </span>
-                              <span className="cd-booking-location-text">
-                                {b.event_location}
-                              </span>
-                            </div>
-
-                            <div className="cd-booking-status-block">
-                              <span className={`cd-status-pill ${b.status}`}>
-                                {formatBookingStatus(b.status)}
-                              </span>
-                            </div>
-
-                            <div className="cd-booking-actions-block">
-                              <button
-                                type="button"
-                                className="cd-btn-quick-act"
-                                onClick={() => {
-                                  setSelectedBooking(b);
-                                  switchTab("booking-detail");
-                                }}
-                              >
-                                View Details
-                              </button>
-
-                              {/* Rescheduling History Icon */}
-                              <button
-                                type="button"
-                                className="cd-action-icon-btn"
-                                title="Rescheduling History"
-                                onClick={() => openHistoryModal(b)}
-                              >
-                                <svg
-                                  width="16"
-                                  height="16"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <circle cx="12" cy="12" r="10" />
-                                  <polyline points="12 6 12 12 16 14" />
-                                </svg>
-                              </button>
-
-                              <button
-                                type="button"
-                                className="cd-action-icon-btn"
-                                title="Download Receipt"
-                                onClick={() => handleOpenReceipt(b)}
-                              >
-                                <svg
-                                  width="17"
-                                  height="17"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <polyline points="14 2 14 8 20 8" />
-                                  <line x1="16" y1="13" x2="8" y2="13" />
-                                  <line x1="16" y1="17" x2="8" y2="17" />
-                                  <polyline points="10 9 9 9 8 9" />
-                                </svg>
-                              </button>
-                            </div>
-
-                            {b.status === "unavailable" && b.response_message && (
-                              <div
-                                style={{
-                                  gridColumn: "1 / -1",
-                                  fontSize: "0.84rem",
-                                  color: "#EF5350",
-                                  marginTop: "6px",
-                                }}
-                              >
-                                {b.response_message}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+            <CustomerBookingsDashboard
+              bookings={bookings}
+              loading={loading}
+              error={error}
+              onRetry={refreshDashboard}
+              onViewDetails={(b) => {
+                setSelectedBooking(b);
+                switchTab("booking-detail");
+              }}
+              onPayNow={(b) => handlePayNow(b)}
+              onReschedule={(b) => openRescheduleModal(b)}
+              onCancelBooking={(b) => openCancelModal(b)}
+              onHistory={(b) => openHistoryModal(b)}
+              onOpenReceipt={(b) => handleOpenReceipt(b)}
+              onContactSupport={() => switchTab("support")}
+              navigate={navigate}
+              paymentLoadingId={paymentLoadingId}
+            />
           )}
 
           {/* =======================================================================
@@ -2044,12 +1755,14 @@ function CustomerDashboard({
                         <span className="cd-summary-value">{b.event_type}</span>
                       </div>
                       <div className="cd-event-summary-item">
-                        <span className="cd-summary-label">Agreed Price</span>
+                        <span className="cd-summary-label">
+                          {b.agreed_price ? "Agreed Price" : "Offered Price"}
+                        </span>
                         <span className="cd-summary-value price">
                           {b.agreed_price
-                            ? `₹${Number(b.agreed_price).toLocaleString("en-IN")}`
+                            ? `₹${Number(b.agreed_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                             : b.customer_budget
-                            ? `₹${Number(b.customer_budget).toLocaleString("en-IN")} (Estimated)`
+                            ? `₹${Number(b.customer_budget).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                             : "TBD"}
                         </span>
                       </div>

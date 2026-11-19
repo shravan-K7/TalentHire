@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import '../css/Navbar.css';
 
-function Navbar({ user, onLogout, currentPath = '/', navigate }) {
+function Navbar({ user, currentPath = '/', navigate }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   function goTo(event, path) {
@@ -50,8 +50,8 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
     { label: 'Contact', path: '/#contact' },
   ];
 
-  if (user?.is_staff || user?.is_superuser) {
-    links.push({ label: 'Admin Console', path: '/admin/' });
+  if (user?.is_staff || user?.is_superuser || user?.role === 'admin') {
+    links.push({ label: 'Admin Dashboard', path: '/admin-dashboard' });
   }
 
   const isArtist = Boolean(user?.is_artist || user?.artist_profile || user?.role === 'artist');
@@ -120,7 +120,13 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
               <button
                 type="button"
                 className="navbar-bell-btn"
-                onClick={(e) => goTo(e, '/profile?tab=notifications')}
+                onClick={(e) => {
+                  if (user?.is_staff || user?.is_superuser || user?.role === 'admin') {
+                    goTo(e, '/admin-dashboard');
+                  } else {
+                    goTo(e, '/profile?tab=notifications');
+                  }
+                }}
                 title="Notifications"
                 aria-label="View notifications"
               >
@@ -134,8 +140,18 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
               {/* Profile Button - Direct click navigates to dashboard */}
               <button
                 type="button"
-                className={`navbar-profile-trigger ${currentPath === '/profile' || currentPath === '/artist-register' ? 'active' : ''}`}
-                onClick={(e) => goTo(e, (isArtist && !user?.artist_profile) ? '/artist-register' : '/profile')}
+                className={`navbar-profile-trigger ${currentPath === '/profile' || currentPath === '/artist-register' || currentPath === '/admin-dashboard' || currentPath === '/artist-dashboard' || currentPath === '/customer-dashboard' ? 'active' : ''}`}
+                onClick={(e) => {
+                  if (user?.is_staff || user?.is_superuser || user?.role === 'admin') {
+                    goTo(e, '/admin-dashboard');
+                  } else if (isArtist && !user?.artist_profile) {
+                    goTo(e, '/artist-register');
+                  } else if (isArtist) {
+                    goTo(e, '/artist-dashboard');
+                  } else {
+                    goTo(e, '/customer-dashboard');
+                  }
+                }}
                 title={`Go to Dashboard (${displayName})`}
                 aria-label="Go to Dashboard"
               >
@@ -148,19 +164,6 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
                 </div>
                 <span className="navbar-profile-name">{displayName.split(' ')[0]}</span>
               </button>
-
-              {mobileMenuOpen && onLogout && (
-                <button
-                  type="button"
-                  className="navbar-logout"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    onLogout();
-                  }}
-                >
-                  Sign Out
-                </button>
-              )}
             </div>
           ) : (
             <div className="navbar-account">

@@ -16,7 +16,6 @@ Financial Principles:
 """
 
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import timedelta
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 

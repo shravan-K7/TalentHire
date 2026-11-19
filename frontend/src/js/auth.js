@@ -757,6 +757,20 @@ export async function fetchArtistCategories() {
   return data.categories || []
 }
 
+export async function fetchArtistCategoriesSummary() {
+  const response = await fetch('/api/artist/categories/', {
+    credentials: 'include',
+  })
+  const data = await readResponse(response)
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load artist categories.')
+  }
+  return {
+    categories: data.categories || [],
+    total_artists: typeof data.total_artists === 'number' ? data.total_artists : 0,
+  }
+}
+
 export async function updateArtistProfileData(formData) {
   const token = await getCsrfToken()
 

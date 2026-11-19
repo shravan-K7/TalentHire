@@ -32,6 +32,16 @@ function formatBookingStatus(status) {
     : "Pending";
 }
 
+function formatPrice(val) {
+  if (val === null || val === undefined || val === "") return "0.00";
+  const num = Number(val);
+  if (isNaN(num)) return String(val);
+  return num.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function renderStars(rating = 5) {
   const rounded = Math.round(Number(rating) || 5);
   return (
@@ -376,7 +386,10 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       action,
       booking,
       reason: "",
-      final_price: "",
+      final_price:
+        action === "accept" && booking?.customer_budget
+          ? String(booking.customer_budget)
+          : "",
     });
   }
 
@@ -393,9 +406,6 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
   // Handle Booking Response (Accept / Reject)
   async function handleConfirmBookingResponse() {
-    console.log("Respond modal state:", respondModal);
-    console.log("Final price:", respondModal.final_price);
-
     if (!respondModal.booking || responding) return;
 
     // Validate before setting loading state
@@ -1280,11 +1290,22 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                             display: "flex",
                             flexDirection: "column",
                             alignItems: "center",
-                            gap: "4px",
+                            gap: "2px",
                           }}
                         >
                           <span className={`cd-status-pill status-${b.status}`}>
                             {formatBookingStatus(b.status)}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              color: "#A0A0A0",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.04em",
+                              marginTop: "2px",
+                            }}
+                          >
+                            {b.status === "pending" ? "Offered Price" : "Agreed Fee"}
                           </span>
                           <span
                             style={{
@@ -1293,7 +1314,9 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                               color: "#FF5722",
                             }}
                           >
-                            ₹{b.agreed_price}
+                            ₹{b.status === "pending" && b.customer_budget
+                              ? formatPrice(b.customer_budget)
+                              : formatPrice(b.agreed_price)}
                           </span>
                         </div>
 
@@ -2716,11 +2739,22 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           display: "flex",
                           flexDirection: "column",
                           alignItems: "center",
-                          gap: "4px",
+                          gap: "2px",
                         }}
                       >
                         <span className={`cd-status-pill status-${b.status}`}>
                           {formatBookingStatus(b.status)}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#A0A0A0",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                            marginTop: "2px",
+                          }}
+                        >
+                          {b.status === "pending" ? "Offered Price" : "Agreed Fee"}
                         </span>
                         <span
                           style={{
@@ -2729,7 +2763,9 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                             color: "#FF5722",
                           }}
                         >
-                          ₹{b.agreed_price}
+                          ₹{b.status === "pending" && b.customer_budget
+                            ? formatPrice(b.customer_budget)
+                            : formatPrice(b.agreed_price)}
                         </span>
                       </div>
 
@@ -2857,18 +2893,59 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                       </p>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: "0.8rem", color: "#A0A0A0" }}>
-                        Agreed Performance Fee
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "1.6rem",
-                          fontWeight: 800,
-                          color: "#FF5722",
-                        }}
-                      >
-                        ₹{selectedBooking.agreed_price}
-                      </div>
+                      {selectedBooking.status === "pending" ? (
+                        <>
+                          <div style={{ fontSize: "0.82rem", color: "#A0A0A0" }}>
+                            Offered Price
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "1.6rem",
+                              fontWeight: 800,
+                              color: "#FF5722",
+                            }}
+                          >
+                            ₹{selectedBooking.customer_budget
+                              ? formatPrice(selectedBooking.customer_budget)
+                              : formatPrice(selectedBooking.agreed_price)}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.76rem",
+                              color: "#888888",
+                              marginTop: "2px",
+                            }}
+                          >
+                            Pending Artist Acceptance
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: "0.82rem", color: "#A0A0A0" }}>
+                            Agreed Performance Fee
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "1.6rem",
+                              fontWeight: 800,
+                              color: "#FF5722",
+                            }}
+                          >
+                            ₹{formatPrice(selectedBooking.agreed_price)}
+                          </div>
+                          {selectedBooking.customer_budget && (
+                            <div
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "#888888",
+                                marginTop: "3px",
+                              }}
+                            >
+                              Offered: ₹{formatPrice(selectedBooking.customer_budget)}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -2963,8 +3040,89 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           margin: "2px 0",
                         }}
                       >
-                        Venue: {selectedBooking.event_location}
+                        Venue:{" "}
+                        <strong style={{ color: "#F7F7F7" }}>
+                          {selectedBooking.venue_name || selectedBooking.event_location || "Venue TBD"}
+                        </strong>
                       </p>
+                      {selectedBooking.event_area && (
+                        <p
+                          style={{
+                            fontSize: "0.92rem",
+                            color: "#A0A0A0",
+                            margin: "2px 0",
+                          }}
+                        >
+                          Area / Locality:{" "}
+                          <strong style={{ color: "#F7F7F7" }}>
+                            {selectedBooking.event_area}
+                          </strong>
+                          {selectedBooking.city ? `, ${selectedBooking.city}` : ""}
+                          {selectedBooking.state ? `, ${selectedBooking.state}` : ""}
+                        </p>
+                      )}
+                      {selectedBooking.event_address && selectedBooking.event_address !== selectedBooking.event_area && (
+                        <p
+                          style={{
+                            fontSize: "0.92rem",
+                            color: "#A0A0A0",
+                            margin: "2px 0",
+                          }}
+                        >
+                          Address: {selectedBooking.event_address}
+                        </p>
+                      )}
+                      {(selectedBooking.latitude != null && selectedBooking.longitude != null) && (
+                        <p
+                          style={{
+                            fontSize: "0.92rem",
+                            color: "#A0A0A0",
+                            margin: "2px 0",
+                          }}
+                        >
+                          Coordinates: {selectedBooking.latitude},{" "}
+                          {selectedBooking.longitude}
+                        </p>
+                      )}
+                      {(selectedBooking.google_maps_url || (selectedBooking.latitude != null && selectedBooking.longitude != null)) && (
+                        <p
+                          style={{
+                            fontSize: "0.92rem",
+                            color: "#FF5722",
+                            margin: "4px 0",
+                          }}
+                        >
+                          <a
+                            href={
+                              selectedBooking.google_maps_url ||
+                              `https://www.google.com/maps/search/?api=1&query=${selectedBooking.latitude},${selectedBooking.longitude}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              color: "#FF8A65",
+                              textDecoration: "underline",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Open in Google Maps
+                          </a>
+                        </p>
+                      )}
+                      {selectedBooking.location_instructions && (
+                        <p
+                          style={{
+                            fontSize: "0.90rem",
+                            color: "#CCCCCC",
+                            margin: "6px 0 2px",
+                            background: "rgba(255,255,255,0.04)",
+                            padding: "8px 10px",
+                            borderRadius: "4px",
+                          }}
+                        >
+                          Directions / Instructions: {selectedBooking.location_instructions}
+                        </p>
+                      )}
                       <p
                         style={{
                           fontSize: "0.92rem",
@@ -2977,6 +3135,20 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           ? formatBookingStatus(selectedBooking.payment.status)
                           : "Pending Escrow"}
                       </p>
+                      {selectedBooking.customer_budget && (
+                        <p
+                          style={{
+                            fontSize: "0.92rem",
+                            color: "#A0A0A0",
+                            margin: "2px 0",
+                          }}
+                        >
+                          Offered Price:{" "}
+                          <strong style={{ color: "#F7F7F7" }}>
+                            ₹{formatPrice(selectedBooking.customer_budget)}
+                          </strong>
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -3260,11 +3432,22 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           display: "flex",
                           flexDirection: "column",
                           alignItems: "center",
-                          gap: "4px",
+                          gap: "2px",
                         }}
                       >
                         <span className="cd-status-pill status-accepted">
                           Confirmed
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#A0A0A0",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                            marginTop: "2px",
+                          }}
+                        >
+                          Agreed Fee
                         </span>
                         <span
                           style={{
@@ -3273,7 +3456,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                             color: "#FF5722",
                           }}
                         >
-                          ₹{b.agreed_price}
+                          ₹{formatPrice(b.agreed_price)}
                         </span>
                       </div>
 
@@ -3833,6 +4016,34 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
               {respondModal.action === "accept" && (
                 <div style={{ marginTop: "16px" }}>
+                  {respondModal.booking?.customer_budget && (
+                    <div
+                      style={{
+                        background: "rgba(255, 87, 34, 0.08)",
+                        border: "1px solid rgba(255, 87, 34, 0.25)",
+                        borderRadius: "6px",
+                        padding: "10px 14px",
+                        marginBottom: "14px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.88rem", color: "#CCCCCC" }}>
+                        Offered Price:
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "1.05rem",
+                          fontWeight: 700,
+                          color: "#FF5722",
+                        }}
+                      >
+                        ₹{formatPrice(respondModal.booking.customer_budget)}
+                      </span>
+                    </div>
+                  )}
+
                   <label className="cd-label" htmlFor="final_price">
                     Final Performance Price (₹) *
                   </label>

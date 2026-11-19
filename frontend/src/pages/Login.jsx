@@ -4,7 +4,7 @@ import Navbar from '../components/Navbar';
 import GoogleSignIn from '../components/GoogleSignIn';
 import '../css/Login.css';
 
-function Login({ onLogin, navigate }) {
+function Login({ onLogin, navigate, currentPath }) {
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -12,27 +12,31 @@ function Login({ onLogin, navigate }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const getSearchParams = useCallback(() => {
+    if (currentPath && currentPath.includes('?')) {
+      return new URLSearchParams(currentPath.substring(currentPath.indexOf('?')));
+    }
+    return new URLSearchParams(window.location.search);
+  }, [currentPath]);
+
   const handleGoogleLogin = useCallback(async (googleUser, meta) => {
     setError('');
     setMessage('Google login successful.');
 
     const role = meta?.role || googleUser?.role;
-    const params = new URLSearchParams(window.location.search);
-    const redirectParam = params.get('redirect');
-
-    if (role === 'admin' || googleUser?.is_staff || googleUser?.is_superuser) {
-      window.location.href = '/admin/';
-      return;
-    }
+    const isArtist = Boolean(role === 'artist' || googleUser?.is_artist);
+    const isAdmin = Boolean(role === 'admin' || googleUser?.is_staff || googleUser?.is_superuser);
+    const redirectParam = getSearchParams().get('redirect');
 
     if (onLogin) {
+      const destination = redirectParam || meta?.redirect_to || (isAdmin ? '/admin-dashboard' : isArtist ? '/artist-dashboard' : '/customer-dashboard');
       onLogin(
         googleUser,
-        role === 'artist',
-        redirectParam || '/'
+        isArtist,
+        destination
       );
     }
-  }, [onLogin]);
+  }, [onLogin, getSearchParams]);
 
   const handleGoogleError = useCallback((errorMessage) => {
     setError(errorMessage);
@@ -51,15 +55,14 @@ function Login({ onLogin, navigate }) {
       setPassword('');
       setMessage(data.message || 'Login successful.');
 
-      if (data.redirect_to === '/admin/' || data.role === 'admin' || data.user?.role === 'admin' || data.user?.is_staff) {
-        window.location.href = '/admin/';
-        return;
-      }
-
       if (onLogin) {
-        const params = new URLSearchParams(window.location.search);
-        const redirectParam = params.get('redirect');
-        onLogin(data.user, data.role === 'artist', redirectParam || '/');
+        const redirectParam = getSearchParams().get('redirect');
+        const role = data.role || data.user?.role;
+        const isArtist = Boolean(role === 'artist' || data.user?.is_artist);
+        const isAdmin = Boolean(role === 'admin' || data.user?.is_staff || data.user?.is_superuser);
+        const destination = redirectParam || data.redirect_to || (isAdmin ? '/admin-dashboard' : isArtist ? '/artist-dashboard' : '/customer-dashboard');
+
+        onLogin(data.user, isArtist, destination);
       }
     } catch (err) {
       setError(err.message || 'Login failed.');
@@ -68,10 +71,16 @@ function Login({ onLogin, navigate }) {
     }
   }
 
+  const redirectParam = getSearchParams().get('redirect');
+  const isBookingRedirect = Boolean(
+    redirectParam && (redirectParam.startsWith('/book-artist') || redirectParam.startsWith('/booking'))
+  );
+
   function handleGoToRegister(event) {
     if (navigate) {
       event.preventDefault();
-      navigate('/register');
+      const targetRedirect = getSearchParams().get('redirect');
+      navigate(targetRedirect ? `/register?redirect=${encodeURIComponent(targetRedirect)}` : '/register');
     }
   }
 
@@ -85,6 +94,21 @@ function Login({ onLogin, navigate }) {
             <h1 className="auth-title">Welcome Back</h1>
             {/*  */}
           </div>
+
+          {isBookingRedirect && !error && !message && (
+            <div
+              className="auth-alert-status"
+              role="status"
+              style={{
+                background: 'rgba(255, 87, 34, 0.15)',
+                border: '1px solid #FF5722',
+                color: '#FF7043',
+                marginBottom: '16px',
+              }}
+            >
+              Please sign in to proceed with booking your artist.
+            </div>
+          )}
 
           {error && (
             <div className="auth-alert-error" role="alert">

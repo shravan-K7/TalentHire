@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { fetchArtists } from '../js/auth';
+import { fetchArtists, fetchArtistCategoriesSummary } from '../js/auth';
 import '../css/Artists.css';
 
 function ArtistsList({ user, onLogout, navigate }) {
@@ -31,14 +31,10 @@ function ArtistsList({ user, onLogout, navigate }) {
   useEffect(() => {
     async function loadCategories() {
       try {
-        const res = await fetch('/api/auth/artist/categories/', { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          const cats = data.categories || [];
-          setCategories(cats);
-          if (typeof data.total_artists === 'number') {
-            setTotalCount(data.total_artists);
-          }
+        const data = await fetchArtistCategoriesSummary();
+        const cats = data.categories || [];
+        setCategories(cats);
+        setTotalCount(data.total_artists);
 
           // Resolve URL category parameter to database category name
           const params = new URLSearchParams(window.location.search);
@@ -64,7 +60,6 @@ function ArtistsList({ user, onLogout, navigate }) {
               setSelectedCategory(matched.name);
             }
           }
-        }
       } catch (err) {
         console.warn('Could not load categories:', err);
       }
@@ -143,6 +138,24 @@ function ArtistsList({ user, onLogout, navigate }) {
   function handleCardClick(artistId) {
     if (navigate) {
       navigate(`/artists/${artistId}`);
+    }
+  }
+
+  function handleBookArtist(artistId) {
+    if (!user) {
+      const target = `/book-artist/${artistId}`;
+      const loginUrl = `/login?redirect=${encodeURIComponent(target)}`;
+      if (navigate) {
+        navigate(loginUrl);
+      } else {
+        window.location.assign(loginUrl);
+      }
+    } else {
+      if (navigate) {
+        navigate(`/book-artist/${artistId}`);
+      } else {
+        window.location.assign(`/book-artist/${artistId}`);
+      }
     }
   }
 
@@ -359,7 +372,7 @@ function ArtistsList({ user, onLogout, navigate }) {
                         className="card-btn-book"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCardClick(artist.id);
+                          handleBookArtist(artist.id);
                         }}
                         title={`Book ${artist.stage_name}`}
                       >
@@ -490,7 +503,7 @@ function ArtistsList({ user, onLogout, navigate }) {
                   onClick={() => {
                     const id = activePlayArtist.id;
                     setActivePlayArtist(null);
-                    handleCardClick(id);
+                    handleBookArtist(id);
                   }}
                 >
                   Book {activePlayArtist.stage_name} Now

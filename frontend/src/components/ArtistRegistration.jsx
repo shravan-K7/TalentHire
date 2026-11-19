@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCsrfToken, fetchArtistCategories } from "../js/auth";
 import "../css/ArtistRegistration.css";
 
 const performanceOptions = [
@@ -62,23 +63,13 @@ export default function ArtistRegistration({
 
     async function loadData() {
       try {
-        // Ensure CSRF cookie is set
-        await fetch("/api/auth/csrf/", {
-          credentials: "include",
-        });
+        // Ensure CSRF token is fetched/cookie is set
+        await getCsrfToken();
 
         // Load Categories
-        const categoryResponse = await fetch("/api/auth/artist/categories/", {
-          credentials: "include",
-        });
-
-        if (!categoryResponse.ok) {
-          throw new Error("Could not load artist categories.");
-        }
-
-        const categoryData = await categoryResponse.json();
+        const categoriesList = await fetchArtistCategories();
         if (!ignore) {
-          setCategories(categoryData.categories || []);
+          setCategories(categoriesList || []);
         }
 
         // Load existing profile if available
@@ -185,9 +176,7 @@ export default function ArtistRegistration({
 
       let csrfToken = getCookie("csrftoken");
       if (!csrfToken) {
-        const csrfRes = await fetch("/api/auth/csrf/", { credentials: "include" });
-        const csrfData = await csrfRes.json();
-        csrfToken = csrfData.csrfToken || "";
+        csrfToken = await getCsrfToken();
       }
 
       const response = await fetch("/api/auth/artist/profile/", {

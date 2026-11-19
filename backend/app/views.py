@@ -25,7 +25,6 @@ from django.views.decorators.http import require_GET, require_POST, require_http
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport import requests
 from google.oauth2 import id_token
-from django.contrib.auth.decorators import login_required
 
 from .forms import LoginForm, ArtistProfileForm
 from .cancellation_policy import calculate_cancellation_refund
@@ -34,7 +33,6 @@ from .models import (
     Category,
     Booking,
     Portfolio,
-    Review,
     Payment,
     CustomerProfile,
     FavoriteArtist,
@@ -106,6 +104,7 @@ def serialize_user(user):
         ),
         "date_joined": user.date_joined.isoformat() if user.date_joined else None,
         "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
         "is_artist": artist_profile is not None,
         "artist_profile": artist_data,
         "customer_profile": customer_data,
@@ -329,13 +328,13 @@ def login_view(request):
     # Dynamic role detection for unified single-entry login
     if user.is_staff or user.is_superuser:
         detected_role = "admin"
-        redirect_to = "/admin/"
+        redirect_to = "/admin-dashboard"
     elif hasattr(user, "artist_profile") and user.artist_profile is not None:
         detected_role = "artist"
-        redirect_to = "/profile"
+        redirect_to = "/artist-dashboard"
     else:
         detected_role = "customer"
-        redirect_to = "/profile"
+        redirect_to = "/customer-dashboard"
 
     user_data = serialize_user(user)
 
@@ -486,16 +485,16 @@ def google_login_view(request):
     # Dynamic role detection for unified single-entry login
     if user.is_staff or user.is_superuser:
         detected_role = "admin"
-        redirect_to = "/admin/"
+        redirect_to = "/admin-dashboard"
     elif hasattr(user, "artist_profile") and user.artist_profile is not None:
         detected_role = "artist"
-        redirect_to = "/profile"
+        redirect_to = "/artist-dashboard"
     elif role == "artist":
         detected_role = "artist"
         redirect_to = "/artist-register"
     else:
         detected_role = "customer"
-        redirect_to = "/profile"
+        redirect_to = "/customer-dashboard"
 
     user_data = serialize_user(user)
     user_data["role"] = detected_role
@@ -569,6 +568,7 @@ def artist_profile_view(request):
                         if instance.profile_image
                         else None,
                         "is_verified": instance.is_verified,
+                        "rejection_notes": instance.rejection_notes,
                     },
                 }
             )
@@ -579,6 +579,9 @@ def artist_profile_view(request):
         try:
             artist = form.save(commit=False)
             artist.user = request.user
+            if not artist.is_verified and artist.rejection_notes:
+                if not artist.rejection_notes.startswith("[Resubmitted"):
+                    artist.rejection_notes = f"[Resubmitted] Updated profile awaiting review. Prior feedback: {artist.rejection_notes}"
             artist.save()
 
             return JsonResponse(
@@ -607,6 +610,7 @@ def artist_profile_view(request):
                         if artist.profile_image
                         else None,
                         "is_verified": artist.is_verified,
+                        "rejection_notes": artist.rejection_notes,
                     },
                 },
                 status=200 if instance else 201,
@@ -648,12 +652,13 @@ def serialize_artist_summary(artist):
         "additional_information": artist.additional_information,
         "profile_image": artist.profile_image.url if artist.profile_image else None,
         "is_verified": artist.is_verified,
+        "rejection_notes": getattr(artist, "rejection_notes", ""),
     }
 
 
 @require_GET
 def artists_list_view(request):
-    qs = ArtistProfile.objects.filter(is_active=True).select_related("category")
+    qs = ArtistProfile.objects.filter(is_active=True, user__is_active=True).select_related("category")
 
     search = request.GET.get("search", "").strip()
     if search:
@@ -739,7 +744,7 @@ def artists_list_view(request):
 @require_GET
 def artist_detail_view(request, artist_id):
     artist = (
-        ArtistProfile.objects.filter(id=artist_id, is_active=True)
+        ArtistProfile.objects.filter(id=artist_id, is_active=True, user__is_active=True)
         .select_related("category")
         .first()
     )
@@ -1103,6 +1108,117 @@ def artist_public_availability_view(request, artist_id):
     )
 
 
+# ============================================================================
+# LOCATION & MAP SERVICES
+# ============================================================================
+
+
+@require_GET
+def location_autocomplete_view(request):
+    """
+    Calls Photon Geocoding API by Komoot for location suggestions.
+    GET /api/locations/autocomplete/?query=...&max_results=...
+    """
+    from app.services import location_service
+
+    query = request.GET.get("query", "").strip()
+    if not query:
+        return JsonResponse({"suggestions": [], "error": "Query parameter is required."}, status=400)
+
+    max_results_str = request.GET.get("max_results", "8")
+    try:
+        max_results = int(max_results_str)
+    except (ValueError, TypeError):
+        max_results = 8
+
+    result = location_service.autocomplete_places(query, max_results=max_results)
+    return JsonResponse(result, status=200)
+
+
+@require_GET
+def location_reverse_view(request):
+    """
+    Reverse geocodes coordinates (lat, lon) to readable address information via Photon.
+    GET /api/locations/reverse/?lat=...&lon=...
+    """
+    from app.services import location_service
+
+    lat_str = request.GET.get("lat", "").strip()
+    lon_str = request.GET.get("lon", "").strip()
+    if not lat_str or not lon_str:
+        return JsonResponse({"success": False, "error": "lat and lon parameters are required."}, status=400)
+
+    try:
+        lat = float(lat_str)
+        lon = float(lon_str)
+    except (ValueError, TypeError):
+        return JsonResponse({"success": False, "error": "Invalid lat or lon numeric values."}, status=400)
+
+    result = location_service.reverse_geocode(lat, lon)
+    return JsonResponse(result, status=200 if result.get("success") else 400)
+
+
+@require_GET
+def location_details_view(request):
+    """
+    Retrieves place details (address components and converted coordinates) for backwards-compatibility.
+    GET /api/locations/details/?place_id=...
+    """
+    from app.services import location_service
+
+    place_id = request.GET.get("place_id", "").strip()
+    if not place_id:
+        return JsonResponse({"error": "place_id parameter is required."}, status=400)
+
+    more_json = request.GET.get("more", "")
+    more_data = None
+    if more_json:
+        try:
+            more_data = json.loads(more_json)
+        except Exception:
+            more_data = None
+
+    result = location_service.get_place_details(place_id, more_data=more_data)
+    if "error" in result and not result.get("title"):
+        status_code = 400 if "required" in result["error"] else 200
+        return JsonResponse(result, status=status_code)
+
+    return JsonResponse(result, status=200)
+
+
+@csrf_protect
+@require_POST
+def resolve_map_link_view(request):
+    """
+    Safely resolves Google Maps links, enforces SSRF protections, and extracts coordinates.
+    POST /api/locations/resolve-map-link/
+    Body: {"url": "https://maps.app.goo.gl/..."}
+    """
+    from app.services import location_service
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"success": False, "error": "Invalid JSON request data."}, status=400)
+
+    url = data.get("url", "").strip()
+    if not url:
+        return JsonResponse({"success": False, "error": "URL parameter is required."}, status=400)
+
+    result = location_service.resolve_google_maps_link(url)
+    return JsonResponse(result, status=200 if result.get("success") else 400)
+
+
+@require_GET
+def location_status_view(request):
+    """
+    Diagnostic endpoint reporting location service status.
+    GET /api/locations/status/
+    """
+    from app.services import location_service
+    return JsonResponse(location_service.get_location_service_status(), status=200)
+
+
 @csrf_protect
 @require_POST
 def create_booking_view(request):
@@ -1118,7 +1234,28 @@ def create_booking_view(request):
     event_type = data.get("event_type", "").strip()
     event_date_str = data.get("event_date", "").strip()
     event_time_str = data.get("event_time", "").strip()
+
+    # Location Information
+    event_area = data.get("event_area", "").strip()
+    venue_name = data.get("venue_name", "").strip()
     event_location = data.get("event_location", "").strip()
+    google_maps_url = data.get("google_maps_url", "").strip()
+    event_area_place_id = data.get("event_area_place_id", "").strip()
+    event_address = data.get("event_address", "").strip()
+    city = data.get("city", "").strip()
+    state = data.get("state", "").strip()
+    country = data.get("country", "India").strip() or "India"
+    location_source = data.get("location_source", "manual").strip()
+    location_instructions = data.get("location_instructions", "").strip()
+
+    # Support backwards compatibility and composite venue/area formatting
+    if not event_location:
+        event_location = f"{venue_name}, {event_area}".strip(", ")
+    if not event_area:
+        event_area = event_location
+    if not venue_name:
+        venue_name = event_location
+
     customer_phone = data.get("customer_phone", data.get("phone", ""))
     if customer_phone is not None:
         customer_phone = str(customer_phone).strip()
@@ -1151,21 +1288,72 @@ def create_booking_view(request):
         return JsonResponse({"error": "Event date is required."}, status=400)
     if not event_time_str:
         return JsonResponse({"error": "Event time is required."}, status=400)
-    if not event_location:
-        return JsonResponse(
-            {"error": "Event location / venue is required."}, status=400
-        )
+    if not event_area:
+        return JsonResponse({"error": "Event location / area is required."}, status=400)
+    if not venue_name:
+        return JsonResponse({"error": "Venue name is required."}, status=400)
     if not performance_duration:
         return JsonResponse({"error": "Performance duration is required."}, status=400)
+
+    # Latitude and Longitude validation
+    lat_val = None
+    lon_val = None
+    latitude = data.get("latitude")
+    longitude = data.get("longitude")
+    if latitude is not None and str(latitude).strip() != "":
+        try:
+            lat_val = Decimal(str(latitude))
+            if not (Decimal("-90.000000") <= lat_val <= Decimal("90.000000")):
+                return JsonResponse({"error": "Latitude must be between -90 and 90 degrees."}, status=400)
+        except (ValueError, TypeError, ArithmeticError):
+            return JsonResponse({"error": "Invalid latitude coordinate."}, status=400)
+
+    if longitude is not None and str(longitude).strip() != "":
+        try:
+            lon_val = Decimal(str(longitude))
+            if not (Decimal("-180.000000") <= lon_val <= Decimal("180.000000")):
+                return JsonResponse({"error": "Longitude must be between -180 and 180 degrees."}, status=400)
+        except (ValueError, TypeError, ArithmeticError):
+            return JsonResponse({"error": "Invalid longitude coordinate."}, status=400)
+
+    area_lat_val = None
+    area_lon_val = None
+    area_latitude = data.get("area_latitude")
+    area_longitude = data.get("area_longitude")
+    if area_latitude is not None and str(area_latitude).strip() != "":
+        try:
+            area_lat_val = Decimal(str(area_latitude))
+            if not (Decimal("-90.000000") <= area_lat_val <= Decimal("90.000000")):
+                area_lat_val = None
+        except (ValueError, TypeError, ArithmeticError):
+            area_lat_val = None
+
+    if area_longitude is not None and str(area_longitude).strip() != "":
+        try:
+            area_lon_val = Decimal(str(area_longitude))
+            if not (Decimal("-180.000000") <= area_lon_val <= Decimal("180.000000")):
+                area_lon_val = None
+        except (ValueError, TypeError, ArithmeticError):
+            area_lon_val = None
 
     try:
         artist_id = int(artist_id)
     except (ValueError, TypeError):
         return JsonResponse({"error": "Invalid artist ID."}, status=400)
 
-    artist = ArtistProfile.objects.filter(id=artist_id, is_active=True).first()
+    artist = (
+        ArtistProfile.objects.filter(id=artist_id, is_active=True, user__is_active=True)
+        .select_related("user")
+        .first()
+    )
     if not artist:
-        return JsonResponse({"error": "Artist profile not found."}, status=404)
+        return JsonResponse({"error": "Artist profile not found or unavailable."}, status=404)
+
+    if not artist.is_verified:
+        return JsonResponse(
+            {"error": "This performing artist is pending verification and cannot accept booking requests."},
+            status=400,
+        )
 
     if artist.user_id == request.user.id:
         return JsonResponse(
@@ -1173,8 +1361,6 @@ def create_booking_view(request):
         )
 
     from django.utils.dateparse import parse_datetime, parse_date, parse_time
-    from django.utils import timezone
-    import datetime
 
     kolkata_tz = ZoneInfo("Asia/Kolkata")
     combined_dt = None
@@ -1300,7 +1486,21 @@ def create_booking_view(request):
             artist=artist_locked,
             event_type=event_type,
             event_date=combined_dt,
-            event_location=event_location,
+            event_location=event_location[:200],
+            event_area=event_area[:255],
+            event_area_place_id=event_area_place_id[:255],
+            event_address=event_address,
+            city=city[:100],
+            state=state[:100],
+            country=country[:100],
+            venue_name=venue_name[:255],
+            latitude=lat_val,
+            longitude=lon_val,
+            area_latitude=area_lat_val,
+            area_longitude=area_lon_val,
+            google_maps_url=google_maps_url[:1000],
+            location_source=location_source[:30] if location_source in ("autocomplete", "maps_link", "map_pin", "manual") else "manual",
+            location_instructions=location_instructions,
             customer_phone=customer_phone[:20] if customer_phone else "",
             performance_duration=performance_duration,
             expected_audience_size=audience_val,
@@ -1356,6 +1556,12 @@ def create_booking_view(request):
             "customer_phone": booking.customer_phone,
             "performance_duration": booking.performance_duration,
             "expected_audience_size": booking.expected_audience_size,
+            "event_area": booking.event_area,
+            "venue_name": booking.venue_name,
+            "latitude": str(booking.latitude) if booking.latitude is not None else None,
+            "longitude": str(booking.longitude) if booking.longitude is not None else None,
+            "google_maps_url": booking.google_maps_url,
+            "location_instructions": booking.location_instructions,
         },
         status=201,
     )
@@ -1454,6 +1660,19 @@ def customer_dashboard_view(request):
             else "",
             "event_date_iso": b_dt_local.isoformat() if b_dt_local else "",
             "event_location": b.event_location,
+            "event_area": b.event_area or b.event_location,
+            "venue_name": b.venue_name,
+            "event_address": b.event_address,
+            "city": b.city,
+            "state": b.state,
+            "country": b.country,
+            "latitude": str(b.latitude) if b.latitude is not None else None,
+            "longitude": str(b.longitude) if b.longitude is not None else None,
+            "area_latitude": str(b.area_latitude) if b.area_latitude is not None else None,
+            "area_longitude": str(b.area_longitude) if b.area_longitude is not None else None,
+            "google_maps_url": b.google_maps_url,
+            "location_source": b.location_source,
+            "location_instructions": b.location_instructions,
             "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
@@ -1463,6 +1682,8 @@ def customer_dashboard_view(request):
             "message": b.message,
             "response_message": b.response_message or "",
             "created_at": b.created_at.strftime("%b %d, %Y"),
+            "accepted_at": b.accepted_at.isoformat() if b.accepted_at else None,
+            "expires_at": b.expires_at.isoformat() if b.expires_at else None,
             "payment": payment_data,
         }
         serialized_bookings.append(booking_item)
@@ -2734,6 +2955,19 @@ def artist_dashboard_view(request):
             else "",
             "event_date_iso": b_dt_local.isoformat() if b_dt_local else "",
             "event_location": b.event_location,
+            "event_area": b.event_area or b.event_location,
+            "venue_name": b.venue_name,
+            "event_address": b.event_address,
+            "city": b.city,
+            "state": b.state,
+            "country": b.country,
+            "latitude": str(b.latitude) if b.latitude is not None else None,
+            "longitude": str(b.longitude) if b.longitude is not None else None,
+            "area_latitude": str(b.area_latitude) if b.area_latitude is not None else None,
+            "area_longitude": str(b.area_longitude) if b.area_longitude is not None else None,
+            "google_maps_url": b.google_maps_url,
+            "location_source": b.location_source,
+            "location_instructions": b.location_instructions,
             "customer_phone": b.customer_phone or (customer_profile.phone if customer_profile else ""),
             "performance_duration": b.performance_duration,
             "expected_audience_size": b.expected_audience_size,
@@ -2957,8 +3191,6 @@ def artist_respond_booking_view(request, booking_id):
             rounding=ROUND_HALF_UP,
         )
 
-        from zoneinfo import ZoneInfo
-        import datetime
         kolkata_tz = ZoneInfo("Asia/Kolkata")
 
         # Save booking and payment details together with concurrency protection

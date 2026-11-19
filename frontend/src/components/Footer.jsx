@@ -51,7 +51,7 @@ function Footer({ navigate }) {
             <div className="footer-col">
               <h4>Company</h4>
               <a href="/#about" onClick={(e) => handleLink(e, '/#about')}>About Us</a>
-              <a href="/#faq" onClick={(e) => handleLink(e, '/#faq')}>Contact</a>
+              <a href="/#contact" onClick={(e) => handleLink(e, '/#contact')}>Contact</a>
               <a href="/register?role=artist" onClick={(e) => handleLink(e, '/register?role=artist')}>Join as an Artist</a>
             </div>
 
