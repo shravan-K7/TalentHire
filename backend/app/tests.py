@@ -7809,6 +7809,258 @@ class ArtistVerificationAndRejectionTests(TestCase):
         self.assertEqual(preserved_payment.transaction_id, "pay_preserve_test_123")
 
 
+class CustomerWhatsAppContactAndNotificationTests(TestCase):
+    """
+    Test suite for:
+      1. Contact Artist eligibility and authorization
+      2. Verified mobile number privacy (no phone leakage for pending, unpaid, or cancelled bookings)
+      3. WhatsApp wa.me Click to Chat URL generation and pre-filled message
+      4. Customer dashboard serialization of contact eligibility
+      5. Customer notifications and upcoming event reminders
+    """
+
+    def setUp(self):
+        self.customer = User.objects.create_user(
+            username="contact_cust",
+            email="contact_cust@example.com",
+            password="password123",
+            first_name="Ananya",
+            last_name="Roy",
+        )
+        self.other_customer = User.objects.create_user(
+            username="other_cust",
+            email="other_cust@example.com",
+            password="password123",
+            first_name="Vikram",
+            last_name="Patel",
+        )
+        self.artist_user = User.objects.create_user(
+            username="band_artist",
+            email="band_artist@example.com",
+            password="password123",
+            first_name="Sound",
+            last_name="Wave",
+        )
+        self.category = Category.objects.create(name="Live Bands", description="Bands")
+        self.artist_profile = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.category,
+            stage_name="SoundWave",
+            location="Kozhikode, Kerala",
+            phone="+91 98765 43210",
+            is_verified=True,
+            is_active=True,
+        )
+
+    def test_contact_artist_unauthenticated_forbidden(self):
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Rock Concert",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("45000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("45000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_test_succ_1",
+            razorpay_order_id="order_test_succ_1",
+        )
+
+        res = self.client.get(f"/api/customer/bookings/{booking.id}/contact/")
+        self.assertEqual(res.status_code, 401)
+
+    def test_contact_artist_unauthorized_user_forbidden(self):
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Rock Concert",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("45000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("45000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_test_succ_2",
+            razorpay_order_id="order_test_succ_2",
+        )
+
+        self.client.force_login(self.other_customer)
+        res = self.client.get(f"/api/customer/bookings/{booking.id}/contact/")
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("Unauthorized", res.json().get("error", ""))
+
+    def test_contact_artist_pending_booking_forbidden(self):
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="College Fest",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.PENDING,
+            agreed_price=Decimal("45000.00"),
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.get(f"/api/customer/bookings/{booking.id}/contact/")
+        self.assertEqual(res.status_code, 403)
+        self.assertFalse(res.json().get("eligible", True))
+        self.assertNotIn("phone", res.json())
+
+    def test_contact_artist_accepted_booking_success(self):
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Corporate Event",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("45000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("45000.00"),
+            status=Payment.Status.PENDING,
+            razorpay_order_id="order_unpaid_test",
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.get(f"/api/customer/bookings/{booking.id}/contact/")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json().get("eligible"))
+        self.assertIn("whatsapp_url", res.json())
+
+    def test_contact_artist_cancelled_booking_forbidden(self):
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Wedding Reception",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.CANCELLED,
+            agreed_price=Decimal("45000.00"),
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.get(f"/api/customer/bookings/{booking.id}/contact/")
+        self.assertEqual(res.status_code, 403)
+        self.assertFalse(res.json().get("eligible", True))
+
+    def test_contact_artist_confirmed_and_paid_success(self):
+        event_time = timezone.now() + datetime.timedelta(days=10)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Live Band Concert",
+            event_date=event_time,
+            event_location="Kozhikode, Kerala",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("45000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("45000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_confirmed_123",
+            razorpay_order_id="order_confirmed_123",
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.get(f"/api/customer/bookings/{booking.id}/contact/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["eligible"])
+        self.assertEqual(data["clean_phone"], "919876543210")
+        self.assertIn("https://wa.me/919876543210", data["whatsapp_url"])
+        self.assertIn(f"BK-{booking.id:03d}", data["whatsapp_url"])
+        self.assertIn("Live%20Band%20Concert", data["whatsapp_url"])
+
+    def test_customer_dashboard_serialization_privacy(self):
+        event_time = timezone.now() + datetime.timedelta(days=5)
+        # 1. Paid & Confirmed
+        paid_booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Confirmed Event",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("30000.00"),
+        )
+        Payment.objects.create(
+            booking=paid_booking,
+            amount=Decimal("30000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_dash_1",
+            razorpay_order_id="order_dash_1",
+        )
+
+        # 2. Pending Unpaid
+        pending_booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Pending Event",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.PENDING,
+            agreed_price=Decimal("20000.00"),
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.get("/api/customer/dashboard/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        bookings = {b["id"]: b for b in data["bookings"]}
+
+        # Paid booking has contact details
+        self.assertTrue(bookings[paid_booking.id]["is_contact_eligible"])
+        self.assertEqual(bookings[paid_booking.id]["artist_phone"], "+91 98765 43210")
+        self.assertIn("https://wa.me/919876543210", bookings[paid_booking.id]["artist_whatsapp_url"])
+
+        # Pending booking does NOT leak phone number
+        self.assertFalse(bookings[pending_booking.id]["is_contact_eligible"])
+        self.assertEqual(bookings[pending_booking.id]["artist_phone"], "")
+        self.assertEqual(bookings[pending_booking.id]["artist_whatsapp_url"], "")
+
+    def test_upcoming_event_reminder_dispatched(self):
+        event_time = timezone.now() + datetime.timedelta(hours=24)
+        booking = Booking.objects.create(
+            customer=self.customer,
+            artist=self.artist_profile,
+            event_type="Tomorrow Gala",
+            event_date=event_time,
+            event_location="Kozhikode",
+            status=Booking.Status.ACCEPTED,
+            agreed_price=Decimal("50000.00"),
+        )
+        Payment.objects.create(
+            booking=booking,
+            amount=Decimal("50000.00"),
+            status=Payment.Status.SUCCESS,
+            transaction_id="pay_reminder_1",
+            razorpay_order_id="order_reminder_1",
+        )
+
+        self.client.force_login(self.customer)
+        res = self.client.get("/api/customer/dashboard/")
+        self.assertEqual(res.status_code, 200)
+
+        notifs = Notification.objects.filter(user=self.customer, title="Upcoming Event Reminder")
+        self.assertTrue(notifs.exists())
+        self.assertIn(f"Booking #{booking.id:03d}", notifs.first().message)
+
+
 
 
 

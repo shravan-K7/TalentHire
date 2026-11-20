@@ -30,6 +30,8 @@ urlpatterns = [
     path("api/bookings/<int:booking_id>/reschedule/", views.customer_request_reschedule_view, name="api_booking_reschedule"),
     path("api/customer/bookings/<int:booking_id>/reschedule-history/", views.customer_reschedule_history_view, name="api_customer_reschedule_history"),
     path("api/bookings/<int:booking_id>/reschedule-history/", views.customer_reschedule_history_view, name="api_booking_reschedule_history"),
+    path("api/customer/bookings/<int:booking_id>/contact/", views.customer_booking_contact_view, name="api_customer_booking_contact"),
+    path("api/bookings/<int:booking_id>/contact/", views.customer_booking_contact_view, name="api_booking_contact"),
     path("api/customer/notifications/mark-read/", views.customer_notifications_read_view, name="api_customer_notifications_read"),
     path("api/customer/support/", views.customer_support_inquiry_view, name="api_customer_support_inquiry"),
     # Artist Dashboard & Management API Endpoints

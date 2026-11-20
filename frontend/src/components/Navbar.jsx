@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import '../css/Navbar.css';
 
-function Navbar({ user, currentPath = '/', navigate }) {
+function Navbar({ user, onLogout, currentPath = '/', navigate }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   function goTo(event, path) {
@@ -56,20 +56,18 @@ function Navbar({ user, currentPath = '/', navigate }) {
 
   const isArtist = Boolean(user?.is_artist || user?.artist_profile || user?.role === 'artist');
 
-  const displayName = user
-    ? (user.first_name ? `${user.first_name} ${user.last_name || ''}`.trim() : (user.username || user.email || 'User'))
-    : '';
-  const initials = displayName
-    ? displayName
-        .split(' ')
-        .filter(Boolean)
-        .map((n) => n[0])
-        .join('')
-        .substring(0, 2)
-        .toUpperCase()
-    : 'U';
-
+  // Dynamic user data resolution - strictly from actual database user fields without hardcoding
+  const profileName = user?.username || (user?.first_name ? user.first_name : (user?.email ? user.email.split('@')[0] : 'User'));
+  const profileInitial = (user?.username || user?.first_name || user?.email || 'U').charAt(0).toUpperCase();
   const avatarUrl = user?.profile_image || user?.avatar || '';
+
+  const targetDashboard = (user?.is_staff || user?.is_superuser || user?.role === 'admin')
+    ? '/admin-dashboard'
+    : (isArtist && !user?.artist_profile)
+      ? '/artist-register'
+      : isArtist
+        ? '/artist-dashboard'
+        : '/customer-dashboard';
 
   return (
     <header className="site-header">
@@ -123,8 +121,10 @@ function Navbar({ user, currentPath = '/', navigate }) {
                 onClick={(e) => {
                   if (user?.is_staff || user?.is_superuser || user?.role === 'admin') {
                     goTo(e, '/admin-dashboard');
+                  } else if (isArtist) {
+                    goTo(e, '/artist-dashboard?tab=notifications');
                   } else {
-                    goTo(e, '/profile?tab=notifications');
+                    goTo(e, '/customer-dashboard?tab=notifications');
                   }
                 }}
                 title="Notifications"
@@ -137,33 +137,36 @@ function Navbar({ user, currentPath = '/', navigate }) {
                 <span className="navbar-bell-dot" />
               </button>
 
-              {/* Profile Button - Direct click navigates to dashboard */}
+              {/* Profile Pill - Functional & Matches UI Reference */}
               <button
                 type="button"
-                className={`navbar-profile-trigger ${currentPath === '/profile' || currentPath === '/artist-register' || currentPath === '/admin-dashboard' || currentPath === '/artist-dashboard' || currentPath === '/customer-dashboard' ? 'active' : ''}`}
-                onClick={(e) => {
-                  if (user?.is_staff || user?.is_superuser || user?.role === 'admin') {
-                    goTo(e, '/admin-dashboard');
-                  } else if (isArtist && !user?.artist_profile) {
-                    goTo(e, '/artist-register');
-                  } else if (isArtist) {
-                    goTo(e, '/artist-dashboard');
-                  } else {
-                    goTo(e, '/customer-dashboard');
-                  }
-                }}
-                title={`Go to Dashboard (${displayName})`}
-                aria-label="Go to Dashboard"
+                className={`navbar-profile-trigger ${currentPath === targetDashboard || currentPath === '/profile' ? 'active' : ''}`}
+                onClick={(e) => goTo(e, targetDashboard)}
+                title={`Go to Dashboard (${profileName})`}
+                aria-label={`Go to Dashboard (${profileName})`}
               >
                 <div className="navbar-avatar-circle">
                   {avatarUrl ? (
-                    <img src={avatarUrl} alt={displayName} className="navbar-avatar-img" />
+                    <img src={avatarUrl} alt={profileName} className="navbar-avatar-img" />
                   ) : (
-                    <span className="navbar-avatar-initials">{initials}</span>
+                    <span className="navbar-avatar-initials">{profileInitial}</span>
                   )}
                 </div>
-                <span className="navbar-profile-name">{displayName.split(' ')[0]}</span>
+                <span className="navbar-profile-name">{profileName}</span>
               </button>
+
+              {mobileMenuOpen && onLogout && (
+                <button
+                  type="button"
+                  className="navbar-logout"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onLogout();
+                  }}
+                >
+                  Sign Out
+                </button>
+              )}
             </div>
           ) : (
             <div className="navbar-account">

@@ -143,6 +143,94 @@ function formatReservationCountdown(expiresAtIso) {
   return `Expires in ${mins}m`;
 }
 
+/**
+ * Resolves the payment / booking amount to display according to strict business rules:
+ * 1. Payment Successful: Display the actual amount from payment.amount.
+ * 2. Artist Accepted but Payment Pending: Display agreed_price as the payable booking amount
+ *    strictly when booking status is 'accepted', payment is not completed, and agreed_price is valid positive amount.
+ * 3. Ineligible booking states (pending approval, rejected, cancelled, expired, etc.): Do NOT present agreed_price.
+ * 4. Payment Not Initiated and No Agreed Price: Display "Amount not available".
+ * 5. Never use customer_budget as a paid amount or confirmed payable amount.
+ */
+function getBookingPaymentAmount(booking) {
+  if (!booking) {
+    return {
+      hasAmount: false,
+      amount: null,
+      formatted: "Amount not available",
+      paidText: "Amount not available",
+    };
+  }
+
+  const paymentStatus = (booking.payment?.status || "").toLowerCase();
+  const isPaid =
+    paymentStatus === "success" ||
+    paymentStatus === "paid" ||
+    paymentStatus === "completed";
+
+  // 1. Payment Successful: Display the actual amount from payment.amount
+  if (isPaid) {
+    const rawPaymentAmt = booking.payment?.amount;
+    if (
+      rawPaymentAmt !== undefined &&
+      rawPaymentAmt !== null &&
+      rawPaymentAmt !== "" &&
+      !isNaN(Number(rawPaymentAmt))
+    ) {
+      const num = Number(rawPaymentAmt);
+      return {
+        hasAmount: true,
+        amount: num,
+        formatted: `₹${num.toLocaleString("en-IN")}`,
+        paidText: `Paid: ₹${num.toLocaleString("en-IN")}`,
+      };
+    }
+    // Payment marked success but amount missing from payment record
+    return {
+      hasAmount: false,
+      amount: null,
+      formatted: "Amount not available",
+      paidText: "Amount not available",
+    };
+  }
+
+  // 2. Artist Accepted but Payment Pending:
+  // Only display booking.agreed_price as the payable amount when:
+  // - Booking status is 'accepted'
+  // - Payment has not been successfully completed (!isPaid)
+  // - agreed_price is a valid positive amount (> 0)
+  const status = (booking.status || "").toLowerCase();
+  if (status === "accepted" && !isPaid) {
+    const rawAgreed = booking.agreed_price;
+    if (
+      rawAgreed !== undefined &&
+      rawAgreed !== null &&
+      rawAgreed !== "" &&
+      !isNaN(Number(rawAgreed))
+    ) {
+      const num = Number(rawAgreed);
+      if (num > 0) {
+        return {
+          hasAmount: true,
+          amount: num,
+          formatted: `₹${num.toLocaleString("en-IN")}`,
+          paidText: `₹${num.toLocaleString("en-IN")}`,
+        };
+      }
+    }
+  }
+
+  // 3. For pending approval, rejected, cancelled, expired or other ineligible booking states,
+  // do not present agreed_price as a payable amount. Display "Amount not available".
+  // 4. Never use customer_budget.
+  return {
+    hasAmount: false,
+    amount: null,
+    formatted: "Amount not available",
+    paidText: "Amount not available",
+  };
+}
+
 // Dynamically compute booking card display state strictly from real database fields
 function computeBookingState(booking) {
   const status = (booking.status || "pending").toLowerCase();
@@ -152,6 +240,7 @@ function computeBookingState(booking) {
     paymentStatus === "paid" ||
     paymentStatus === "completed";
   const isToday = checkIsEventToday(booking);
+  const paymentInfo = getBookingPaymentAmount(booking);
 
   // 1. Cancelled / Rejected / Expired / Unavailable
   if (
@@ -183,11 +272,13 @@ function computeBookingState(booking) {
   // 2. Pending Approval
   if (status === "pending") {
     const countdown = formatReservationCountdown(booking.expires_at);
+    // Rule 3: Payment not initiated and no agreed price -> "Amount not available" (or countdown if reservation active)
     return {
       type: "pending",
       badgeText: "Pending Approval",
       badgeClass: "pending",
-      amountOrSubtext: countdown || "Awaiting Artist Approval",
+      amountOrSubtext: countdown || (paymentInfo.hasAmount ? paymentInfo.formatted : "Amount not available"),
+      isAmount: !countdown && paymentInfo.hasAmount,
       progressPercent: 33.33,
       steps: [
         { label: "Request Sent", state: "completed" },
@@ -204,7 +295,9 @@ function computeBookingState(booking) {
     const subtext =
       dt.date && dt.date !== "Date TBD"
         ? `Completed on ${dt.date}`
-        : "Completed";
+        : paymentInfo.hasAmount
+          ? paymentInfo.paidText
+          : "Completed";
 
     return {
       type: "completed",
@@ -224,22 +317,18 @@ function computeBookingState(booking) {
   // 4. Accepted by Artist
   if (status === "accepted") {
     // 4A. Unpaid / Awaiting Payment
+    // Rule 2: Artist Accepted but Payment Pending -> Display agreed_price as payable amount
+    // Rule 3: If no agreed price -> Display "Amount not available"
+    // Rule 4: Never use customer_budget
     if (!isPaid) {
-      const rawAmt =
-        booking.payment?.amount ||
-        booking.agreed_price ||
-        booking.customer_budget;
-      const amtNum = rawAmt ? Number(rawAmt) : null;
-      const countdown = formatReservationCountdown(booking.expires_at);
-
       return {
         type: "awaiting_payment",
         badgeText: "Awaiting Payment",
         badgeClass: "awaiting_payment",
-        amountOrSubtext: amtNum
-          ? `₹${amtNum.toLocaleString("en-IN")}`
-          : countdown || "Payment Required",
-        isAmount: Boolean(amtNum),
+        amountOrSubtext: paymentInfo.hasAmount
+          ? paymentInfo.formatted
+          : "Amount not available",
+        isAmount: paymentInfo.hasAmount,
         progressPercent: 66.66,
         steps: [
           { label: "Request Sent", state: "completed" },
@@ -269,19 +358,17 @@ function computeBookingState(booking) {
     }
 
     // 4C. Paid & Future Event (Confirmed)
-    const paidRaw =
-      booking.payment?.amount ||
-      booking.agreed_price ||
-      booking.customer_budget;
-    const paidNum = paidRaw ? Number(paidRaw) : null;
-
+    // Rule 1: Payment Successful -> Display actual amount from payment.amount
+    // Rule 3: If payment amount not available -> "Amount not available"
+    // Rule 4: Never use customer_budget
     return {
       type: "confirmed",
       badgeText: "Confirmed",
       badgeClass: "confirmed",
-      amountOrSubtext: paidNum
-        ? `Paid: ₹${paidNum.toLocaleString("en-IN")}`
-        : "Confirmed & Paid",
+      amountOrSubtext: paymentInfo.hasAmount
+        ? paymentInfo.paidText
+        : "Amount not available",
+      isAmount: false,
       progressPercent: 100,
       steps: [
         { label: "Request Sent", state: "completed" },
@@ -315,7 +402,8 @@ function computeBookingState(booking) {
     type: "pending",
     badgeText: status.charAt(0).toUpperCase() + status.slice(1),
     badgeClass: "pending",
-    amountOrSubtext: "Status: " + status,
+    amountOrSubtext: paymentInfo.hasAmount ? paymentInfo.formatted : "Amount not available",
+    isAmount: paymentInfo.hasAmount,
     progressPercent: 33.33,
     steps: [
       { label: "Request Sent", state: "completed" },
@@ -335,8 +423,8 @@ export default function CustomerBookingsDashboard({
   onPayNow,
   onReschedule,
   onCancelBooking,
-  onHistory,
-  onOpenReceipt,
+  _onHistory,
+  _onOpenReceipt,
   onContactSupport,
   navigate,
   paymentLoadingId,

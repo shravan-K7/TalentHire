@@ -3,6 +3,8 @@ import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import BookingCalendarPicker from "../components/BookingCalendarPicker";
 import CustomerBookingsDashboard from "../components/booking/CustomerBookingsDashboard";
+import CustomerBookingDetail from "../components/booking/CustomerBookingDetail";
+import CustomerPaymentHistory from "../components/booking/CustomerPaymentHistory";
 import {
   fetchCustomerDashboard,
   updateCustomerProfile,
@@ -23,20 +25,6 @@ import {
   verifyPayment,
 } from "../js/auth";
 import "../css/CustomerDashboard.css";
-
-function formatBookingStatus(status) {
-  if (!status) return "Pending";
-  if (status === "accepted") return "Confirmed";
-  if (status === "completed") return "Completed";
-  if (status === "cancelled") return "Cancelled";
-  if (status === "rejected") return "Rejected";
-  if (status === "refunded") return "Refunded";
-  if (status === "partially_refunded") return "Partially Refunded";
-  if (status === "unavailable") return "Unavailable";
-  return typeof status === "string" && status.length > 0
-    ? status.charAt(0).toUpperCase() + status.slice(1)
-    : "Pending";
-}
 
 const ARTIST_PERF_OPTIONS = [
   "Solo performance",
@@ -1185,8 +1173,8 @@ function CustomerDashboard({
             RIGHT MAIN CONTENT AREA
             ========================================================================= */}
         <main className="cd-main-panel">
-          {/* Top Bar inside content view (hidden on bookings dashboard to preserve exact reference layout) */}
-          {activeTab !== "bookings" && (
+          {/* Top Bar inside content view (hidden on bookings, booking details & payments to preserve exact reference layout) */}
+          {activeTab !== "bookings" && activeTab !== "booking-detail" && activeTab !== "payments" && (
             <div className="cd-content-topbar">
               <div className="cd-screen-heading-wrap">
                 <h1 className="cd-screen-title">{screenTitle}</h1>
@@ -1655,385 +1643,40 @@ function CustomerDashboard({
           )}
 
           {/* =======================================================================
-              SCREEN 4: BOOKING DETAILS PAGE (Exact layout from reference image)
+              SCREEN 4: BOOKING DETAILS PAGE (Exact layout from reference PDF)
               ======================================================================= */}
           {activeTab === "booking-detail" && (
-            <div className="cd-view-container cd-booking-detail-view">
-              {(() => {
-                const b = selectedBooking || bookings[0];
-                if (!b) {
-                  return (
-                    <div className="cd-empty-card">
-                      <h3>No Booking Selected</h3>
-                      <button
-                        type="button"
-                        className="cd-btn-primary"
-                        onClick={() => switchTab("bookings")}
-                      >
-                        Back to Bookings
-                      </button>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="cd-detail-card">
-                    {/* Header Row */}
-                    <div className="cd-detail-header-row">
-                      <div className="cd-detail-title-group">
-                        <button
-                          type="button"
-                          className="cd-btn-back"
-                          onClick={() => switchTab("bookings")}
-                          title="Back to Bookings"
-                        >
-                          <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.4"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <line x1="19" y1="12" x2="5" y2="12" />
-                            <polyline points="12 19 5 12 12 5" />
-                          </svg>
-                        </button>
-                        <h2 className="cd-detail-title">
-                          Booking ID:{" "}
-                          <span className="cd-highlight-id">#BK-{b.id}</span>
-                        </h2>
-                      </div>
-
-                      <span className={`cd-status-pill ${b.status} large`}>
-                        {formatBookingStatus(b.status)}
-                      </span>
-                    </div>
-
-                    {b.status === "unavailable" && (
-                      <div
-                        className="cd-alert cd-alert-error"
-                        role="alert"
-                        style={{ marginTop: "16px", marginBottom: "16px" }}
-                      >
-                        {b.response_message ||
-                          "This artist is no longer available on your selected date because another booking was confirmed."}
-                      </div>
-                    )}
-
-                    <div className="cd-detail-card-divider" />
-
-                    {/* Time & Schedule Grid */}
-                    <div className="cd-detail-times-grid">
-                      <div className="cd-detail-time-box">
-                        <span className="cd-time-label">Event Date & Time</span>
-                        <span className="cd-time-value">
-                          {b.event_date || "Date TBD"}
-                        </span>
-                      </div>
-
-                      <div className="cd-detail-time-box">
-                        <span className="cd-time-label">Performance Duration</span>
-                        <span className="cd-time-value">
-                          {b.performance_duration || "To be discussed"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Artist & Event Details */}
-                    <div className="cd-detail-event-summary">
-                      <div className="cd-event-summary-item">
-                        <span className="cd-summary-label">Performer</span>
-                        <span className="cd-summary-value">
-                          {b.artist_name} ({b.category_name})
-                        </span>
-                      </div>
-                      <div className="cd-event-summary-item">
-                        <span className="cd-summary-label">Event Type</span>
-                        <span className="cd-summary-value">{b.event_type}</span>
-                      </div>
-                      <div className="cd-event-summary-item">
-                        <span className="cd-summary-label">
-                          {b.agreed_price ? "Agreed Price" : "Offered Price"}
-                        </span>
-                        <span className="cd-summary-value price">
-                          {b.agreed_price
-                            ? `₹${Number(b.agreed_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : b.customer_budget
-                            ? `₹${Number(b.customer_budget).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : "TBD"}
-                        </span>
-                      </div>
-                      {b.customer_phone && (
-                        <div className="cd-event-summary-item">
-                          <span className="cd-summary-label">Contact Phone</span>
-                          <span className="cd-summary-value">{b.customer_phone}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Map & Location Preview Card */}
-                    <div className="cd-detail-map-section">
-                      <span className="cd-map-section-label">Map</span>
-                      <div className="cd-map-container">
-                        <div className="cd-map-visual">
-                          <div className="cd-map-pin">
-                            <svg
-                              width="24"
-                              height="24"
-                              viewBox="0 0 24 24"
-                              fill="#FF5722"
-                            >
-                              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-                            </svg>
-                          </div>
-                          <span className="cd-map-location-badge">
-                            Event Venue
-                          </span>
-                        </div>
-                        <div className="cd-map-details-box">
-                          <div className="cd-map-status-row">
-                            <span className="cd-map-status-label">Status</span>
-                            <span className="cd-map-status-val">
-                              Verified Venue
-                            </span>
-                          </div>
-                          <div className="cd-map-address-row">
-                            <span className="cd-map-pin-icon">
-                              <svg
-                                width="15"
-                                height="15"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                                <circle cx="12" cy="10" r="3" />
-                              </svg>
-                            </span>
-                            <span className="cd-map-address-text">
-                              {b.event_location ||
-                                "Mumbai Expert Exhibition, 1102554, Sentosa St. Pelion"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Bottom Action Buttons: Download Receipt & Cancel */}
-                    <div className="cd-detail-actions-row">
-                      <button
-                        type="button"
-                        className="cd-btn-primary cd-btn-download-receipt"
-                        onClick={() => handleOpenReceipt(b)}
-                      >
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                          <polyline points="7 10 12 15 17 10" />
-                          <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        <span>Download Receipt</span>
-                      </button>
-
-                      {b.status === "accepted" && (
-                        <button
-                          type="button"
-                          className="cd-btn-secondary"
-                          onClick={() => openRescheduleModal(b)}
-                        >
-                          Request Rescheduling
-                        </button>
-                      )}
-
-                      {(b.status === "pending" || b.status === "accepted") && (
-                        <button
-                          type="button"
-                          className="cd-btn-secondary cd-btn-cancel-booking"
-                          style={{ borderColor: "#EF5350", color: "#EF5350" }}
-                          onClick={() => openCancelModal(b)}
-                        >
-                          Cancel Booking
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        className="cd-btn-outline"
-                        onClick={() => openHistoryModal(b)}
-                      >
-                        Rescheduling History
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
+            <CustomerBookingDetail
+              booking={selectedBooking || bookings[0]}
+              onBack={() => switchTab("bookings")}
+              onReschedule={(b) => openRescheduleModal(b)}
+              onCancelBooking={(b) => openCancelModal(b)}
+              onOpenReceipt={(b) => handleOpenReceipt(b)}
+              onPayNow={(b) => handlePayNow(b)}
+              navigate={navigate}
+              onContactSupport={() => switchTab("support")}
+            />
           )}
 
           {/* =======================================================================
-              SCREEN 5: PAYMENT HISTORY PAGE (Exact layout from reference image)
+              SCREEN 5: PAYMENT HISTORY PAGE (Exact layout from reference PDF)
               ======================================================================= */}
           {activeTab === "payments" && (
-            <div className="cd-view-container cd-payments-view">
-              <div className="cd-table-card">
-                <div className="cd-table-card-header">
-                  <h2 className="cd-table-title">Payment History</h2>
-                  <span className="cd-table-count">
-                    {payments.length} transactions
-                  </span>
-                </div>
-
-                {payments.length === 0 ? (
-                  <div className="cd-empty-card">
-                    <h3>No Transactions Found</h3>
-                    <p>
-                      Once you book an artist and initiate transactions, payment
-                      receipts and records will appear here.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="cd-table-responsive">
-                    <table
-                      className="cd-data-table"
-                      aria-label="Customer Payment History Table"
-                    >
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Transaction ID</th>
-                          <th>Amount</th>
-                          <th>Status</th>
-                          <th className="th-actions">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payments.map((p) => {
-                          const isPaid =
-                            p.status === "completed" ||
-                            p.status === "paid" ||
-                            p.status === "success" ||
-                            p.status === "SUCCESS";
-                          const isPending =
-                            p.status === "pending" || p.status === "PENDING";
-                          const isPartiallyRefunded =
-                            p.status === "partially_refunded" ||
-                            p.status === "PARTIALLY_REFUNDED";
-                          const isRefunded =
-                            p.status === "refunded" || p.status === "REFUNDED";
-                          const relatedBooking = bookings.find(
-                            (b) => b.id === p.booking_id,
-                          );
-                          const canPayNow =
-                            isPending &&
-                            (!relatedBooking ||
-                              relatedBooking.status === "accepted");
-
-                          return (
-                            <tr key={p.id}>
-                              <td className="td-date">
-                                {p.date?.split(" ")[0] || "03-01-2023"}
-                              </td>
-                              <td className="td-txn">
-                                <span className="cd-txn-id">
-                                  {p.transaction_id || "Pending"}
-                                </span>
-                              </td>
-                              <td className="td-amount">₹{p.amount}</td>
-                              <td className="td-status">
-                                <span
-                                  className={`cd-status-pill ${
-                                    isPaid
-                                      ? "paid"
-                                      : isPending
-                                        ? "pending"
-                                        : isPartiallyRefunded
-                                          ? "partially-refunded"
-                                          : isRefunded
-                                            ? "refunded"
-                                            : p.status
-                                  }`}
-                                >
-                                  {isPaid
-                                    ? "Paid"
-                                    : isPending
-                                      ? "Pending"
-                                      : isPartiallyRefunded
-                                        ? "Partially Refunded"
-                                        : isRefunded
-                                          ? "Refunded"
-                                          : p.status}
-                                </span>
-                              </td>
-                              <td className="td-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                {canPayNow && (
-                                  <button
-                                    type="button"
-                                    className="cd-btn-primary"
-                                    style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
-                                    onClick={() =>
-                                      handlePayNow(
-                                        relatedBooking || {
-                                          id: p.booking_id,
-                                          artist_name: p.artist_name,
-                                        },
-                                      )
-                                    }
-                                    disabled={
-                                      paymentLoadingId === (p.booking_id || p.id)
-                                    }
-                                  >
-                                    {paymentLoadingId === (p.booking_id || p.id)
-                                      ? "Processing..."
-                                      : "Pay Now"}
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  className="cd-table-icon-btn"
-                                  title="Download Receipt"
-                                  onClick={() => handleOpenReceipt(p)}
-                                >
-                                  <svg
-                                    width="16"
-                                    height="16"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                    <polyline points="14 2 14 8 20 8" />
-                                    <line x1="16" y1="13" x2="8" y2="13" />
-                                    <line x1="16" y1="17" x2="8" y2="17" />
-                                    <polyline points="10 9 9 9 8 9" />
-                                  </svg>
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
+            <CustomerPaymentHistory
+              bookings={bookings}
+              payments={payments}
+              loading={loading}
+              error={error}
+              onOpenReceipt={(item) => handleOpenReceipt(item)}
+              onPayNow={(booking) => handlePayNow(booking)}
+              onViewDetails={(booking) => {
+                setSelectedBooking(booking);
+                switchTab("booking-detail");
+              }}
+              paymentLoadingId={paymentLoadingId}
+              showToast={showToast}
+              onRefresh={refreshDashboard}
+            />
           )}
 
           {/* =======================================================================
@@ -2919,9 +2562,10 @@ function CustomerDashboard({
                 <span>Total Amount Paid</span>
                 <span className="cd-receipt-total-price">
                   ₹
-                  {receiptItem.amount ||
+                  {receiptItem.payment?.amount ||
+                    receiptItem.amount ||
                     receiptItem.agreed_price ||
-                    "25,000.00"}
+                    "0.00"}
                 </span>
               </div>
             </div>

@@ -1,0 +1,575 @@
+/* ==========================================================================
+   TalentHire - Customer Payment History Styles
+   Accurately reproduces the Customer Payment History design reference.
+   ========================================================================== */
+
+.th-payhistory-root {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 0 60px 0;
+  color: #FFFFFF;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ==========================================================================
+   PAGE HEADER
+   ========================================================================== */
+.th-payhistory-header {
+  margin-bottom: 24px;
+}
+
+.th-payhistory-title {
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #FFFFFF;
+  margin: 0 0 6px 0;
+  line-height: 1.2;
+}
+
+.th-payhistory-subtitle {
+  font-size: 0.95rem;
+  color: #8E8E93;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ==========================================================================
+   TOP 4 SUMMARY CARDS GRID
+   ========================================================================== */
+.th-payhistory-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.th-paystat-card {
+  background: #181A1E;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+  min-height: 110px;
+  box-sizing: border-box;
+}
+
+.th-paystat-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8E8E93;
+  margin-bottom: 10px;
+}
+
+.th-paystat-value {
+  font-size: 1.68rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1.15;
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+
+.th-paystat-subtext {
+  font-size: 0.84rem;
+  color: #8E8E93;
+  font-weight: 400;
+}
+
+/* Payment Due highlighted styling matching PDF reference */
+.th-paystat-card.th-paystat-due.has-due {
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.06);
+}
+
+.th-paystat-card.th-paystat-due.has-due .th-paystat-label {
+  color: #F59E0B;
+}
+
+.th-paystat-card.th-paystat-due.has-due .th-paystat-value {
+  color: #F59E0B;
+}
+
+.th-paystat-card.th-paystat-due.has-due .th-paystat-subtext {
+  color: #B47A1F;
+}
+
+/* ==========================================================================
+   CONTROLS BAR: SEARCH & FILTERS
+   ========================================================================== */
+.th-payhistory-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.th-payhistory-search-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 480px;
+  min-width: 280px;
+}
+
+.th-payhistory-search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #8E8E93;
+  pointer-events: none;
+}
+
+.th-payhistory-search-input {
+  width: 100%;
+  background: #181A1E;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 16px 10px 42px;
+  color: #FFFFFF;
+  font-size: 0.88rem;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.th-payhistory-search-input::placeholder {
+  color: #6C707A;
+}
+
+.th-payhistory-search-input:focus {
+  border-color: #FF511A;
+  box-shadow: 0 0 0 2px rgba(255, 81, 26, 0.15);
+}
+
+.th-payhistory-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.th-select-wrapper {
+  position: relative;
+}
+
+.th-payhistory-select {
+  background: #181A1E;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 34px 10px 14px;
+  color: #FFFFFF;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color 0.2s ease;
+}
+
+.th-payhistory-select:focus {
+  border-color: #FF511A;
+}
+
+.th-payhistory-select option {
+  background: #1E2024;
+  color: #FFFFFF;
+}
+
+.th-payhistory-count {
+  color: #8E8E93;
+  font-size: 0.88rem;
+  font-weight: 500;
+  white-space: nowrap;
+  padding-left: 4px;
+}
+
+/* ==========================================================================
+   TRANSACTION TABLE
+   ========================================================================== */
+.th-payhistory-table-container {
+  background: #181A1E;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  overflow-x: auto;
+}
+
+.th-payhistory-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  min-width: 840px;
+}
+
+.th-payhistory-table thead tr {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #181A1E;
+}
+
+.th-payhistory-table th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #7E828A;
+  text-transform: uppercase;
+  padding: 16px 22px;
+  white-space: nowrap;
+}
+
+.th-payhistory-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background-color 0.15s ease;
+}
+
+.th-payhistory-row:last-child {
+  border-bottom: none;
+}
+
+.th-payhistory-row:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.th-payhistory-table td {
+  padding: 18px 22px;
+  vertical-align: middle;
+}
+
+/* 1. Date & Time Column */
+.th-date-primary {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: #FFFFFF;
+}
+
+.th-date-time {
+  font-size: 0.8rem;
+  color: #8E8E93;
+  margin-top: 3px;
+}
+
+/* 2. Transaction ID Column */
+.th-txn-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.th-txn-code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.88rem;
+  color: #E2E8F0;
+  font-weight: 400;
+}
+
+.th-copy-btn {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  border-radius: 4px;
+  color: #8E8E93;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.th-copy-btn:hover {
+  color: #FFFFFF;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.th-copy-btn:active {
+  transform: scale(0.92);
+}
+
+.th-copied-icon {
+  color: #22C55E;
+}
+
+.th-txn-not-generated {
+  color: #71767F;
+  font-size: 0.88rem;
+  font-style: normal;
+}
+
+/* 3. Booking Column */
+.th-booking-id {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.th-artist-name {
+  font-size: 0.82rem;
+  color: #8E8E93;
+  margin-top: 2px;
+}
+
+/* 4. Amount Column */
+.th-amount-val {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+/* 5. Status Column */
+.th-status-pill {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.status-paid {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22C55E;
+}
+
+.status-payment_due {
+  background: rgba(245, 158, 11, 0.14);
+  color: #F59E0B;
+}
+
+.status-awaiting_artist {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94A3B8;
+}
+
+.status-refunded {
+  background: rgba(168, 85, 247, 0.14);
+  color: #C084FC;
+}
+
+.status-cancelled,
+.status-rejected {
+  background: rgba(239, 68, 68, 0.14);
+  color: #F87171;
+}
+
+.status-pending {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94A3B8;
+}
+
+/* 6. Actions Column */
+.th-actions-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.th-btn-action {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+  outline: none;
+}
+
+.th-btn-receipt,
+.th-btn-details {
+  background: #24272D;
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.th-btn-receipt:hover,
+.th-btn-details:hover {
+  background: #2F333B;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.th-btn-pay {
+  background: #FF511A;
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+.th-btn-pay:hover {
+  background: #E04815;
+}
+
+.th-btn-pay:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   FOOTER TEXT
+   ========================================================================== */
+.th-payhistory-footer {
+  margin-top: 18px;
+  font-size: 0.84rem;
+  color: #8E8E93;
+}
+
+/* ==========================================================================
+   EMPTY, LOADING, AND ERROR STATES
+   ========================================================================== */
+.th-payhistory-empty-card {
+  background: #181A1E;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 60px 24px;
+  text-align: center;
+}
+
+.th-payhistory-empty-icon-wrap {
+  width: 56px;
+  height: 56px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px auto;
+  color: #8E8E93;
+}
+
+.th-payhistory-empty-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 8px 0;
+}
+
+.th-payhistory-empty-desc {
+  font-size: 0.9rem;
+  color: #8E8E93;
+  max-width: 440px;
+  margin: 0 auto 20px auto;
+  line-height: 1.5;
+}
+
+.th-payhistory-reset-btn {
+  background: #24272D;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #FFFFFF;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.th-payhistory-reset-btn:hover {
+  background: #2F333B;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.th-payhistory-loading-wrap {
+  padding: 60px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #8E8E93;
+}
+
+.th-payhistory-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #FF511A;
+  border-radius: 50%;
+  animation: th-spin 0.8s linear infinite;
+}
+
+@keyframes th-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.th-payhistory-alert {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  color: #F87171;
+  font-size: 0.9rem;
+}
+
+.th-payhistory-alert-icon {
+  flex-shrink: 0;
+}
+
+.th-payhistory-alert-msg {
+  flex: 1;
+}
+
+.th-payhistory-retry-btn {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #F87171;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.th-payhistory-retry-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+/* ==========================================================================
+   RESPONSIVENESS
+   ========================================================================== */
+@media (max-width: 1024px) {
+  .th-payhistory-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .th-payhistory-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .th-payhistory-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .th-payhistory-search-wrap {
+    max-width: 100%;
+  }
+
+  .th-payhistory-filter-group {
+    justify-content: space-between;
+  }
+}
