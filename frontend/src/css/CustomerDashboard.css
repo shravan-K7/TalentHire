@@ -206,10 +206,14 @@
 }
 
 .cd-sidebar-icon {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  color: #888888;
-  transition: color 0.18s ease;
+  color: #8E8E93;
+  transition: color 0.18s ease, transform 0.18s ease;
 }
 
 .cd-sidebar-item:hover .cd-sidebar-icon {

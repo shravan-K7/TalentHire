@@ -3319,6 +3319,7 @@ def artist_dashboard_view(request):
         "-created_at"
     )
     unread_notifications_count = notifications_qs.filter(is_read=False).count()
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
     notifications_list = [
         {
             "id": n.id,
@@ -3326,10 +3327,27 @@ def artist_dashboard_view(request):
             "message": n.message,
             "notification_type": n.notification_type,
             "is_read": n.is_read,
-            "created_at": n.created_at.strftime("%b %d, %Y %I:%M %p"),
+            "created_at": timezone.localtime(n.created_at, timezone=kolkata_tz).strftime("%b %d, %Y %I:%M %p"),
+            "timestamp": n.created_at.isoformat(),
         }
         for n in notifications_qs[:30]
     ]
+
+    for n in notifications_qs[:20]:
+        n_dt = timezone.localtime(n.created_at, timezone=kolkata_tz)
+        clean_title = n.title.replace("! 🎉", "").strip()
+        recent_activity.append(
+            {
+                "id": f"notif-{n.id}",
+                "type": "notification",
+                "title": clean_title,
+                "description": n.message,
+                "timestamp": n.created_at.isoformat(),
+                "formatted_time": n_dt.strftime("%b %d, %Y %I:%M %p"),
+                "status": "read" if n.is_read else "unread",
+                "notification_type": n.notification_type,
+            }
+        )
 
     # Sort recent activity descending
     recent_activity.sort(key=lambda x: x["timestamp"], reverse=True)

@@ -15,8 +15,28 @@ import {
   cancelArtistBooking,
   fetchArtistPendingReschedulingRequests,
   respondArtistReschedulingRequest,
+  submitSupportInquiry,
 } from "../js/auth";
+import {
+  LayoutDashboard,
+  UserRound,
+  Images,
+  Inbox,
+  CalendarDays,
+  TicketCheck,
+  CalendarCheck,
+  Wallet,
+  Star,
+  Bell,
+  Headset,
+  Settings,
+  LogOut,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import "../css/CustomerDashboard.css";
+import "../css/ArtistDashboard.css";
 
 function formatBookingStatus(status) {
   if (!status) return "Pending";
@@ -166,6 +186,39 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const [artistCancelSubmitting, setArtistCancelSubmitting] = useState(false);
   const [artistCancelError, setArtistCancelError] = useState("");
 
+  // Support Inquiry State
+  const [supportForm, setSupportForm] = useState({ subject: "", message: "" });
+  const [supportSending, setSupportSending] = useState(false);
+  const [supportSuccessMsg, setSupportSuccessMsg] = useState("");
+  const [supportErrorMsg, setSupportErrorMsg] = useState("");
+
+  // Mini calendar schedule state on Dashboard overview
+  const [scheduleMonth, setScheduleMonth] = useState(() => new Date());
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState("");
+
+  const syncCalendarWithPerformances = useCallback((dashData) => {
+    if (dashData?.upcoming_performances && dashData.upcoming_performances.length > 0) {
+      const first = dashData.upcoming_performances[0];
+      const rawDate = first.event_date_iso || first.event_date;
+      if (rawDate) {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          setSelectedScheduleDate(`${y}-${m}-${day}`);
+          setScheduleMonth(new Date(y, d.getMonth(), 1));
+          return;
+        }
+      }
+    }
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    setSelectedScheduleDate(`${y}-${m}-${day}`);
+  }, []);
+
   // Sync tab with browser URL history
   useEffect(() => {
     function handlePop() {
@@ -201,6 +254,28 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     }, 3500);
   }
 
+  async function handleSupportSubmit(e) {
+    e.preventDefault();
+    setSupportSending(true);
+    setSupportSuccessMsg("");
+    setSupportErrorMsg("");
+    try {
+      const res = await submitSupportInquiry(supportForm);
+      setSupportSuccessMsg(
+        res.message ||
+          "Your inquiry has been submitted. Our support team will assist you shortly.",
+      );
+      setSupportForm({ subject: "", message: "" });
+      showToast("Support inquiry submitted.");
+    } catch (err) {
+      setSupportErrorMsg(
+        err.message || "Failed to submit support inquiry. Please try again.",
+      );
+    } finally {
+      setSupportSending(false);
+    }
+  }
+
   const loadPendingRescheduling = useCallback(async () => {
     try {
       const res = await fetchArtistPendingReschedulingRequests();
@@ -214,6 +289,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     try {
       const res = await fetchArtistDashboard();
       setData(res);
+      syncCalendarWithPerformances(res);
       const artist = res.artist || {};
       setEditForm({
         stage_name: artist.stage_name || "",
@@ -239,7 +315,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     } finally {
       setLoading(false);
     }
-  }, [loadPendingRescheduling]);
+  }, [loadPendingRescheduling, syncCalendarWithPerformances]);
 
   useEffect(() => {
     let ignore = false;
@@ -249,6 +325,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
         const res = await fetchArtistDashboard();
         if (!ignore) {
           setData(res);
+          syncCalendarWithPerformances(res);
           const artist = res.artist || {};
           setEditForm({
             stage_name: artist.stage_name || "",
@@ -283,7 +360,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     return () => {
       ignore = true;
     };
-  }, [loadPendingRescheduling]);
+  }, [loadPendingRescheduling, syncCalendarWithPerformances]);
 
   // Phase 6: Approve Rescheduling Request
   async function handleApproveReschedule(reqItem) {
@@ -700,6 +777,133 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const pendingBookingsList = bookings.filter((b) => b.status === "pending");
   const acceptedBookingsList = bookings.filter((b) => b.status === "accepted");
 
+  // Next upcoming performance
+  const nextPerformance =
+    upcomingPerformances && upcomingPerformances.length > 0
+      ? upcomingPerformances[0]
+      : null;
+
+  let nextPerfDay = "--";
+  let nextPerfMonth = "DATE";
+  let nextPerfFormattedDate = "";
+  if (nextPerformance) {
+    const rawD = nextPerformance.event_date_iso || nextPerformance.event_date;
+    const d = rawD ? new Date(rawD) : null;
+    if (d && !isNaN(d.getTime())) {
+      nextPerfDay = String(d.getDate()).padStart(2, "0");
+      nextPerfMonth = d
+        .toLocaleString("default", { month: "short" })
+        .toUpperCase();
+      const timeStr = d.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const monthStr = d.toLocaleString("default", { month: "short" });
+      nextPerfFormattedDate = `${monthStr} ${d.getDate()}, ${d.getFullYear()} • ${timeStr}`;
+    } else {
+      nextPerfFormattedDate = nextPerformance.event_date || "";
+    }
+  }
+
+  // Mini calendar schedule helpers
+  const calYear = scheduleMonth.getFullYear();
+  const calMonth = scheduleMonth.getMonth();
+  const calMonthLabel = `${scheduleMonth.toLocaleString("default", { month: "short" })} ${calYear}`;
+  const totalCalDays = new Date(calYear, calMonth + 1, 0).getDate();
+  const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
+
+  const blankDays = Array.from({ length: firstDayOfWeek });
+  const daysInMonth = Array.from({ length: totalCalDays }, (_, i) => i + 1);
+
+  const confirmedBookingsList = bookings.filter(
+    (b) => b.status === "accepted" || b.status === "confirmed",
+  );
+
+  function hasBookingOnDay(day) {
+    const yyyy = calYear;
+    const mm = String(calMonth + 1).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const targetDateStr = `${yyyy}-${mm}-${dd}`;
+    return confirmedBookingsList.some((b) => {
+      if (b.event_date_iso && b.event_date_iso.startsWith(targetDateStr))
+        return true;
+      if (b.event_date && b.event_date.includes(targetDateStr)) return true;
+      const bDate = new Date(b.event_date_iso || b.event_date);
+      if (!isNaN(bDate.getTime())) {
+        return (
+          bDate.getFullYear() === yyyy &&
+          bDate.getMonth() === calMonth &&
+          bDate.getDate() === day
+        );
+      }
+      return false;
+    });
+  }
+
+  function handlePrevScheduleMonth() {
+    setScheduleMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1),
+    );
+  }
+
+  function handleNextScheduleMonth() {
+    setScheduleMonth(
+      (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1),
+    );
+  }
+
+  const eventsForSelectedDate = confirmedBookingsList.filter((b) => {
+    if (!selectedScheduleDate) return false;
+    const targetDateStr = selectedScheduleDate;
+    if (b.event_date_iso && b.event_date_iso.startsWith(targetDateStr))
+      return true;
+    const bDate = new Date(b.event_date_iso || b.event_date);
+    if (!isNaN(bDate.getTime())) {
+      const yyyy = bDate.getFullYear();
+      const mm = String(bDate.getMonth() + 1).padStart(2, "0");
+      const dd = String(bDate.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}` === targetDateStr;
+    }
+    return false;
+  });
+
+  let selectedDateLabel = "Events";
+  if (selectedScheduleDate) {
+    const parts = selectedScheduleDate.split("-");
+    if (parts.length === 3) {
+      const tempD = new Date(
+        Number(parts[0]),
+        Number(parts[1]) - 1,
+        Number(parts[2]),
+      );
+      if (!isNaN(tempD.getTime())) {
+        selectedDateLabel = `Events on ${tempD.toLocaleString("default", { month: "short" })} ${tempD.getDate()}`;
+      }
+    }
+  }
+
+  const recentPayout = payments && payments.length > 0 ? payments[0] : null;
+
+  function getActivityBadgeInfo(act) {
+    const title = (act.title || "").toLowerCase();
+    if (title.includes("confirm") || title.includes("accept")) {
+      return { label: "Booking Confirmed", badgeClass: "badge-green" };
+    }
+    if (title.includes("verified") || title.includes("profile")) {
+      return { label: "Profile Verified", badgeClass: "badge-blue" };
+    }
+    if (title.includes("request") || title.includes("received")) {
+      return { label: "New Booking Request", badgeClass: "badge-gray" };
+    }
+    if (title.includes("payment")) {
+      return { label: "Payment Update", badgeClass: "badge-green" };
+    }
+    if (title.includes("decline") || title.includes("cancel")) {
+      return { label: "Booking Cancelled", badgeClass: "badge-red" };
+    }
+    return { label: act.title || "Activity", badgeClass: "badge-gray" };
+  }
+
   if (loading) {
     return (
       <div className="cd-page">
@@ -784,345 +988,194 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       {/* Main Dashboard Layout Shell: Docked Sidebar + Content Area */}
       <div className="cd-dashboard-shell">
         {/* =====================================================================
-            LEFT SIDEBAR NAVIGATION (Role-specific for Performing Artist)
+            LEFT SIDEBAR NAVIGATION (Icons + Text Labels for Performing Artist)
             ===================================================================== */}
-        <aside className="cd-sidebar" aria-label="Performing Artist Navigation">
-          <div className="cd-sidebar-header">
-            <span className="cd-sidebar-brand-label">Artist Studio</span>
+        <aside className="artist-sidebar" aria-label="Artist Navigation">
+          {/* Category / Studio Header */}
+          <div className="artist-sidebar-header-label">
+            <span className="artist-sidebar-chevron">›</span> ARTIST STUDIO
           </div>
 
-          {/* Artist mini-card */}
-          <div className="cd-sidebar-user-mini">
-            <div className="cd-sidebar-user-avatar">
+          {/* Artist mini profile summary at top */}
+          <div
+            className="artist-sidebar-user-mini"
+            onClick={() => switchTab("profile")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") switchTab("profile");
+            }}
+            title="View Artist Profile"
+          >
+            <div className="artist-sidebar-user-avatar">
               {artist.profile_image ? (
-                <img src={artist.profile_image} alt={artist.stage_name} />
+                <img
+                  src={artist.profile_image}
+                  alt={artist.stage_name || user?.username || "Artist"}
+                />
               ) : (
                 <span>{initials}</span>
               )}
             </div>
-            <div className="cd-sidebar-user-info">
-              <div className="cd-sidebar-user-name">
+            <div className="artist-sidebar-user-info">
+              <div className="artist-sidebar-user-name">
                 {artist.stage_name || user?.username}
               </div>
-              <div className="cd-sidebar-user-role">
+              <div className="artist-sidebar-user-role">
                 {artist.category_name || "Performing Artist"}
               </div>
             </div>
           </div>
 
-          <nav className="cd-sidebar-nav">
-            {/* 1. Artist Dashboard */}
+          {/* Navigation Items (Icons + Text Labels) */}
+          <nav className="artist-sidebar-nav" aria-label="Artist Navigation Links">
+            {/* 1. Dashboard */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "dashboard" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "dashboard" ? "active" : ""}`}
               onClick={() => switchTab("dashboard")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
-              <span>Artist Dashboard</span>
+              <LayoutDashboard className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Dashboard</span>
             </button>
 
-            {/* 2. Artist Profile */}
+            {/* 2. My Profile */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "profile" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "profile" ? "active" : ""}`}
               onClick={() => switchTab("profile")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-              <span>Artist Profile</span>
+              <UserRound className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">My Profile</span>
             </button>
 
-            {/* 3. Edit Profile */}
+            {/* 3. Portfolio */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "edit-profile" ? "active" : ""}`}
-              onClick={() => switchTab("edit-profile")}
-            >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              <span>Edit Profile</span>
-            </button>
-
-            {/* 4. Portfolio Management */}
-            <button
-              type="button"
-              className={`cd-sidebar-item ${activeTab === "portfolio" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "portfolio" ? "active" : ""}`}
               onClick={() => switchTab("portfolio")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-              <span>Portfolio</span>
-              {portfolio.length > 0 && (
-                <span className="cd-sidebar-badge">{portfolio.length}</span>
-              )}
+              <Images className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Portfolio</span>
             </button>
 
-            {/* 5. Booking Requests */}
+            {/* 4. Booking Requests */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "requests" || activeTab === "booking-detail" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "requests" || activeTab === "booking-detail" ? "active" : ""}`}
               onClick={() => {
                 setSelectedBooking(null);
                 switchTab("requests");
               }}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-              </svg>
-              <span>Booking Requests</span>
+              <Inbox className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Booking Requests</span>
               {pendingBookingsList.length > 0 && (
-                <span
-                  className="cd-sidebar-badge"
-                  style={{ background: "#FF5722", color: "#FFFFFF" }}
-                >
+                <span className="artist-nav-badge" aria-label={`${pendingBookingsList.length} pending requests`}>
                   {pendingBookingsList.length}
                 </span>
               )}
             </button>
 
-            {/* 6. Booking Calendar */}
+            {/* 5. Booking Calendar */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "calendar" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "calendar" ? "active" : ""}`}
               onClick={() => switchTab("calendar")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                <line x1="16" y1="2" x2="16" y2="6" />
-                <line x1="8" y1="2" x2="8" y2="6" />
-                <line x1="3" y1="10" x2="21" y2="10" />
-              </svg>
-              <span>Booking Calendar</span>
+              <CalendarDays className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Booking Calendar</span>
             </button>
 
-            {/* 7. Accepted Bookings */}
+            {/* 6. My Bookings */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "accepted" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "accepted" ? "active" : ""}`}
               onClick={() => switchTab("accepted")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <span>Accepted Bookings</span>
-              {acceptedBookingsList.length > 0 && (
-                <span className="cd-sidebar-badge">
-                  {acceptedBookingsList.length}
-                </span>
-              )}
+              <TicketCheck className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">My Bookings</span>
             </button>
 
-            {/* 8. Payment & Earnings */}
+            {/* 7. Availability */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "earnings" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "availability" ? "active" : ""}`}
+              onClick={() => switchTab("availability")}
+            >
+              <CalendarCheck className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Availability</span>
+            </button>
+
+            {/* 8. Payments & Earnings */}
+            <button
+              type="button"
+              className={`artist-nav-item ${activeTab === "earnings" ? "active" : ""}`}
               onClick={() => switchTab("earnings")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-                <line x1="1" y1="10" x2="23" y2="10" />
-              </svg>
-              <span>Payment & Earnings</span>
+              <Wallet className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Payments & Earnings</span>
             </button>
 
             {/* 9. Reviews & Ratings */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "reviews" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "reviews" ? "active" : ""}`}
               onClick={() => switchTab("reviews")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-              </svg>
-              <span>Reviews & Ratings</span>
-              {reviews.length > 0 && (
-                <span className="cd-sidebar-badge">{reviews.length}</span>
-              )}
+              <Star className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Reviews & Ratings</span>
             </button>
 
-            <div className="cd-sidebar-divider" />
+            {/* Spacing gap before secondary sections */}
+            <div className="artist-sidebar-spacer" />
 
-            {/* 10. Availability Management */}
+            {/* 10. Notifications */}
             <button
               type="button"
-              className={`cd-sidebar-item ${activeTab === "availability" ? "active" : ""}`}
-              onClick={() => switchTab("availability")}
-            >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              <span>Availability</span>
-            </button>
-
-            {/* 11. Artist Notifications */}
-            <button
-              type="button"
-              className={`cd-sidebar-item ${activeTab === "notifications" ? "active" : ""}`}
+              className={`artist-nav-item ${activeTab === "notifications" ? "active" : ""}`}
               onClick={() => switchTab("notifications")}
             >
-              <svg
-                className="cd-sidebar-icon"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-              </svg>
-              <span>Notifications</span>
+              <Bell className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Notifications</span>
               {unreadNotifsCount > 0 && (
-                <span
-                  className="cd-sidebar-badge"
-                  style={{ background: "#FF5722", color: "#FFFFFF" }}
-                >
+                <span className="artist-nav-badge" aria-label={`${unreadNotifsCount} unread notifications`}>
                   {unreadNotifsCount}
                 </span>
               )}
             </button>
-          </nav>
 
-          <div className="cd-sidebar-footer">
+            {/* 11. Help & Support */}
             <button
               type="button"
-              className="cd-sidebar-logout"
-              onClick={onLogout}
+              className={`artist-nav-item ${activeTab === "support" ? "active" : ""}`}
+              onClick={() => switchTab("support")}
             >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-              <span>Sign Out</span>
+              <Headset className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Help & Support</span>
+            </button>
+
+            {/* 12. Settings */}
+            <button
+              type="button"
+              className={`artist-nav-item ${activeTab === "settings" || activeTab === "edit-profile" ? "active" : ""}`}
+              onClick={() => switchTab("settings")}
+            >
+              <Settings className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Settings</span>
+            </button>
+          </nav>
+
+          {/* 13. Sign Out (fixed at the bottom) */}
+          <div className="artist-sidebar-footer">
+            <button
+              type="button"
+              className="artist-nav-logout"
+              onClick={onLogout}
+              aria-label="Sign Out"
+            >
+              <LogOut className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Sign Out</span>
             </button>
           </div>
         </aside>
@@ -1131,572 +1184,452 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             RIGHT FLUID CONTENT AREA
             ===================================================================== */}
         <main className="cd-main-panel" id="main-content">
-          {/* Top Bar with actions / verification badge */}
-          <div className="cd-content-topbar">
-            <div className="cd-topbar-actions">
-              <span
-                className={`cd-topbar-badge ${artist.is_verified ? "" : "pending"}`}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+          {/* Top Bar with actions / verification badge on secondary tabs */}
+          {activeTab !== "dashboard" && (
+            <div className="cd-content-topbar">
+              <div className="cd-topbar-actions">
+                <span
+                  className={`cd-topbar-badge ${artist.is_verified ? "" : "pending"}`}
                 >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                {artist.is_verified
-                  ? "Verified Performing Artist"
-                  : "Verification Under Review"}
-              </span>
+                  <Check size={13} strokeWidth={3} />
+                  {artist.is_verified
+                    ? "Verified Performing Artist"
+                    : "Verification Under Review"}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* =================================================================
               TAB 1: ARTIST DASHBOARD OVERVIEW
               ================================================================= */}
           {activeTab === "dashboard" && (
-            <div className="cd-view-container" style={{ gap: "24px" }}>
-              {/* Statistics Grid - 6 Key Metrics in Canonical Grid */}
-              <div className="cd-overview-stats-grid artist-grid">
+            <div className="artist-dash-view">
+              {/* Dashboard Header */}
+              <div className="artist-dash-header">
+                <div>
+                  <h1 className="artist-dash-welcome">
+                    Welcome back, {artist.stage_name || user?.username || "Artist"}
+                  </h1>
+                  <p className="artist-dash-subtext">
+                    Here's a quick overview of your bookings and earnings.
+                  </p>
+                </div>
+                {artist.is_verified ? (
+                  <span className="artist-verified-pill">
+                    <Check size={14} strokeWidth={2.5} />
+                    Verified Performing Artist
+                  </span>
+                ) : (
+                  <span className="artist-pending-pill">
+                    Verification Under Review
+                  </span>
+                )}
+              </div>
+
+              {/* Statistics Cards (4 Cards Grid) */}
+              <div className="artist-dash-stats-grid">
                 <div
-                  className="cd-stat-box"
+                  className="artist-dash-stat-card"
                   onClick={() => switchTab("requests")}
                 >
-                  <div className="cd-stat-lbl">Total Requests</div>
-                  <div className="cd-stat-num">{stats.total_bookings ?? 0}</div>
-                  <div className="cd-stat-sub">All-time received</div>
+                  <div className="artist-stat-label">Total Requests</div>
+                  <div className="artist-stat-value">
+                    {stats.total_bookings ?? 0}
+                  </div>
                 </div>
 
                 <div
-                  className="cd-stat-box accent-pending"
+                  className="artist-dash-stat-card card-pending"
                   onClick={() => {
                     setRequestFilter("pending");
                     switchTab("requests");
                   }}
                 >
-                  <div className="cd-stat-lbl" style={{ color: "#FF9800" }}>
+                  <div className="artist-stat-label text-pending">
                     Pending Requests
                   </div>
-                  <div className="cd-stat-num pending">
+                  <div className="artist-stat-value text-pending">
                     {stats.pending_requests ?? 0}
                   </div>
-                  <div className="cd-stat-sub">Action required</div>
                 </div>
 
                 <div
-                  className="cd-stat-box"
+                  className="artist-dash-stat-card"
                   onClick={() => switchTab("accepted")}
                 >
-                  <div className="cd-stat-lbl">Accepted Bookings</div>
-                  <div className="cd-stat-num confirmed">
+                  <div className="artist-stat-label">Confirmed Bookings</div>
+                  <div className="artist-stat-value">
                     {stats.accepted_bookings ?? 0}
                   </div>
-                  <div className="cd-stat-sub">Confirmed shows</div>
                 </div>
 
                 <div
-                  className="cd-stat-box"
-                  onClick={() => switchTab("calendar")}
-                >
-                  <div className="cd-stat-lbl">Completed</div>
-                  <div className="cd-stat-num">
-                    {stats.completed_performances ?? 0}
-                  </div>
-                  <div className="cd-stat-sub">Delivered on stage</div>
-                </div>
-
-                <div
-                  className="cd-stat-box accent-earnings"
+                  className="artist-dash-stat-card card-earnings"
                   onClick={() => switchTab("earnings")}
                 >
-                  <div className="cd-stat-lbl" style={{ color: "#4CAF50" }}>
-                    Total Earnings
-                  </div>
-                  <div className="cd-stat-num payments">
+                  <div className="artist-stat-label">Total Earnings</div>
+                  <div className="artist-stat-value text-earnings">
                     ₹{stats.total_earnings ?? "0.00"}
                   </div>
-                  <div className="cd-stat-sub">Completed & secured</div>
-                </div>
-
-                <div
-                  className="cd-stat-box"
-                  onClick={() => switchTab("calendar")}
-                >
-                  <div className="cd-stat-lbl">Upcoming Shows</div>
-                  <div className="cd-stat-num">
-                    {stats.upcoming_performances ?? 0}
-                  </div>
-                  <div className="cd-stat-sub">Scheduled on calendar</div>
                 </div>
               </div>
 
-              {/* Section 1: Booking Overview (Recent Booking Requests) */}
-              <div className="cd-profile-card">
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "18px",
-                  }}
-                >
-                  <h2 className="cd-card-title" style={{ margin: 0 }}>
-                    Booking Overview
-                  </h2>
-                  <button
-                    type="button"
-                    className="cd-btn-secondary cd-btn-sm"
-                    onClick={() => switchTab("requests")}
-                  >
-                    View All Requests ({bookings.length})
-                  </button>
-                </div>
-
-                {bookings.length === 0 ? (
-                  <div className="cd-empty-card">
-                    <h3>No Booking Requests Yet</h3>
-                    <p>
-                      Incoming inquiries for your live performances will appear
-                      here as soon as event hosts book you.
-                    </p>
+              {/* 2-Column Row 1: Next Performance & Pending Requests */}
+              <div className="artist-dash-2col-grid">
+                {/* Section A: Next Performance */}
+                <div className="artist-dash-card">
+                  <div className="artist-dash-card-header">
+                    <h2 className="artist-dash-card-title">Next Performance</h2>
                   </div>
-                ) : (
-                  <div className="cd-bookings-list">
-                    {bookings.slice(0, 4).map((b) => (
-                      <div key={b.id} className="cd-booking-row-card">
-                        <div className="cd-booking-id-block">
-                          <span className="cd-booking-code">#BK-{b.id}</span>
-                          <span className="cd-booking-artist-sub">
-                            {b.event_type} · Host: {b.customer_name}
-                          </span>
-                        </div>
 
-                        <div className="cd-booking-date-block">
-                          <span className="cd-booking-date-text">
-                            {b.event_date || "Date TBD"}
-                          </span>
-                          <span className="cd-booking-location-text">
-                            {b.event_location}
-                          </span>
-                        </div>
+                  {nextPerformance ? (
+                    <div
+                      className="artist-next-perf-row"
+                      onClick={() => {
+                        setSelectedBooking(nextPerformance);
+                        switchTab("booking-detail");
+                      }}
+                    >
+                      <div className="artist-perf-date-box">
+                        <span className="artist-perf-day">{nextPerfDay}</span>
+                        <span className="artist-perf-month">
+                          {nextPerfMonth}
+                        </span>
+                      </div>
 
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            gap: "2px",
-                          }}
-                        >
-                          <span className={`cd-status-pill status-${b.status}`}>
-                            {formatBookingStatus(b.status)}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "0.72rem",
-                              color: "#A0A0A0",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.04em",
-                              marginTop: "2px",
-                            }}
-                          >
-                            {b.status === "pending" ? "Offered Price" : "Agreed Fee"}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "1.05rem",
-                              fontWeight: 800,
-                              color: "#FF5722",
-                            }}
-                          >
-                            ₹{b.status === "pending" && b.customer_budget
-                              ? formatPrice(b.customer_budget)
-                              : formatPrice(b.agreed_price)}
-                          </span>
+                      <div className="artist-perf-info">
+                        <h3 className="artist-perf-name">
+                          {nextPerformance.event_type}
+                        </h3>
+                        <div className="artist-perf-location">
+                          {nextPerformance.event_location ||
+                            nextPerformance.city ||
+                            "Location TBD"}
                         </div>
-
-                        <div className="cd-booking-actions-block">
-                          <button
-                            type="button"
-                            className="cd-btn-secondary cd-btn-sm"
-                            onClick={() => {
-                              setSelectedBooking(b);
-                              switchTab("booking-detail");
-                            }}
-                          >
-                            Details
-                          </button>
-                          {b.status === "pending" && (
-                            <button
-                              type="button"
-                              className="cd-btn-primary cd-btn-sm"
-                              onClick={() => openRespondModal("accept", b)}
-                            >
-                              Respond
-                            </button>
-                          )}
+                        <div className="artist-perf-datetime">
+                          {nextPerfFormattedDate}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {/* Section 2: Upcoming Performances */}
-              <div className="cd-profile-card">
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "16px",
-                  }}
-                >
-                  <h2 className="cd-card-title" style={{ margin: 0 }}>
-                    Upcoming Performances
-                  </h2>
-                  <button
-                    type="button"
-                    className="cd-btn-secondary cd-btn-sm"
-                    onClick={() => switchTab("calendar")}
-                  >
-                    Open Calendar Schedule
-                  </button>
-                </div>
-
-                {upcomingPerformances.length === 0 ? (
-                  <div className="cd-empty-state">
-                    <p className="cd-empty-title">
-                      No Upcoming Confirmed Events
-                    </p>
-                    <p className="cd-empty-text">
-                      Accepted bookings scheduled for upcoming dates will appear
-                      here.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="cd-timeline">
-                    {upcomingPerformances.slice(0, 3).map((perf) => (
-                      <div key={perf.id} className="cd-timeline-item">
-                        <div className="cd-timeline-date-box">
-                          <div className="cd-timeline-date-day">
-                            {perf.event_date
-                              ? new Date(
-                                  perf.event_date_iso || perf.event_date,
-                                ).getDate()
-                              : "--"}
-                          </div>
-                          <div className="cd-timeline-date-sub">
-                            {perf.event_date
-                              ? new Date(
-                                  perf.event_date_iso || perf.event_date,
-                                ).toLocaleString("default", { month: "short" })
-                              : "DATE"}
-                          </div>
-                        </div>
-
-                        <div className="cd-timeline-info">
-                          <h3 className="cd-timeline-title">
-                            {perf.event_type}
-                          </h3>
-                          <div className="cd-timeline-sub">
-                            Host: {perf.customer_name} · {perf.event_location} ·
-                            Time: {perf.event_date}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "0.86rem",
-                              color: "#FF5722",
-                              fontWeight: 600,
-                              marginTop: "2px",
-                            }}
-                          >
-                            Agreed Fee: ₹{perf.agreed_price}
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", gap: "8px" }}>
-                          <button
-                            type="button"
-                            className="cd-btn-secondary cd-btn-sm"
-                            onClick={() => {
-                              setSelectedBooking(perf);
-                              switchTab("booking-detail");
-                            }}
-                          >
-                            Details
-                          </button>
-                          <button
-                            type="button"
-                            className="cd-btn-primary cd-btn-sm"
-                            onClick={() => handleCompleteBooking(perf.id)}
-                          >
-                            Mark Completed
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Grid: Recent Activity & Earnings Overview */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-                  gap: "20px",
-                }}
-              >
-                {/* Section 3: Recent Activity */}
-                <div className="cd-profile-card">
-                  <h2
-                    className="cd-card-title"
-                    style={{ marginBottom: "14px" }}
-                  >
-                    Recent Activity
-                  </h2>
-                  {recentActivity.length === 0 ? (
-                    <p style={{ color: "#888888", fontSize: "0.92rem" }}>
-                      No recent activity records.
-                    </p>
+                      <span className="artist-status-confirmed">Confirmed</span>
+                    </div>
                   ) : (
-                    <div className="cd-activity-feed">
-                      {recentActivity.slice(0, 6).map((act) => (
-                        <div key={act.id} className="cd-activity-item">
-                          <div className="cd-activity-dot" />
-                          <div className="cd-activity-content">
-                            <div className="cd-activity-title">{act.title}</div>
-                            <div className="cd-activity-desc">
-                              {act.description}
-                            </div>
-                            <div className="cd-activity-time">
-                              {act.formatted_time}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="artist-dash-empty">
+                      <p className="artist-dash-empty-title">
+                        No upcoming performances scheduled
+                      </p>
+                      <p className="artist-dash-empty-sub">
+                        Confirmed bookings will appear here.
+                      </p>
                     </div>
                   )}
                 </div>
 
-                {/* Section 4: Earnings Overview */}
-                <div className="cd-profile-card">
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <h2 className="cd-card-title" style={{ margin: 0 }}>
-                      Earnings Overview
-                    </h2>
+                {/* Section B: Pending Requests */}
+                <div className="artist-dash-card">
+                  <div className="artist-dash-card-header">
+                    <h2 className="artist-dash-card-title">Pending Requests</h2>
                     <button
                       type="button"
-                      className="cd-btn-secondary cd-btn-sm"
+                      className="artist-dash-card-btn"
+                      onClick={() => {
+                        setRequestFilter("pending");
+                        switchTab("requests");
+                      }}
+                    >
+                      View All
+                    </button>
+                  </div>
+
+                  {pendingBookingsList.length > 0 ? (
+                    <div className="artist-pending-list">
+                      {pendingBookingsList.slice(0, 2).map((req) => (
+                        <div
+                          key={req.id}
+                          className="artist-pending-item"
+                          onClick={() => {
+                            setSelectedBooking(req);
+                            switchTab("booking-detail");
+                          }}
+                        >
+                          <div className="artist-pending-info">
+                            <div className="artist-pending-host">
+                              {req.customer_name}
+                            </div>
+                            <div className="artist-pending-event">
+                              {req.event_type} · {req.event_date || "Date TBD"}
+                            </div>
+                          </div>
+                          <div className="artist-pending-price">
+                            ₹
+                            {formatPrice(
+                              req.customer_budget || req.agreed_price,
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="artist-dash-empty">
+                      <p className="artist-dash-empty-title">
+                        No pending requests
+                      </p>
+                      <p className="artist-dash-empty-sub">
+                        New requests will appear here.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 2-Column Row 2: Upcoming Schedule & Earnings Overview */}
+              <div className="artist-dash-2col-grid">
+                {/* Section C: Upcoming Schedule */}
+                <div className="artist-dash-card">
+                  <div className="artist-dash-card-header">
+                    <h2 className="artist-dash-card-title">Upcoming Schedule</h2>
+                    <button
+                      type="button"
+                      className="artist-dash-card-btn"
+                      onClick={() => switchTab("calendar")}
+                    >
+                      View Calendar
+                    </button>
+                  </div>
+
+                  <div className="artist-sched-split">
+                    {/* Compact Monthly Calendar */}
+                    <div className="artist-mini-calendar">
+                      <div className="artist-cal-nav">
+                        <button
+                          type="button"
+                          className="artist-cal-arrow-btn"
+                          onClick={handlePrevScheduleMonth}
+                          aria-label="Previous Month"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <span className="artist-cal-month-title">
+                          {calMonthLabel}
+                        </span>
+                        <button
+                          type="button"
+                          className="artist-cal-arrow-btn"
+                          onClick={handleNextScheduleMonth}
+                          aria-label="Next Month"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+
+                      <div className="artist-cal-grid">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                          (d) => (
+                            <span key={d} className="artist-cal-day-hdr">
+                              {d}
+                            </span>
+                          ),
+                        )}
+
+                        {blankDays.map((_, i) => (
+                          <span key={`blank-${i}`} />
+                        ))}
+
+                        {daysInMonth.map((day) => {
+                          const yyyy = calYear;
+                          const mm = String(calMonth + 1).padStart(2, "0");
+                          const dd = String(day).padStart(2, "0");
+                          const fullDateStr = `${yyyy}-${mm}-${dd}`;
+                          const isBooked = hasBookingOnDay(day);
+                          const isSelected =
+                            selectedScheduleDate === fullDateStr;
+
+                          return (
+                            <button
+                              key={`day-${day}`}
+                              type="button"
+                              className={`artist-cal-day-cell ${
+                                isBooked ? "has-booking" : ""
+                              } ${isSelected ? "is-selected" : ""}`}
+                              onClick={() =>
+                                setSelectedScheduleDate(fullDateStr)
+                              }
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Events Panel for Selected Date */}
+                    <div className="artist-sched-events-panel">
+                      <div className="artist-sched-events-title">
+                        {selectedDateLabel}
+                      </div>
+
+                      {eventsForSelectedDate.length > 0 ? (
+                        eventsForSelectedDate.map((ev) => (
+                          <div
+                            key={ev.id}
+                            className="artist-sched-event-card"
+                            onClick={() => {
+                              setSelectedBooking(ev);
+                              switchTab("booking-detail");
+                            }}
+                          >
+                            <div>
+                              <div className="artist-sched-event-title">
+                                {ev.event_type}
+                              </div>
+                              <div className="artist-sched-event-sub">
+                                {(() => {
+                                  const rawD =
+                                    ev.event_date_iso || ev.event_date;
+                                  const d = rawD ? new Date(rawD) : null;
+                                  const timeStr =
+                                    d && !isNaN(d.getTime())
+                                      ? d.toLocaleTimeString("en-US", {
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })
+                                      : "";
+                                  const loc =
+                                    ev.event_location || ev.city || "";
+                                  return [timeStr, loc]
+                                    .filter(Boolean)
+                                    .join(" • ");
+                                })()}
+                              </div>
+                            </div>
+                            <span className="artist-status-confirmed">
+                              Confirmed
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div
+                          className="artist-dash-empty"
+                          style={{ minHeight: "80px" }}
+                        >
+                          <p className="artist-dash-empty-sub">
+                            No events scheduled
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section D: Earnings Overview */}
+                <div className="artist-dash-card">
+                  <div className="artist-dash-card-header">
+                    <h2 className="artist-dash-card-title">Earnings Overview</h2>
+                    <button
+                      type="button"
+                      className="artist-dash-card-btn"
                       onClick={() => switchTab("earnings")}
                     >
                       Full Statement
                     </button>
                   </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "14px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        background: "#191919",
-                        padding: "16px",
-                        borderRadius: "6px",
-                        border: "1px solid rgba(255,255,255,0.06)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "0.82rem",
-                          color: "#A0A0A0",
-                          textTransform: "uppercase",
-                        }}
-                      >
+                  <div className="artist-earnings-body">
+                    <div className="artist-earnings-row">
+                      <span className="artist-earnings-label">
                         Completed Earnings
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "1.6rem",
-                          fontWeight: 800,
-                          color: "#4CAF50",
-                          margin: "4px 0 2px",
-                        }}
-                      >
+                      </span>
+                      <span className="artist-earnings-val">
                         ₹{stats.completed_earnings ?? "0.00"}
-                      </div>
-                      <div style={{ fontSize: "0.8rem", color: "#727272" }}>
-                        Credited from delivered performances
-                      </div>
+                      </span>
                     </div>
 
-                    <div
-                      style={{
-                        background: "#191919",
-                        padding: "16px",
-                        borderRadius: "6px",
-                        border: "1px solid rgba(255,255,255,0.06)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "0.82rem",
-                          color: "#A0A0A0",
-                          textTransform: "uppercase",
-                        }}
-                      >
+                    <div className="artist-earnings-row">
+                      <span className="artist-earnings-label">
                         Pending Earnings
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "1.6rem",
-                          fontWeight: 800,
-                          color: "#FF9800",
-                          margin: "4px 0 2px",
-                        }}
-                      >
+                      </span>
+                      <span className="artist-earnings-val val-orange">
                         ₹{stats.pending_earnings ?? "0.00"}
-                      </div>
-                      <div style={{ fontSize: "0.8rem", color: "#727272" }}>
-                        In escrow / scheduled for confirmed bookings
-                      </div>
+                      </span>
                     </div>
 
-                    {payments.length > 0 && (
-                      <div>
+                    <div className="artist-earnings-divider" />
+
+                    <div>
+                      <div className="artist-payout-header">Recent Payout</div>
+                      {recentPayout ? (
                         <div
-                          style={{
-                            fontSize: "0.84rem",
-                            color: "#888888",
-                            marginBottom: "8px",
-                          }}
+                          className="artist-earnings-row"
+                          style={{ marginTop: "6px" }}
                         >
-                          Recent Payouts:
-                        </div>
-                        {payments.slice(0, 3).map((p) => (
-                          <div
-                            key={p.id}
+                          <span
+                            style={{ fontSize: "0.9rem", color: "#FFFFFF" }}
+                          >
+                            {recentPayout.customer_name}
+                          </span>
+                          <span
                             style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              padding: "8px 0",
-                              borderBottom: "1px solid rgba(255,255,255,0.05)",
-                              fontSize: "0.88rem",
+                              fontSize: "0.95rem",
+                              fontWeight: 700,
+                              color: "#FFFFFF",
                             }}
                           >
-                            <span>{p.customer_name}</span>
-                            <strong
-                              style={{
-                                color:
-                                  p.status === "success"
-                                    ? "#4CAF50"
-                                    : "#FF9800",
-                              }}
-                            >
-                              ₹{p.amount}
-                            </strong>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                            ₹{recentPayout.amount}
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          className="artist-payout-empty"
+                          style={{ marginTop: "6px" }}
+                        >
+                          No payout records yet.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Section 5: Recent Notifications */}
-              <div className="cd-profile-card">
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "14px",
-                  }}
-                >
-                  <h2 className="cd-card-title" style={{ margin: 0 }}>
-                    Recent Notifications
-                  </h2>
+              {/* Full-Width Row 3: Recent Activity */}
+              <div className="artist-dash-card">
+                <div className="artist-dash-card-header">
+                  <h2 className="artist-dash-card-title">Recent Activity</h2>
                   <button
                     type="button"
-                    className="cd-btn-secondary cd-btn-sm"
+                    className="artist-dash-card-btn"
                     onClick={() => switchTab("notifications")}
                   >
-                    All Notifications ({unreadNotifsCount} unread)
+                    View All
                   </button>
                 </div>
 
-                {notifications.length === 0 ? (
-                  <p style={{ color: "#888888", fontSize: "0.92rem" }}>
-                    No notifications received yet.
-                  </p>
-                ) : (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "10px",
-                    }}
-                  >
-                    {notifications.slice(0, 4).map((n) => (
-                      <div
-                        key={n.id}
-                        style={{
-                          padding: "12px 14px",
-                          background: n.is_read
-                            ? "#1E1E1E"
-                            : "rgba(255, 87, 34, 0.08)",
-                          borderLeft: n.is_read
-                            ? "3px solid transparent"
-                            : "3px solid #FF5722",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                          }}
-                        >
-                          <strong
-                            style={{ fontSize: "0.96rem", color: "#F7F7F7" }}
-                          >
-                            {n.title}
-                          </strong>
+                {recentActivity && recentActivity.length > 0 ? (
+                  <div className="artist-activity-list">
+                    {recentActivity.slice(0, 5).map((act) => {
+                      const badge = getActivityBadgeInfo(act);
+                      return (
+                        <div key={act.id} className="artist-activity-row">
                           <span
-                            style={{ fontSize: "0.78rem", color: "#888888" }}
+                            className={`artist-activity-badge ${badge.badgeClass}`}
                           >
-                            {n.created_at}
+                            {badge.label}
+                          </span>
+                          <span className="artist-activity-desc">
+                            {act.description}
+                          </span>
+                          <span className="artist-activity-time">
+                            {act.formatted_time}
                           </span>
                         </div>
-                        <p
-                          style={{
-                            margin: "4px 0 0",
-                            fontSize: "0.88rem",
-                            color: "#CCCCCC",
-                            lineHeight: 1.4,
-                          }}
-                        >
-                          {n.message}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="artist-dash-empty">
+                    <p className="artist-dash-empty-sub">
+                      No recent activity recorded.
+                    </p>
                   </div>
                 )}
               </div>
@@ -2026,12 +1959,12 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           )}
 
           {/* =================================================================
-              TAB 3: EDIT ARTIST PROFILE PAGE
+              TAB 12: ARTIST SETTINGS & PROFILE PAGE
               ================================================================= */}
-          {activeTab === "edit-profile" && (
+          {(activeTab === "settings" || activeTab === "edit-profile") && (
             <div className="cd-form-card">
               <div className="cd-form-header">
-                <h2 className="cd-form-title">Edit Artist Profile</h2>
+                <h2 className="cd-form-title">Artist Settings & Profile</h2>
                 <p className="cd-form-subtext">
                   Update your stage credentials, category, rates, and biography
                 </p>
@@ -3949,6 +3882,106 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* =================================================================
+              TAB 11: ARTIST HELP & SUPPORT PAGE
+              ================================================================= */}
+          {activeTab === "support" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+              <div className="cd-form-card">
+                <div className="cd-form-header">
+                  <h2 className="cd-form-title">Artist Help & Support</h2>
+                  <p className="cd-form-subtext">
+                    Have questions about bookings, payments, or your artist profile? Submit an inquiry and our support team will respond promptly.
+                  </p>
+                </div>
+
+                {supportSuccessMsg && (
+                  <div className="cd-alert-success" role="status" style={{ marginBottom: "16px" }}>
+                    {supportSuccessMsg}
+                  </div>
+                )}
+                {supportErrorMsg && (
+                  <div className="cd-alert-error" role="alert" style={{ marginBottom: "16px" }}>
+                    {supportErrorMsg}
+                  </div>
+                )}
+
+                <form onSubmit={handleSupportSubmit} className="cd-form">
+                  <div className="cd-form-group">
+                    <label className="cd-label" htmlFor="support_subject">
+                      Inquiry Subject *
+                    </label>
+                    <input
+                      id="support_subject"
+                      type="text"
+                      className="cd-input"
+                      placeholder="e.g. Question about booking payout, cancellation, or schedule"
+                      value={supportForm.subject}
+                      onChange={(e) =>
+                        setSupportForm((p) => ({ ...p, subject: e.target.value }))
+                      }
+                      required
+                    />
+                  </div>
+
+                  <div className="cd-form-group">
+                    <label className="cd-label" htmlFor="support_message">
+                      Message Details *
+                    </label>
+                    <textarea
+                      id="support_message"
+                      rows={5}
+                      className="cd-textarea"
+                      placeholder="Describe your inquiry with relevant details such as booking reference or dates..."
+                      value={supportForm.message}
+                      onChange={(e) =>
+                        setSupportForm((p) => ({ ...p, message: e.target.value }))
+                      }
+                      required
+                    />
+                  </div>
+
+                  <div className="cd-form-actions">
+                    <button
+                      type="submit"
+                      className="cd-btn-primary cd-btn-sm"
+                      disabled={supportSending}
+                    >
+                      {supportSending ? "Submitting..." : "Submit Support Request"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Quick Help & FAQs Card */}
+              <div className="cd-profile-card">
+                <h3 className="cd-card-title" style={{ marginBottom: "14px" }}>
+                  Frequently Asked Questions
+                </h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <div style={{ background: "rgba(255, 255, 255, 0.03)", padding: "14px 16px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+                    <strong style={{ color: "#F7F7F7", fontSize: "0.95rem" }}>When do I receive booking payouts?</strong>
+                    <p style={{ margin: "6px 0 0", color: "#AAAAAA", fontSize: "0.88rem", lineHeight: 1.5 }}>
+                      Payouts are released directly after the event date and completion verification by the host. Check the Payments & Earnings tab for real-time history and payout receipts.
+                    </p>
+                  </div>
+                  <div style={{ background: "rgba(255, 255, 255, 0.03)", padding: "14px 16px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+                    <strong style={{ color: "#F7F7F7", fontSize: "0.95rem" }}>How do I block unavailable dates?</strong>
+                    <p style={{ margin: "6px 0 0", color: "#AAAAAA", fontSize: "0.88rem", lineHeight: 1.5 }}>
+                      Navigate to Availability tab (CalendarCheck icon) to mark specific dates as unavailable for bookings so clients cannot inquire for those days.
+                    </p>
+                  </div>
+                  <div style={{ background: "rgba(255, 255, 255, 0.03)", padding: "14px 16px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
+                    <strong style={{ color: "#F7F7F7", fontSize: "0.95rem" }}>What happens if I cancel a confirmed booking?</strong>
+                    <p style={{ margin: "6px 0 0", color: "#AAAAAA", fontSize: "0.88rem", lineHeight: 1.5 }}>
+                      Under TalentHire's Artist Cancellation Policy, cancelling an accepted booking releases your calendar date and immediately issues a full 100% refund to the client.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}

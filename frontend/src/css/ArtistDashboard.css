@@ -1,0 +1,957 @@
+/* ==========================================================================
+   TalentHire Artist Dashboard: Dark Theme Styling
+   Clean, minimal, professional dark aesthetic matching reference UI
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Left Sidebar Navigation
+   -------------------------------------------------------------------------- */
+.artist-sidebar {
+  width: 250px;
+  min-width: 250px;
+  flex-shrink: 0;
+  background: #141414;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 14px;
+  box-sizing: border-box;
+  position: sticky;
+  top: var(--navbar-height, 68px);
+  height: calc(100vh - var(--navbar-height, 68px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  z-index: 100;
+}
+
+.artist-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.artist-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+/* Category / Studio Header */
+.artist-sidebar-header-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #727272;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.artist-sidebar-chevron {
+  color: #727272;
+  font-size: 0.82rem;
+}
+
+/* Artist mini profile summary card */
+.artist-sidebar-user-mini {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.artist-sidebar-user-mini:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 87, 34, 0.35);
+}
+
+.artist-sidebar-user-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #D9461A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(255, 87, 34, 0.35);
+}
+
+.artist-sidebar-user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.artist-sidebar-user-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.artist-sidebar-user-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.artist-sidebar-user-role {
+  font-size: 0.78rem;
+  color: #8E8E93;
+  margin-top: 2px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Navigation items container */
+.artist-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Individual Navigation Item (Icon + Text Label) */
+.artist-nav-item {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #9E9E9E;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 9px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  box-sizing: border-box;
+}
+
+.artist-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Active Navigation Item - Rounded outline with subtle warm fill matching reference UI */
+.artist-nav-item.active {
+  background: rgba(255, 87, 34, 0.12);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 87, 34, 0.45);
+  font-weight: 600;
+}
+
+.artist-nav-item.active .artist-nav-icon {
+  color: #FF5722;
+}
+
+.artist-sidebar-spacer {
+  height: 14px;
+}
+
+.artist-nav-icon {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  color: #8E8E93;
+  transition: color 0.18s ease;
+}
+
+.artist-nav-item:hover .artist-nav-icon {
+  color: #FFFFFF;
+}
+
+.artist-nav-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.artist-nav-badge {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #FF5722;
+  color: #FFFFFF;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+/* Sidebar Footer (Sign Out) */
+.artist-sidebar-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.artist-nav-logout {
+  width: 100%;
+  background: transparent;
+  border: 1px solid rgba(239, 83, 80, 0.25);
+  color: #EF5350;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.artist-nav-logout .artist-nav-icon {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  color: #EF5350;
+}
+
+.artist-nav-logout:hover {
+  background: rgba(239, 83, 80, 0.12);
+  border-color: rgba(239, 83, 80, 0.55);
+  color: #FF6B6B;
+}
+
+.artist-nav-logout:hover .artist-nav-icon {
+  color: #FF6B6B;
+}
+
+/* --------------------------------------------------------------------------
+   2. Main Dashboard Panel & Header
+   -------------------------------------------------------------------------- */
+.artist-dash-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+.artist-dash-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2px;
+}
+
+.artist-dash-welcome {
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.02em;
+}
+
+.artist-dash-subtext {
+  font-size: 0.92rem;
+  color: #8E8E93;
+  margin: 0;
+}
+
+.artist-verified-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: #4ADE80;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.artist-pending-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  color: #FF9800;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   3. Statistics Cards (4 Cards Grid)
+   -------------------------------------------------------------------------- */
+.artist-dash-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.artist-dash-stat-card {
+  background: #161616;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 20px 22px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.artist-dash-stat-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.artist-stat-label {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #9E9E9E;
+  margin-bottom: 12px;
+}
+
+.artist-stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1.1;
+}
+
+/* Card 2: Pending Requests */
+.artist-dash-stat-card.card-pending {
+  border-color: rgba(255, 152, 0, 0.4);
+  background: rgba(255, 152, 0, 0.02);
+}
+
+.artist-stat-label.text-pending {
+  color: #FF9800;
+}
+
+.artist-stat-value.text-pending {
+  color: #FF9800;
+}
+
+/* Card 4: Total Earnings */
+.artist-dash-stat-card.card-earnings {
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(34, 197, 94, 0.02);
+}
+
+.artist-stat-value.text-earnings {
+  color: #4ADE80;
+}
+
+/* --------------------------------------------------------------------------
+   4. Section Cards (Common Styling & Two-Column Grid)
+   -------------------------------------------------------------------------- */
+.artist-dash-2col-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.artist-dash-card {
+  background: #161616;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.artist-dash-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.artist-dash-card-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.artist-dash-card-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #E0E0E0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.artist-dash-card-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #FFFFFF;
+}
+
+/* --------------------------------------------------------------------------
+   Section A: Next Performance
+   -------------------------------------------------------------------------- */
+.artist-next-perf-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.artist-next-perf-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.artist-perf-date-box {
+  width: 54px;
+  height: 54px;
+  background: #222222;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.artist-perf-day {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #FF9800;
+  line-height: 1.1;
+}
+
+.artist-perf-month {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #CCCCCC;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.artist-perf-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.artist-perf-name {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 3px 0;
+}
+
+.artist-perf-location {
+  font-size: 0.84rem;
+  color: #8E8E93;
+  margin-bottom: 3px;
+}
+
+.artist-perf-datetime {
+  font-size: 0.8rem;
+  color: #8E8E93;
+}
+
+.artist-status-confirmed {
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ADE80;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+/* Empty State */
+.artist-dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  text-align: center;
+  padding: 16px 0;
+}
+
+.artist-dash-empty-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #FFFFFF;
+  margin: 0 0 4px 0;
+}
+
+.artist-dash-empty-sub {
+  font-size: 0.84rem;
+  color: #8E8E93;
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Section B: Pending Requests List
+   -------------------------------------------------------------------------- */
+.artist-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.artist-pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  gap: 12px;
+}
+
+.artist-pending-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.artist-pending-host {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin-bottom: 2px;
+}
+
+.artist-pending-event {
+  font-size: 0.82rem;
+  color: #8E8E93;
+}
+
+.artist-pending-price {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #FF5722;
+}
+
+/* --------------------------------------------------------------------------
+   Section C: Upcoming Schedule (Calendar + Selected Date Events)
+   -------------------------------------------------------------------------- */
+.artist-sched-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.artist-mini-calendar {
+  display: flex;
+  flex-direction: column;
+}
+
+.artist-cal-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.artist-cal-month-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.artist-cal-arrow-btn {
+  background: transparent;
+  border: none;
+  color: #8E8E93;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.artist-cal-arrow-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
+}
+
+.artist-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  text-align: center;
+}
+
+.artist-cal-day-hdr {
+  font-size: 0.72rem;
+  color: #727272;
+  font-weight: 500;
+  padding: 4px 0;
+}
+
+.artist-cal-day-cell {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  color: #D4D4D4;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.artist-cal-day-cell:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
+}
+
+/* Highlighted date with confirmed booking */
+.artist-cal-day-cell.has-booking {
+  background: #FF5722;
+  color: #FFFFFF;
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(255, 87, 34, 0.45);
+}
+
+.artist-cal-day-cell.is-selected:not(.has-booking) {
+  border-color: #FF5722;
+  color: #FFFFFF;
+}
+
+.artist-sched-events-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.artist-sched-events-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin-bottom: 2px;
+}
+
+.artist-sched-event-card {
+  border-left: 3px solid #FF5722;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 0 8px 8px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.artist-sched-event-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.artist-sched-event-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 4px 0;
+}
+
+.artist-sched-event-sub {
+  font-size: 0.82rem;
+  color: #8E8E93;
+}
+
+/* --------------------------------------------------------------------------
+   Section D: Earnings Overview
+   -------------------------------------------------------------------------- */
+.artist-earnings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.artist-earnings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.artist-earnings-label {
+  font-size: 0.9rem;
+  color: #D4D4D4;
+}
+
+.artist-earnings-val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.artist-earnings-val.val-orange {
+  color: #FF9800;
+}
+
+.artist-earnings-divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  margin: 4px 0 2px 0;
+}
+
+.artist-payout-header {
+  font-size: 0.8rem;
+  color: #8E8E93;
+  margin-bottom: 2px;
+}
+
+.artist-payout-empty {
+  font-size: 0.85rem;
+  color: #727272;
+}
+
+/* --------------------------------------------------------------------------
+   Section E: Recent Activity (Full Width)
+   -------------------------------------------------------------------------- */
+.artist-activity-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.artist-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.artist-activity-row:last-child {
+  border-bottom: none;
+}
+
+.artist-activity-badge {
+  min-width: 135px;
+  text-align: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.artist-activity-badge.badge-green {
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ADE80;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.artist-activity-badge.badge-blue {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60A5FA;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.artist-activity-badge.badge-gray {
+  background: rgba(255, 255, 255, 0.07);
+  color: #E0E0E0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.artist-activity-badge.badge-red {
+  background: rgba(239, 83, 80, 0.12);
+  color: #EF5350;
+  border: 1px solid rgba(239, 83, 80, 0.25);
+}
+
+.artist-activity-desc {
+  flex: 1;
+  font-size: 0.88rem;
+  color: #D4D4D4;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artist-activity-time {
+  font-size: 0.8rem;
+  color: #8E8E93;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive Layout Rules
+   -------------------------------------------------------------------------- */
+@media (max-width: 1080px) {
+  .artist-dash-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .artist-sidebar {
+    position: sticky;
+    top: var(--navbar-height, 68px);
+    z-index: 100;
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: auto;
+    flex-direction: row;
+    align-items: center;
+    padding: 8px 12px;
+    background: #161616;
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 8px;
+  }
+
+  .artist-sidebar-header-label,
+  .artist-sidebar-user-mini {
+    display: none;
+  }
+
+  .artist-sidebar-nav {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 6px;
+    width: auto;
+    flex: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .artist-sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .artist-sidebar-spacer {
+    display: none;
+  }
+
+  .artist-nav-item {
+    width: auto;
+    padding: 7px 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    gap: 8px;
+    font-size: 0.84rem;
+  }
+
+  .artist-sidebar-footer {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+    width: auto;
+    flex-shrink: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    padding-left: 8px;
+  }
+
+  .artist-nav-logout {
+    width: auto;
+    padding: 7px 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    gap: 8px;
+    font-size: 0.84rem;
+  }
+
+  .artist-dash-2col-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-sched-split {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-dash-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .artist-activity-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .artist-activity-desc {
+    white-space: normal;
+  }
+
+  .artist-activity-time {
+    align-self: flex-end;
+  }
+}
+
+@media (max-width: 600px) {
+  .artist-dash-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-next-perf-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .artist-status-confirmed {
+    align-self: flex-start;
+  }
+}
