@@ -5,6 +5,7 @@ import { fetchVerificationQueue, verifyArtistAction } from "../../services/admin
 export default function AdminVerificationsView({ onCountChange }) {
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [rejectModalArtist, setRejectModalArtist] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -13,6 +14,7 @@ export default function AdminVerificationsView({ onCountChange }) {
   useEffect(() => {
     let ignore = false;
     async function load() {
+      setLoadError("");
       try {
         const data = await fetchVerificationQueue();
         if (!ignore) {
@@ -21,6 +23,7 @@ export default function AdminVerificationsView({ onCountChange }) {
         }
       } catch (err) {
         console.error("Error loading verification queue:", err);
+        if (!ignore) setLoadError(err.message || "Failed to load verification queue.");
       } finally {
         if (!ignore) setLoading(false);
       }
@@ -76,6 +79,12 @@ export default function AdminVerificationsView({ onCountChange }) {
       {feedback && (
         <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "20px", fontSize: "0.95rem" }}>
           {feedback}
+        </div>
+      )}
+
+      {loadError && (
+        <div style={{ padding: "10px 16px", background: "rgba(239, 68, 68, 0.15)", color: "var(--admin-status-danger)", borderRadius: "6px", marginBottom: "20px", fontSize: "0.95rem" }}>
+          {loadError}
         </div>
       )}
 

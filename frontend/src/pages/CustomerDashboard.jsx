@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { MapPin, Loader2 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import BookingCalendarPicker from "../components/BookingCalendarPicker";
 import CustomerBookingsDashboard from "../components/booking/CustomerBookingsDashboard";
 import CustomerBookingDetail from "../components/booking/CustomerBookingDetail";
 import CustomerPaymentHistory from "../components/booking/CustomerPaymentHistory";
+import { autocompleteLocations } from "../services/locationService";
 import {
   fetchCustomerDashboard,
   updateCustomerProfile,
@@ -102,6 +104,128 @@ function CustomerDashboard({
   const [artistErrorMsg, setArtistErrorMsg] = useState("");
   const [artistFieldErrors, setArtistFieldErrors] = useState({});
   const artistFileInputRef = useRef(null);
+
+  // Artist Registration Place Autocomplete
+  const [regLocationSuggestions, setRegLocationSuggestions] = useState([]);
+  const [showRegLocationDropdown, setShowRegLocationDropdown] = useState(false);
+  const [regLocationLoading, setRegLocationLoading] = useState(false);
+  const [highlightedRegLocationIdx, setHighlightedRegLocationIdx] = useState(-1);
+  const regLocationContainerRef = useRef(null);
+  const regLocationDebounceTimer = useRef(null);
+  const regLocationReqSeqRef = useRef(0);
+
+  // Close place suggestions dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (
+        regLocationContainerRef.current &&
+        !regLocationContainerRef.current.contains(event.target)
+      ) {
+        setShowRegLocationDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const fetchRegLocationSuggestions = useCallback(async (queryText) => {
+    const clean = (queryText || "").trim();
+    if (clean.length < 2) {
+      setRegLocationSuggestions([]);
+      setShowRegLocationDropdown(false);
+      setRegLocationLoading(false);
+      return;
+    }
+
+    const currentReqId = ++regLocationReqSeqRef.current;
+    setRegLocationLoading(true);
+
+    try {
+      const res = await autocompleteLocations(clean);
+      if (currentReqId !== regLocationReqSeqRef.current) return;
+
+      if (res.suggestions && res.suggestions.length > 0) {
+        setRegLocationSuggestions(res.suggestions);
+        setShowRegLocationDropdown(true);
+        setHighlightedRegLocationIdx(-1);
+      } else {
+        setRegLocationSuggestions([]);
+        setShowRegLocationDropdown(false);
+      }
+    } catch {
+      if (currentReqId === regLocationReqSeqRef.current) {
+        setRegLocationSuggestions([]);
+        setShowRegLocationDropdown(false);
+      }
+    } finally {
+      if (currentReqId === regLocationReqSeqRef.current) {
+        setRegLocationLoading(false);
+      }
+    }
+  }, []);
+
+  function handleRegLocationChange(e) {
+    const value = e.target.value;
+    setArtistForm((prev) => ({ ...prev, location: value }));
+
+    if (artistFieldErrors.location) {
+      setArtistFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.location;
+        return next;
+      });
+    }
+
+    if (regLocationDebounceTimer.current) {
+      clearTimeout(regLocationDebounceTimer.current);
+    }
+
+    regLocationDebounceTimer.current = setTimeout(() => {
+      fetchRegLocationSuggestions(value);
+    }, 320);
+  }
+
+  function handleSelectRegLocation(suggestion) {
+    const formatted =
+      suggestion.formatted_address ||
+      [suggestion.title, suggestion.subtitle].filter(Boolean).join(", ");
+    setArtistForm((prev) => ({ ...prev, location: formatted }));
+    setShowRegLocationDropdown(false);
+    setRegLocationSuggestions([]);
+    if (artistFieldErrors.location) {
+      setArtistFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.location;
+        return next;
+      });
+    }
+  }
+
+  function handleRegLocationKeyDown(e) {
+    if (!showRegLocationDropdown || regLocationSuggestions.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedRegLocationIdx((prev) =>
+        prev < regLocationSuggestions.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedRegLocationIdx((prev) =>
+        prev > 0 ? prev - 1 : regLocationSuggestions.length - 1
+      );
+    } else if (e.key === "Enter") {
+      if (
+        highlightedRegLocationIdx >= 0 &&
+        highlightedRegLocationIdx < regLocationSuggestions.length
+      ) {
+        e.preventDefault();
+        handleSelectRegLocation(regLocationSuggestions[highlightedRegLocationIdx]);
+      }
+    } else if (e.key === "Escape") {
+      setShowRegLocationDropdown(false);
+    }
+  }
 
   // Password Change Form State
   const [passwordForm, setPasswordForm] = useState({
@@ -2268,24 +2392,77 @@ function CustomerDashboard({
                       </div>
 
                       {/* Base Location */}
-                      <div className="cd-form-group">
+                      <div
+                        className="cd-form-group artist-location-wrapper"
+                        ref={regLocationContainerRef}
+                      >
                         <label className="cd-form-label" htmlFor="reg_location">
                           Base City / Region *
                         </label>
-                        <input
-                          id="reg_location"
-                          type="text"
-                          name="location"
-                          className={`cd-form-input ${artistFieldErrors.location ? "cd-input-error" : ""}`}
-                          value={artistForm.location}
-                          onChange={handleArtistFormChange}
-                          placeholder="e.g. Pune, Maharashtra"
-                          required
-                        />
+                        <div className="artist-location-input-box">
+                          <input
+                            id="reg_location"
+                            type="text"
+                            name="location"
+                            className={`cd-form-input ${artistFieldErrors.location ? "cd-input-error" : ""}`}
+                            value={artistForm.location}
+                            onChange={handleRegLocationChange}
+                            onFocus={() => {
+                              if (
+                                regLocationSuggestions.length > 0 &&
+                                artistForm.location.trim().length >= 2
+                              ) {
+                                setShowRegLocationDropdown(true);
+                              }
+                            }}
+                            onKeyDown={handleRegLocationKeyDown}
+                            placeholder="e.g. Pune, Maharashtra"
+                            autoComplete="off"
+                            required
+                          />
+                          {regLocationLoading && (
+                            <div className="artist-location-spinner-icon">
+                              <Loader2 size={16} className="spin" />
+                            </div>
+                          )}
+                        </div>
                         {artistFieldErrors.location && (
                           <span className="cd-field-error-text">
                             {artistFieldErrors.location}
                           </span>
+                        )}
+
+                        {showRegLocationDropdown && regLocationSuggestions.length > 0 && (
+                          <ul className="artist-location-dropdown" role="listbox">
+                            {regLocationSuggestions.map((item, idx) => {
+                              const isHighlighted = idx === highlightedRegLocationIdx;
+                              return (
+                                <li
+                                  key={item.place_id || `${item.title}-${idx}`}
+                                  role="option"
+                                  aria-selected={isHighlighted}
+                                  className={`artist-location-option ${isHighlighted ? "active" : ""}`}
+                                  onClick={() => handleSelectRegLocation(item)}
+                                  onMouseEnter={() => setHighlightedRegLocationIdx(idx)}
+                                >
+                                  <MapPin size={16} className="artist-location-pin" />
+                                  <div className="artist-location-info">
+                                    <div className="artist-location-title-row">
+                                      <span className="artist-location-title">{item.title}</span>
+                                      {item.area_type && (
+                                        <span className="artist-location-tag">
+                                          {item.area_type.replace(/([A-Z])/g, " $1").toLowerCase()}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {item.subtitle && (
+                                      <div className="artist-location-subtitle">{item.subtitle}</div>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
                         )}
                       </div>
                     </div>

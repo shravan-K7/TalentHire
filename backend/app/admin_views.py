@@ -508,12 +508,22 @@ def admin_verification_queue_view(request):
     for a in pending:
         portfolio_items = []
         for p in a.portfolio_items.all()[:5]:
+            media_url = ""
+            if p.media_file:
+                media_url = p.media_file.url
+            elif p.thumbnail:
+                media_url = p.thumbnail.url
+            elif p.thumbnail_url:
+                media_url = p.thumbnail_url
+            elif p.media_url:
+                media_url = p.media_url
+
             portfolio_items.append({
                 "id": p.id,
-                "media_type": p.media_type,
-                "caption": p.caption,
-                "is_featured": p.is_featured,
-                "url": p.media_file.url if p.media_file else "",
+                "media_type": getattr(p, "item_type", "photo"),
+                "caption": getattr(p, "title", "") or getattr(p, "description", ""),
+                "is_featured": getattr(p, "is_featured", False),
+                "url": media_url,
             })
 
         results.append({

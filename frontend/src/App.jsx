@@ -161,14 +161,8 @@ function App() {
       return;
     }
 
-    // 3. Artists redirected to their existing artist dashboard
-    if (isArtist || loggedInUser?.role === "artist" || loggedInUser?.is_artist) {
-      navigate("/artist-dashboard");
-      return;
-    }
-
-    // 4. Customers redirected to their existing customer dashboard
-    navigate("/customer-dashboard");
+    // 3. Non-admin users (both user and artist) land on the home page
+    navigate("/");
   }
 
   function handleArtistProfileSaved(artistData) {

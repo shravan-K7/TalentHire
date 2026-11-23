@@ -29,7 +29,7 @@ function Login({ onLogin, navigate, currentPath }) {
     const redirectParam = getSearchParams().get('redirect');
 
     if (onLogin) {
-      const destination = redirectParam || meta?.redirect_to || (isAdmin ? '/admin-dashboard' : isArtist ? '/artist-dashboard' : '/customer-dashboard');
+      const destination = redirectParam || (isAdmin ? '/admin-dashboard' : '/');
       onLogin(
         googleUser,
         isArtist,
@@ -60,7 +60,7 @@ function Login({ onLogin, navigate, currentPath }) {
         const role = data.role || data.user?.role;
         const isArtist = Boolean(role === 'artist' || data.user?.is_artist);
         const isAdmin = Boolean(role === 'admin' || data.user?.is_staff || data.user?.is_superuser);
-        const destination = redirectParam || data.redirect_to || (isAdmin ? '/admin-dashboard' : isArtist ? '/artist-dashboard' : '/customer-dashboard');
+        const destination = redirectParam || (isAdmin ? '/admin-dashboard' : '/');
 
         onLogin(data.user, isArtist, destination);
       }

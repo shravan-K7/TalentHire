@@ -193,9 +193,19 @@ export default function AdminUsersView({ defaultRole = "all" }) {
                     </td>
                     <td>{u.bookings_count}</td>
                     <td>
-                      <span className={`admin-status-pill ${u.is_active ? "active" : "inactive"}`}>
-                        {u.is_active ? "Active" : "Inactive"}
-                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "5px", alignItems: "flex-start" }}>
+                        <span className={`admin-status-pill ${u.is_active ? "active" : "inactive"}`}>
+                          {u.is_active ? "Active" : "Inactive"}
+                        </span>
+                        {u.role === "artist" && (
+                          <span
+                            className={`admin-status-pill ${u.is_verified ? "success" : "warning"}`}
+                            style={{ fontSize: "0.76rem", padding: "2px 8px" }}
+                          >
+                            {u.is_verified ? "Verified" : "Pending Verification"}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       {u.role !== "admin" && (

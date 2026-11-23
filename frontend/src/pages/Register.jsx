@@ -41,7 +41,7 @@ function Register({ onLogin, navigate, currentPath }) {
   const handleGoogleLogin = useCallback((googleUser, meta) => {
     const chosenRole = meta?.role || googleUser?.role || formData.role;
     if (!chosenRole) {
-      setError('Please select whether you want to join as a Customer or Performing Artist before continuing with Google.');
+      setError('Please select whether you want to join as a User or Performing Artist before continuing with Google.');
       return;
     }
 
@@ -52,7 +52,7 @@ function Register({ onLogin, navigate, currentPath }) {
     const redirectParam = getSearchParams().get('redirect');
 
     if (onLogin) {
-      const destination = redirectParam || (isAdmin ? '/admin-dashboard' : isArtist ? '/artist-dashboard' : '/customer-dashboard');
+      const destination = redirectParam || (isAdmin ? '/admin-dashboard' : '/');
       onLogin(googleUser, isArtist, destination);
     }
   }, [onLogin, formData.role, getSearchParams]);
@@ -127,7 +127,7 @@ function Register({ onLogin, navigate, currentPath }) {
     setError('');
 
     if (!formData.role) {
-      setError('Please select whether you want to join as a Customer or Performing Artist.');
+      setError('Please select whether you want to join as a User or Performing Artist.');
       return;
     }
 
@@ -376,7 +376,7 @@ function Register({ onLogin, navigate, currentPath }) {
                     <span className="role-radio-inner"></span>
                   </span>
                   <div className="role-radio-text">
-                    <span className="role-radio-title">Customer</span>
+                    <span className="role-radio-title">User</span>
                     <span className="role-radio-desc">Book live performers</span>
                   </div>
                 </label>
