@@ -644,23 +644,117 @@ export async function fetchArtistPortfolio() {
   return data
 }
 
-export async function addArtistPortfolio({ title, description, media_url }) {
+export async function addArtistPortfolio(payload) {
   const token = await getCsrfToken()
+  const isFormData = payload instanceof FormData
+
+  const headers = {
+    'X-CSRFToken': token,
+  }
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json'
+  }
 
   const response = await fetch('/api/artist/portfolio/', {
     method: 'POST',
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRFToken': token,
-    },
-    body: JSON.stringify({ title, description, media_url }),
+    headers,
+    body: isFormData ? payload : JSON.stringify(payload),
   })
 
   const data = await readResponse(response)
 
   if (!response.ok) {
     throw new Error(data.error || 'Failed to add portfolio item.')
+  }
+
+  return data
+}
+
+export async function updateArtistPortfolio(itemId, payload) {
+  const token = await getCsrfToken()
+  const isFormData = payload instanceof FormData
+
+  const headers = {
+    'X-CSRFToken': token,
+  }
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  const response = await fetch(`/api/artist/portfolio/${itemId}/update/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: isFormData ? payload : JSON.stringify(payload),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to update portfolio item.')
+  }
+
+  return data
+}
+
+export async function setArtistPortfolioFeatured(itemId) {
+  const token = await getCsrfToken()
+
+  const response = await fetch(`/api/artist/portfolio/${itemId}/set-featured/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': token,
+    },
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to set featured item.')
+  }
+
+  return data
+}
+
+export async function removeArtistPortfolioFeatured() {
+  const token = await getCsrfToken()
+
+  const response = await fetch('/api/artist/portfolio/remove-featured/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': token,
+    },
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to remove featured item.')
+  }
+
+  return data
+}
+
+export async function reorderArtistPortfolio(order) {
+  const token = await getCsrfToken()
+
+  const response = await fetch('/api/artist/portfolio/reorder/', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+    },
+    body: JSON.stringify({ order }),
+  })
+
+  const data = await readResponse(response)
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to reorder portfolio.')
   }
 
   return data

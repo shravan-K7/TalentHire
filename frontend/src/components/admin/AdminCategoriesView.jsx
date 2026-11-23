@@ -91,7 +91,7 @@ export default function AdminCategoriesView() {
       </div>
 
       {message && (
-        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.85rem" }}>
+        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.94rem" }}>
           {message}
         </div>
       )}

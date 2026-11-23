@@ -69,47 +69,47 @@ export default function AdminSettingsView({ defaultTab = "settings" }) {
 
       {activeTab === "settings" && settingsData && (
         <div className="admin-panel-card" style={{ padding: "24px" }}>
-          <h3 style={{ margin: "0 0 18px", fontSize: "1.1rem", color: "var(--admin-text-primary)", fontWeight: 600 }}>
+          <h3 style={{ margin: "0 0 18px", fontSize: "1.25rem", color: "var(--admin-text-primary)", fontWeight: 600 }}>
             TalentHire Platform Policy Parameters
           </h3>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px" }}>
             <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px", border: "1px solid var(--admin-border)" }}>
-              <div style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Platform Commission Model</div>
-              <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--admin-accent)" }}>
+              <div style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Platform Commission Model</div>
+              <div style={{ fontSize: "1.35rem", fontWeight: 700, color: "var(--admin-accent)" }}>
                 {settingsData.platform?.commission_rate}
               </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
+              <div style={{ fontSize: "0.88rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
                 TalentHire platform service fee retained on successful bookings.
               </div>
             </div>
 
             <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px", border: "1px solid var(--admin-border)" }}>
-              <div style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Artist Payout Share</div>
-              <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--admin-status-success)" }}>
+              <div style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Artist Payout Share</div>
+              <div style={{ fontSize: "1.35rem", fontWeight: 700, color: "var(--admin-status-success)" }}>
                 {settingsData.platform?.artist_share}
               </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
+              <div style={{ fontSize: "0.88rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
                 Disbursed to performing artists post completion.
               </div>
             </div>
 
             <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px", border: "1px solid var(--admin-border)" }}>
-              <div style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Cancellation Grace Window</div>
-              <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
+              <div style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Cancellation Grace Window</div>
+              <div style={{ fontSize: "1.35rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
                 {settingsData.platform?.cancellation_window_hours} Hours
               </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
+              <div style={{ fontSize: "0.88rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
                 Free cancellation threshold before performance start.
               </div>
             </div>
 
             <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px", border: "1px solid var(--admin-border)" }}>
-              <div style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Timezone & Currency</div>
-              <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
+              <div style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)", marginBottom: "4px" }}>Timezone & Currency</div>
+              <div style={{ fontSize: "1.35rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
                 {settingsData.platform?.currency} · {settingsData.platform?.timezone}
               </div>
-              <div style={{ fontSize: "0.78rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
+              <div style={{ fontSize: "0.88rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
                 Standard operating timezone across India.
               </div>
             </div>

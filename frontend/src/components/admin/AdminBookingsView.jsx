@@ -211,31 +211,31 @@ export default function AdminBookingsView({ defaultFilter = "all" }) {
               {/* Event & Pricing Overview */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
+                  <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
                     Customer Details
                   </div>
-                  <div style={{ fontWeight: 600, color: "var(--admin-text-primary)", fontSize: "1rem" }}>
+                  <div style={{ fontWeight: 600, color: "var(--admin-text-primary)", fontSize: "1.12rem" }}>
                     {selectedBooking.customer?.name}
                   </div>
-                  <div style={{ fontSize: "0.84rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
+                  <div style={{ fontSize: "0.95rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
                     Email: {selectedBooking.customer?.email}
                   </div>
-                  <div style={{ fontSize: "0.84rem", color: "var(--admin-text-secondary)" }}>
+                  <div style={{ fontSize: "0.95rem", color: "var(--admin-text-secondary)" }}>
                     Phone: {selectedBooking.customer_phone || "Not provided"}
                   </div>
                 </div>
 
                 <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
+                  <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
                     Performing Artist
                   </div>
-                  <div style={{ fontWeight: 600, color: "var(--admin-text-primary)", fontSize: "1rem" }}>
+                  <div style={{ fontWeight: 600, color: "var(--admin-text-primary)", fontSize: "1.12rem" }}>
                     {selectedBooking.artist?.stage_name}
                   </div>
-                  <div style={{ fontSize: "0.84rem", color: "var(--admin-accent)", marginTop: "4px" }}>
+                  <div style={{ fontSize: "0.95rem", color: "var(--admin-accent)", marginTop: "4px" }}>
                     Category: {selectedBooking.artist?.category}
                   </div>
-                  <div style={{ fontSize: "0.84rem", color: "var(--admin-text-secondary)" }}>
+                  <div style={{ fontSize: "0.95rem", color: "var(--admin-text-secondary)" }}>
                     Email: {selectedBooking.artist?.email}
                   </div>
                 </div>
@@ -243,20 +243,20 @@ export default function AdminBookingsView({ defaultFilter = "all" }) {
 
               {/* Event Location & Coordinates */}
               <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px" }}>
-                <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
+                <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
                   Event Location & Venue
                 </div>
-                <div style={{ fontSize: "0.92rem", color: "var(--admin-text-primary)", fontWeight: 500 }}>
+                <div style={{ fontSize: "1.02rem", color: "var(--admin-text-primary)", fontWeight: 500 }}>
                   {selectedBooking.venue_name ? `${selectedBooking.venue_name}, ` : ""}
                   {selectedBooking.event_location}
                 </div>
                 {selectedBooking.city && (
-                  <div style={{ fontSize: "0.84rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
+                  <div style={{ fontSize: "0.95rem", color: "var(--admin-text-secondary)", marginTop: "4px" }}>
                     City: {selectedBooking.city}, {selectedBooking.state} ({selectedBooking.country})
                   </div>
                 )}
                 {selectedBooking.latitude && selectedBooking.longitude && (
-                  <div style={{ fontSize: "0.82rem", color: "var(--admin-text-muted)", marginTop: "4px" }}>
+                  <div style={{ fontSize: "0.92rem", color: "var(--admin-text-muted)", marginTop: "4px" }}>
                     Coordinates: {selectedBooking.latitude}, {selectedBooking.longitude}
                   </div>
                 )}
@@ -277,31 +277,31 @@ export default function AdminBookingsView({ defaultFilter = "all" }) {
 
               {/* Financial & Payment Status */}
               <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "8px" }}>
-                <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
+                <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--admin-text-muted)", textTransform: "uppercase", marginBottom: "8px" }}>
                   Financial Breakdown (8% Platform Commission & 92% Artist Share)
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px", marginTop: "8px" }}>
                   <div>
-                    <span style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)" }}>Agreed Fee: </span>
-                    <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
+                    <span style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)" }}>Agreed Fee: </span>
+                    <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
                       ₹{Number(selectedBooking.agreed_price).toLocaleString("en-IN")}
                     </div>
                   </div>
                   <div>
-                    <span style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)" }}>Platform Commission (8%): </span>
-                    <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--admin-accent)" }}>
+                    <span style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)" }}>Platform Commission (8%): </span>
+                    <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-accent)" }}>
                       ₹{selectedBooking.payment ? Number(selectedBooking.payment.commission_amount).toLocaleString("en-IN") : (Number(selectedBooking.agreed_price) * 0.08).toLocaleString("en-IN")}
                     </div>
                   </div>
                   <div>
-                    <span style={{ fontSize: "0.8rem", color: "var(--admin-text-muted)" }}>Artist Payout (92%): </span>
-                    <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--admin-status-success)" }}>
+                    <span style={{ fontSize: "0.9rem", color: "var(--admin-text-muted)" }}>Artist Payout (92%): </span>
+                    <div style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--admin-status-success)" }}>
                       ₹{selectedBooking.payment ? Number(selectedBooking.payment.artist_amount).toLocaleString("en-IN") : (Number(selectedBooking.agreed_price) * 0.92).toLocaleString("en-IN")}
                     </div>
                   </div>
                 </div>
                 {selectedBooking.payment && (
-                  <div style={{ marginTop: "12px", fontSize: "0.82rem", color: "var(--admin-text-muted)" }}>
+                  <div style={{ marginTop: "12px", fontSize: "0.92rem", color: "var(--admin-text-muted)" }}>
                     Razorpay Order ID: <code style={{ color: "var(--admin-text-secondary)" }}>{selectedBooking.payment.razorpay_order_id}</code> | Transaction ID: <code style={{ color: "var(--admin-text-secondary)" }}>{selectedBooking.payment.transaction_id || "Uncaptured"}</code>
                   </div>
                 )}
@@ -310,13 +310,13 @@ export default function AdminBookingsView({ defaultFilter = "all" }) {
               {/* Cancellation Notice if Cancelled */}
               {selectedBooking.cancellation && (
                 <div style={{ background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", padding: "16px", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "0.84rem", fontWeight: 700, color: "var(--admin-status-danger)", marginBottom: "4px" }}>
+                  <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--admin-status-danger)", marginBottom: "4px" }}>
                     Cancellation Details (Cancelled by {selectedBooking.cancellation.cancelled_by})
                   </div>
-                  <div style={{ fontSize: "0.86rem", color: "var(--admin-text-primary)" }}>
+                  <div style={{ fontSize: "0.96rem", color: "var(--admin-text-primary)" }}>
                     Reason: {selectedBooking.cancellation.reason}
                   </div>
-                  <div style={{ fontSize: "0.82rem", color: "var(--admin-text-muted)", marginTop: "4px" }}>
+                  <div style={{ fontSize: "0.92rem", color: "var(--admin-text-muted)", marginTop: "4px" }}>
                     Refund Amount: ₹{Number(selectedBooking.cancellation.refund_amount).toLocaleString("en-IN")} (Processed on {selectedBooking.cancellation.created_at})
                   </div>
                 </div>

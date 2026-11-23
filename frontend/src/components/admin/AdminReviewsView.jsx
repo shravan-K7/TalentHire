@@ -46,7 +46,7 @@ export default function AdminReviewsView() {
       </div>
 
       {feedback && (
-        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.85rem" }}>
+        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.95rem" }}>
           {feedback}
         </div>
       )}

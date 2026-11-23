@@ -71,6 +71,11 @@ class ArtistProfile(models.Model):
 
 
 class Portfolio(models.Model):
+    class ItemType(models.TextChoices):
+        PHOTO = "photo", "Photo"
+        VIDEO = "video", "Video"
+        YOUTUBE = "youtube", "YouTube Link"
+
     artist = models.ForeignKey(
         ArtistProfile,
         on_delete=models.CASCADE,
@@ -78,11 +83,38 @@ class Portfolio(models.Model):
     )
     title = models.CharField(max_length=150)
     description = models.TextField(blank=True)
-    media_url = models.URLField(blank=True)
+    item_type = models.CharField(
+        max_length=20,
+        choices=ItemType.choices,
+        default=ItemType.PHOTO,
+    )
+    media_url = models.URLField(blank=True, max_length=500)
+    media_file = models.FileField(
+        upload_to="artists/portfolio/",
+        blank=True,
+        null=True,
+    )
+    thumbnail = models.ImageField(
+        upload_to="artists/portfolio/thumbnails/",
+        blank=True,
+        null=True,
+    )
+    thumbnail_url = models.CharField(max_length=500, blank=True)
+    youtube_url = models.URLField(blank=True, max_length=500)
+    duration = models.CharField(max_length=30, blank=True)
+    dimensions = models.CharField(max_length=50, blank=True)
+    file_size = models.CharField(max_length=50, blank=True)
+    format_ext = models.CharField(max_length=20, blank=True)
+    is_featured = models.BooleanField(default=False)
+    is_public = models.BooleanField(default=True)
+    display_order = models.PositiveIntegerField(default=0)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["display_order", "-uploaded_at"]
+
     def __str__(self):
-        return self.title
+        return f"{self.artist.stage_name} - {self.title} ({self.item_type})"
 
 
 class Booking(models.Model):

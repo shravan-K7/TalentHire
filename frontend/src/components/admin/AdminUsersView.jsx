@@ -70,7 +70,7 @@ export default function AdminUsersView({ defaultRole = "all" }) {
       </div>
 
       {message && (
-        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.85rem" }}>
+        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.94rem" }}>
           {message}
         </div>
       )}
@@ -168,7 +168,7 @@ export default function AdminUsersView({ defaultRole = "all" }) {
                     <td>
                       <div>
                         <div style={{ fontWeight: 600, color: "var(--admin-text-primary)" }}>{u.name}</div>
-                        <div style={{ fontSize: "0.78rem", color: "var(--admin-text-muted)" }}>@{u.username}</div>
+                        <div style={{ fontSize: "0.88rem", color: "var(--admin-text-muted)" }}>@{u.username}</div>
                       </div>
                     </td>
                     <td>{u.email || "No email"}</td>
@@ -187,7 +187,7 @@ export default function AdminUsersView({ defaultRole = "all" }) {
                       <div>
                         <div>{u.location || "India"}</div>
                         {u.category && (
-                          <div style={{ fontSize: "0.76rem", color: "var(--admin-text-muted)" }}>{u.category}</div>
+                          <div style={{ fontSize: "0.86rem", color: "var(--admin-text-muted)" }}>{u.category}</div>
                         )}
                       </div>
                     </td>

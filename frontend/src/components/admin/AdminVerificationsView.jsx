@@ -74,7 +74,7 @@ export default function AdminVerificationsView({ onCountChange }) {
       </div>
 
       {feedback && (
-        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "20px", fontSize: "0.85rem" }}>
+        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "20px", fontSize: "0.95rem" }}>
           {feedback}
         </div>
       )}
@@ -91,12 +91,12 @@ export default function AdminVerificationsView({ onCountChange }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px", marginBottom: "16px" }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
+                    <h3 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 700, color: "var(--admin-text-primary)" }}>
                       {artist.stage_name}
                     </h3>
                     <span className="admin-status-pill warning">Pending Verification</span>
                   </div>
-                  <div style={{ fontSize: "0.86rem", color: "var(--admin-accent)", marginTop: "4px", fontWeight: 600 }}>
+                  <div style={{ fontSize: "0.96rem", color: "var(--admin-accent)", marginTop: "4px", fontWeight: 600 }}>
                     {artist.category}
                   </div>
                 </div>
@@ -133,7 +133,7 @@ export default function AdminVerificationsView({ onCountChange }) {
                     border: "1px solid rgba(239, 68, 68, 0.3)",
                     borderRadius: "6px",
                     marginBottom: "16px",
-                    fontSize: "0.85rem",
+                    fontSize: "0.94rem",
                     color: "#fca5a5",
                     lineHeight: 1.5,
                   }}
@@ -146,7 +146,7 @@ export default function AdminVerificationsView({ onCountChange }) {
               )}
 
               {/* Bio & Details */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", background: "var(--admin-card-subtle)", padding: "14px 18px", borderRadius: "6px", marginBottom: "16px", fontSize: "0.85rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px", background: "var(--admin-card-subtle)", padding: "14px 18px", borderRadius: "6px", marginBottom: "16px", fontSize: "0.95rem" }}>
                 <div>
                   <span style={{ color: "var(--admin-text-muted)" }}>Location: </span>
                   <span style={{ color: "var(--admin-text-primary)", fontWeight: 500 }}>{artist.location || "Kerala, India"}</span>
@@ -166,7 +166,7 @@ export default function AdminVerificationsView({ onCountChange }) {
               </div>
 
               {artist.bio && (
-                <div style={{ marginBottom: "16px", fontSize: "0.88rem", color: "var(--admin-text-secondary)", lineHeight: 1.5 }}>
+                <div style={{ marginBottom: "16px", fontSize: "0.98rem", color: "var(--admin-text-secondary)", lineHeight: 1.55 }}>
                   <strong style={{ color: "var(--admin-text-primary)" }}>Biography: </strong>
                   {artist.bio}
                 </div>
@@ -174,7 +174,7 @@ export default function AdminVerificationsView({ onCountChange }) {
 
               {/* Portfolio Preview */}
               <div>
-                <div style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--admin-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--admin-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
                   Portfolio Items ({artist.portfolio?.length || 0})
                 </div>
                 {artist.portfolio && artist.portfolio.length > 0 ? (
@@ -205,7 +205,7 @@ export default function AdminVerificationsView({ onCountChange }) {
                     ))}
                   </div>
                 ) : (
-                  <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--admin-text-muted)" }}>No portfolio media uploaded yet.</p>
+                  <p style={{ margin: 0, fontSize: "0.92rem", color: "var(--admin-text-muted)" }}>No portfolio media uploaded yet.</p>
                 )}
               </div>
             </div>

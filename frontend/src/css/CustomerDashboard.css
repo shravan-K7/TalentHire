@@ -99,7 +99,7 @@
 }
 
 .cd-sidebar-brand-label {
-  font-size: 0.76rem;
+  font-size: 0.84rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
@@ -156,7 +156,7 @@
 }
 
 .cd-sidebar-user-role {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #8E8E93;
   margin-top: 2px;
   line-height: 1.2;
@@ -222,7 +222,7 @@
 
 .cd-sidebar-badge {
   margin-left: auto;
-  font-size: 0.72rem;
+  font-size: 0.80rem;
   font-weight: 700;
   background: #FF5722;
   color: #FFFFFF;
@@ -254,7 +254,7 @@
   background: transparent;
   border: 1px solid rgba(244, 67, 54, 0.35);
   color: #EF5350;
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   font-weight: 600;
   padding: 8px 16px;
   border-radius: 8px;
@@ -312,7 +312,7 @@
 }
 
 .cd-dashboard-subtitle {
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   color: #A0A0A0;
@@ -592,7 +592,7 @@
 .cd-stat-num.payments { color: #FF5722; }
 
 .cd-stat-lbl {
-  font-size: 0.92rem;
+  font-size: 0.98rem;
   font-weight: 700;
   color: #C0C0C0;
   text-transform: uppercase;
@@ -600,7 +600,7 @@
 }
 
 .cd-stat-sub {
-  font-size: 0.82rem;
+  font-size: 0.90rem;
   color: #888888;
   margin-top: 4px;
 }
@@ -784,7 +784,7 @@
 
 .cd-btn-outline.small {
   padding: 6px 14px;
-  font-size: 0.88rem;
+  font-size: 0.94rem;
 }
 
 .cd-btn-outline.danger:hover {
@@ -909,7 +909,7 @@
 }
 
 .cd-booking-location-text {
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   color: #888888;
   white-space: nowrap;
   overflow: hidden;
@@ -921,7 +921,7 @@
   display: inline-block;
   padding: 5px 14px;
   border-radius: 20px;
-  font-size: 0.84rem;
+  font-size: 0.90rem;
   font-weight: 700;
   text-align: center;
   letter-spacing: 0.03em;
@@ -1116,7 +1116,7 @@
 }
 
 .cd-time-label {
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   font-weight: 600;
   color: #888888;
   text-transform: uppercase;
@@ -1148,7 +1148,7 @@
 }
 
 .cd-summary-label {
-  font-size: 0.86rem;
+  font-size: 0.92rem;
   font-weight: 600;
   color: #888888;
   text-transform: uppercase;
@@ -1218,7 +1218,7 @@
 }
 
 .cd-map-location-badge {
-  font-size: 0.78rem;
+  font-size: 0.86rem;
   font-weight: 700;
   color: #FF5722;
   background: rgba(255, 87, 34, 0.15);
@@ -1242,7 +1242,7 @@
 }
 
 .cd-map-status-label {
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   font-weight: 600;
   color: #888888;
 }
@@ -1530,7 +1530,7 @@
 }
 
 .cd-fav-category {
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   color: #FF5722;
   font-weight: 600;
 }
@@ -1612,7 +1612,7 @@
 }
 
 .cd-notif-time {
-  font-size: 0.82rem;
+  font-size: 0.90rem;
   color: #707070;
 }
 
@@ -1652,7 +1652,7 @@
 .cd-alert {
   padding: 12px 18px;
   border-radius: 8px;
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   font-weight: 500;
   margin-bottom: 20px;
 }
@@ -1672,19 +1672,22 @@
 /* ==========================================================================
    MODAL DIALOGS (Receipt Modal & Deactivate Modal)
    ========================================================================== */
-.cd-modal-backdrop {
+.cd-modal-backdrop,
+.cd-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 3000;
-  padding: 20px;
+  padding: 24px 16px;
+  overflow-y: auto;
+  box-sizing: border-box;
   animation: cdFadeIn 0.2s ease;
 }
 
@@ -1736,13 +1739,13 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
-  font-size: 0.88rem;
+  font-size: 0.96rem;
   margin-bottom: 20px;
 }
 
 .cd-receipt-lbl {
   display: block;
-  font-size: 0.76rem;
+  font-size: 0.86rem;
   color: #888888;
   text-transform: uppercase;
   margin-bottom: 2px;
@@ -2085,7 +2088,7 @@
 }
 
 .cd-portfolio-desc {
-  font-size: 0.88rem;
+  font-size: 0.95rem;
   color: #A0A0A0;
   line-height: 1.45;
   margin: 0;
@@ -2098,7 +2101,7 @@
   justify-content: space-between;
   padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #7A7A7A;
 }
 
@@ -2127,7 +2130,7 @@
 }
 
 .cd-avail-reason {
-  font-size: 0.82rem;
+  font-size: 0.90rem;
   color: #A0A0A0;
   margin-top: 3px;
 }
@@ -2176,7 +2179,7 @@
 }
 
 .cd-review-meta {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #7A7A7A;
 }
 
@@ -2215,7 +2218,7 @@
 }
 
 .cd-timeline-date-sub {
-  font-size: 0.76rem;
+  font-size: 0.85rem;
   font-weight: 600;
   text-transform: uppercase;
   color: #D0D0D0;
@@ -2237,7 +2240,7 @@
 }
 
 .cd-timeline-sub {
-  font-size: 0.86rem;
+  font-size: 0.94rem;
   color: #A0A0A0;
 }
 
@@ -2415,22 +2418,28 @@
   border-radius: 14px;
   width: 100%;
   max-width: 540px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
-  padding: 28px 32px;
+  max-height: calc(100vh - 48px);
+  margin: auto;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
+  padding: clamp(20px, 2.5vw, 28px);
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .cd-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
-  padding-bottom: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .cd-modal-title {
-  font-size: 1.35rem;
+  font-size: 1.3rem;
   font-weight: 800;
   color: #F7F7F7;
   margin: 0;
@@ -2445,6 +2454,7 @@
   padding: 4px 8px;
   border-radius: 6px;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .cd-modal-close:hover {
@@ -2452,10 +2462,38 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+.cd-modal-card form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .cd-modal-body {
-  font-size: 1.02rem;
+  font-size: 1rem;
   color: #D4D4D4;
   line-height: 1.5;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #1d1d1d;
+}
+
+.cd-modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cd-modal-body::-webkit-scrollbar-track {
+  background: #1d1d1d;
+  border-radius: 3px;
+}
+
+.cd-modal-body::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
 }
 
 /* ==========================================================================
@@ -2670,7 +2708,7 @@
 }
 
 .cd-artist-join-badge {
-  font-size: 0.74rem;
+  font-size: 0.84rem;
   font-weight: 800;
   color: #FF5722;
   letter-spacing: 0.08em;
@@ -2728,7 +2766,7 @@
   background: rgba(255, 87, 34, 0.15);
   border: 1px solid rgba(255, 87, 34, 0.4);
   color: #FF7043;
-  font-size: 0.76rem;
+  font-size: 0.86rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2747,14 +2785,14 @@
 }
 
 .cd-form-helper-text {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #8E8E8E;
   margin-top: 4px;
   line-height: 1.4;
 }
 
 .cd-field-error-text {
-  font-size: 0.82rem;
+  font-size: 0.90rem;
   color: #FF5252;
   margin-top: 4px;
 }
@@ -2830,7 +2868,7 @@
   align-items: center;
   gap: 4px;
   color: #777777;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   font-weight: 500;
 }
 
@@ -3078,7 +3116,7 @@
 .cd-history-badge {
   padding: 3px 10px;
   border-radius: 6px;
-  font-size: 0.78rem;
+  font-size: 0.86rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -3102,7 +3140,7 @@
 }
 
 .cd-history-meta {
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #888888;
 }
 
@@ -3111,7 +3149,7 @@
   border-left: 3px solid #444444;
   padding: 8px 12px;
   border-radius: 4px;
-  font-size: 0.86rem;
+  font-size: 0.94rem;
   color: #CCCCCC;
 }
 

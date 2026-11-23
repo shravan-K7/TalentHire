@@ -47,9 +47,9 @@ export default function AdminReportsView() {
         <div className="admin-panel-card" style={{ padding: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
             <FileSpreadsheet size={20} style={{ color: "var(--admin-accent)" }} />
-            <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--admin-text-primary)" }}>Bookings Export</h3>
+            <h3 style={{ margin: 0, fontSize: "1.15rem", color: "var(--admin-text-primary)" }}>Bookings Export</h3>
           </div>
-          <p style={{ margin: "0 0 16px", fontSize: "0.82rem", color: "var(--admin-text-muted)" }}>
+          <p style={{ margin: "0 0 16px", fontSize: "0.92rem", color: "var(--admin-text-muted)" }}>
             Download complete historical booking records, event venues, statuses, and customer contacts.
           </p>
           <a
@@ -66,9 +66,9 @@ export default function AdminReportsView() {
         <div className="admin-panel-card" style={{ padding: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
             <FileSpreadsheet size={20} style={{ color: "var(--admin-status-success)" }} />
-            <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--admin-text-primary)" }}>Financials Export</h3>
+            <h3 style={{ margin: 0, fontSize: "1.15rem", color: "var(--admin-text-primary)" }}>Financials Export</h3>
           </div>
-          <p style={{ margin: "0 0 16px", fontSize: "0.82rem", color: "var(--admin-text-muted)" }}>
+          <p style={{ margin: "0 0 16px", fontSize: "0.92rem", color: "var(--admin-text-muted)" }}>
             Download full payment logs, 8% commission breakdowns, Razorpay transaction IDs, and disbursements.
           </p>
           <a
@@ -85,9 +85,9 @@ export default function AdminReportsView() {
         <div className="admin-panel-card" style={{ padding: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
             <FileSpreadsheet size={20} style={{ color: "var(--admin-status-info)" }} />
-            <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--admin-text-primary)" }}>Users Export</h3>
+            <h3 style={{ margin: 0, fontSize: "1.15rem", color: "var(--admin-text-primary)" }}>Users Export</h3>
           </div>
-          <p style={{ margin: "0 0 16px", fontSize: "0.82rem", color: "var(--admin-text-muted)" }}>
+          <p style={{ margin: "0 0 16px", fontSize: "0.92rem", color: "var(--admin-text-muted)" }}>
             Download user accounts, customer emails, artist roster registrations, and membership status.
           </p>
           <a

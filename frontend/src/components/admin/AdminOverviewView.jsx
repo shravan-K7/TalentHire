@@ -1,4 +1,3 @@
-import { useState, useId } from "react";
 import { ArrowRight } from "lucide-react";
 
 export default function AdminOverviewView({
@@ -6,9 +5,6 @@ export default function AdminOverviewView({
   loading,
   onNavigateSection,
 }) {
-  const [timeframe, setTimeframe] = useState("6m");
-  const chartFilterId = useId();
-
   if (loading) {
     return (
       <div className="admin-state-empty">
@@ -19,8 +15,6 @@ export default function AdminOverviewView({
   }
 
   const kpis = data?.kpis || {};
-  const bookingTrends = data?.booking_trends || [];
-  const commissionTrends = data?.monthly_commission || [];
   const recentBookings = data?.recent_bookings || [];
   const pendingActions = data?.pending_actions || {};
   const recentRegistrations = data?.recent_registrations || [];
@@ -35,34 +29,6 @@ export default function AdminOverviewView({
     return `₹${num.toLocaleString("en-IN")}`;
   }
 
-  // Calculate SVG line chart points for Booking Trends
-  const maxBookingCount = Math.max(
-    ...bookingTrends.map((t) => t.count),
-    10
-  );
-  const chartWidth = 500;
-  const chartHeight = 180;
-  const paddingX = 40;
-  const paddingY = 25;
-
-  const points = bookingTrends.map((item, index) => {
-    const x =
-      paddingX +
-      (index / Math.max(1, bookingTrends.length - 1)) *
-        (chartWidth - paddingX * 2);
-    const normalizedY = item.count / maxBookingCount;
-    const y = chartHeight - paddingY - normalizedY * (chartHeight - paddingY * 2);
-    return { x, y, ...item };
-  });
-
-  const polylineStr = points.map((p) => `${p.x},${p.y}`).join(" ");
-
-  // Calculate SVG bar chart for Monthly Commission
-  const maxCommission = Math.max(
-    ...commissionTrends.map((t) => t.amount),
-    1000
-  );
-
   return (
     <div>
       {/* Top Page Header */}
@@ -70,20 +36,6 @@ export default function AdminOverviewView({
         <div>
           <h1 className="admin-page-title">Dashboard</h1>
           <p className="admin-page-subtitle">Platform overview · real-time data</p>
-        </div>
-
-        <div className="admin-page-actions">
-          <label htmlFor={chartFilterId} className="visually-hidden" style={{ display: "none" }}>Timeframe</label>
-          <select
-            id={chartFilterId}
-            className="admin-select"
-            value={timeframe}
-            onChange={(e) => setTimeframe(e.target.value)}
-          >
-            <option value="6m">Last 6 months</option>
-            <option value="30d">Last 30 days</option>
-            <option value="all">All time</option>
-          </select>
         </div>
       </div>
 
@@ -224,143 +176,6 @@ export default function AdminOverviewView({
           <span>View commission report</span>
           <ArrowRight size={14} />
         </button>
-      </div>
-
-      {/* Charts Row */}
-      <div className="admin-charts-grid">
-        {/* Left: Booking Trends Line Chart */}
-        <div className="admin-chart-card">
-          <div className="admin-chart-header">
-            <h2 className="admin-chart-title">Booking trends</h2>
-            <span className="admin-chart-subtitle">Bookings per month</span>
-          </div>
-
-          <div className="admin-chart-container">
-            {bookingTrends.length > 0 ? (
-              <svg
-                viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-                className="admin-svg-chart"
-                preserveAspectRatio="none"
-              >
-                {/* Horizontal reference lines */}
-                <line
-                  x1={paddingX}
-                  y1={paddingY}
-                  x2={chartWidth - paddingX}
-                  y2={paddingY}
-                  className="admin-chart-grid-line"
-                />
-                <line
-                  x1={paddingX}
-                  y1={chartHeight / 2}
-                  x2={chartWidth - paddingX}
-                  y2={chartHeight / 2}
-                  className="admin-chart-grid-line"
-                />
-                <line
-                  x1={paddingX}
-                  y1={chartHeight - paddingY}
-                  x2={chartWidth - paddingX}
-                  y2={chartHeight - paddingY}
-                  className="admin-chart-grid-line"
-                />
-
-                {/* Y Axis Labels */}
-                <text x="10" y={paddingY + 4} className="admin-chart-axis-label">
-                  {maxBookingCount}
-                </text>
-                <text x="10" y={chartHeight / 2 + 4} className="admin-chart-axis-label">
-                  {Math.round(maxBookingCount / 2)}
-                </text>
-                <text x="10" y={chartHeight - paddingY + 4} className="admin-chart-axis-label">
-                  0
-                </text>
-
-                {/* SVG Polyline */}
-                {points.length > 1 && (
-                  <polyline points={polylineStr} className="admin-chart-line" />
-                )}
-
-                {/* Data Points */}
-                {points.map((p) => (
-                  <g key={`${p.month}-${p.year}`}>
-                    <circle cx={p.x} cy={p.y} r={4.5} className="admin-chart-point" />
-                    <text
-                      x={p.x}
-                      y={chartHeight - 6}
-                      textAnchor="middle"
-                      className="admin-chart-axis-label"
-                    >
-                      {p.month}
-                    </text>
-                  </g>
-                ))}
-              </svg>
-            ) : (
-              <div className="admin-state-empty">No trend data available.</div>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Monthly Commission Bar Chart */}
-        <div className="admin-chart-card">
-          <div className="admin-chart-header">
-            <h2 className="admin-chart-title">Monthly commission</h2>
-            <span className="admin-chart-subtitle">₹ thousands</span>
-          </div>
-
-          <div className="admin-chart-container">
-            {commissionTrends.length > 0 ? (
-              <svg
-                viewBox={`0 0 280 ${chartHeight}`}
-                className="admin-svg-chart"
-                preserveAspectRatio="none"
-              >
-                {/* Horizontal reference line */}
-                <line
-                  x1="10"
-                  y1={chartHeight - paddingY}
-                  x2="270"
-                  y2={chartHeight - paddingY}
-                  className="admin-chart-grid-line"
-                />
-
-                {commissionTrends.map((item, index) => {
-                  const barWidth = 24;
-                  const totalSlots = commissionTrends.length;
-                  const slotWidth = 240 / totalSlots;
-                  const x = 20 + index * slotWidth + (slotWidth - barWidth) / 2;
-
-                  const rawHeight = (item.amount / maxCommission) * (chartHeight - paddingY * 2);
-                  const barHeight = Math.max(item.amount > 0 ? 6 : 2, rawHeight);
-                  const y = chartHeight - paddingY - barHeight;
-
-                  return (
-                    <g key={`${item.month}-${item.year}`}>
-                      <rect
-                        x={x}
-                        y={y}
-                        width={barWidth}
-                        height={barHeight}
-                        className="admin-chart-bar"
-                      />
-                      <text
-                        x={x + barWidth / 2}
-                        y={chartHeight - 6}
-                        textAnchor="middle"
-                        className="admin-chart-axis-label"
-                      >
-                        {item.month}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-            ) : (
-              <div className="admin-state-empty">No commission data.</div>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Middle Row: Recent Bookings + Pending Actions */}

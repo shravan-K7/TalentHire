@@ -147,7 +147,7 @@ export default function AdminFinanceView({ initialTab = "transactions" }) {
                         ₹{Number(tx.artist_amount).toLocaleString("en-IN")}
                       </td>
                       <td>
-                        <code style={{ fontSize: "0.82rem", color: "var(--admin-text-secondary)" }}>
+                        <code style={{ fontSize: "0.92rem", color: "var(--admin-text-secondary)" }}>
                           {tx.transaction_id || tx.razorpay_order_id}
                         </code>
                       </td>

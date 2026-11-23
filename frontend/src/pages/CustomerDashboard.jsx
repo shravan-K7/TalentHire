@@ -2716,7 +2716,7 @@ function CustomerDashboard({
                   <div className="cd-policy-header">
                     <span
                       style={{
-                        fontSize: "0.88rem",
+                        fontSize: "0.96rem",
                         fontWeight: 700,
                         color: "#FFFFFF",
                       }}
@@ -2777,7 +2777,7 @@ function CustomerDashboard({
                         <div
                           className="cd-policy-row"
                           style={{
-                            fontSize: "0.82rem",
+                            fontSize: "0.90rem",
                             color: "#888888",
                             paddingLeft: "12px",
                           }}
@@ -2788,7 +2788,7 @@ function CustomerDashboard({
                         <div
                           className="cd-policy-row"
                           style={{
-                            fontSize: "0.82rem",
+                            fontSize: "0.90rem",
                             color: "#888888",
                             paddingLeft: "12px",
                           }}
@@ -2824,7 +2824,7 @@ function CustomerDashboard({
                   style={{
                     display: "block",
                     marginBottom: "6px",
-                    fontSize: "0.88rem",
+                    fontSize: "0.96rem",
                   }}
                 >
                   Reason for Cancellation (Optional)
@@ -2970,7 +2970,7 @@ function CustomerDashboard({
                   style={{
                     display: "block",
                     marginBottom: "6px",
-                    fontSize: "0.88rem",
+                    fontSize: "0.96rem",
                   }}
                 >
                   Reason for Rescheduling
@@ -3093,7 +3093,7 @@ function CustomerDashboard({
                           display: "grid",
                           gridTemplateColumns: "1fr 1fr",
                           gap: "10px",
-                          fontSize: "0.88rem",
+                          fontSize: "0.96rem",
                         }}
                       >
                         <div>
@@ -3101,7 +3101,7 @@ function CustomerDashboard({
                             style={{
                               color: "#888888",
                               display: "block",
-                              fontSize: "0.76rem",
+                              fontSize: "0.85rem",
                             }}
                           >
                             ORIGINAL DATE
@@ -3124,7 +3124,7 @@ function CustomerDashboard({
                             style={{
                               color: "#888888",
                               display: "block",
-                              fontSize: "0.76rem",
+                              fontSize: "0.85rem",
                             }}
                           >
                             REQUESTED DATE
@@ -3166,7 +3166,7 @@ function CustomerDashboard({
                             <span
                               style={{
                                 display: "block",
-                                fontSize: "0.75rem",
+                                fontSize: "0.85rem",
                                 color: "#888888",
                                 marginTop: "4px",
                               }}

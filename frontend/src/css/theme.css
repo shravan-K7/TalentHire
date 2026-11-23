@@ -68,6 +68,11 @@ body,
   overflow-x: clip;
 }
 
+/* Base font scaling for dashboard pages for improved visibility & readability */
+html:has(.cd-page) {
+  font-size: 18px;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 10px;

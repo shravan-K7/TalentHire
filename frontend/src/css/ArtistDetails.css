@@ -26,8 +26,50 @@
 }
 
 /* --------------------------------------------------------------------------
-   Top Back Navigation
+   Top Breadcrumb Navigation
    -------------------------------------------------------------------------- */
+.artist-breadcrumb-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  font-size: 0.92rem;
+}
+
+.artist-breadcrumb-link {
+  background: transparent;
+  border: none;
+  color: #A0A0A0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font-size: inherit;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.artist-breadcrumb-link:hover {
+  color: #FFFFFF;
+}
+
+.artist-breadcrumb-sep {
+  color: #555555;
+  font-size: 0.85rem;
+}
+
+.artist-breadcrumb-muted {
+  color: #A0A0A0;
+  font-weight: 500;
+}
+
+.artist-breadcrumb-current {
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
 .artist-back-bar {
   margin-bottom: 20px;
   width: 100%;
@@ -326,8 +368,15 @@
   font-size: 1.3rem;
   font-weight: 700;
   color: #FFFFFF;
-  margin: 0 0 16px 0;
+  margin: 0 0 4px 0;
   letter-spacing: -0.01em;
+}
+
+.artist-section-sub {
+  color: #8E8E8E;
+  font-size: 0.9rem;
+  margin: 0 0 18px 0;
+  line-height: 1.45;
 }
 
 /* --------------------------------------------------------------------------
@@ -714,9 +763,288 @@
   color: #CCCCCC;
 }
 
+/* --------------------------------------------------------------------------
+   Performance Reel Section (Grid of 3 cards)
+   -------------------------------------------------------------------------- */
+.artist-reel-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  width: 100%;
+}
+
+.artist-reel-card {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  border-radius: 10px;
+  outline: none;
+}
+
+.artist-reel-thumb-box {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #181818;
+  border: 1px solid #2C2C2C;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.artist-reel-card:hover .artist-reel-thumb-box {
+  border-color: #FF5722;
+  transform: translateY(-2px);
+}
+
+.artist-reel-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.artist-reel-play-circle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.artist-reel-card:hover .artist-reel-play-circle {
+  transform: scale(1.1);
+  background: #FF5722;
+  border-color: #FF5722;
+}
+
+.artist-reel-duration-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #F0F0F0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+
+.artist-reel-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #FFFFFF;
+  margin-top: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------------------
+   Photo Gallery Section (Grid of 4 cards)
+   -------------------------------------------------------------------------- */
+.artist-public-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  width: 100%;
+}
+
+.artist-public-photo-card {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background-color: #181818;
+  border: 1px solid #2C2C2C;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.artist-public-photo-card:hover {
+  border-color: #555555;
+  transform: translateY(-2px);
+}
+
+.artist-public-photo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* --------------------------------------------------------------------------
+   Completed Shows Section (Clean Minimal Rows)
+   -------------------------------------------------------------------------- */
+.artist-clean-shows-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.artist-clean-show-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 4px;
+  border-bottom: 1px solid #242424;
+}
+
+.artist-clean-show-row:last-child {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+
+.artist-clean-show-row:first-child {
+  padding-top: 4px;
+}
+
+.artist-clean-show-name {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.artist-clean-show-date {
+  font-size: 0.88rem;
+  color: #8E8E8E;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Reviews Section (Score Card + Clean Review Cards)
+   -------------------------------------------------------------------------- */
+.artist-reviews-flex-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.artist-reviews-score-card {
+  background-color: #161616;
+  border: 1px solid #282828;
+  border-radius: 12px;
+  padding: 22px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.artist-reviews-score-num {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  line-height: 1.1;
+}
+
+.artist-reviews-score-denom {
+  font-size: 1.1rem;
+  color: #888888;
+  font-weight: 500;
+}
+
+.artist-reviews-stars-gold {
+  color: #FFB300;
+  font-size: 1.15rem;
+  letter-spacing: 2px;
+  margin: 6px 0 4px;
+}
+
+.artist-reviews-count-text {
+  color: #8E8E8E;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.artist-reviews-cards-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.artist-review-card-rect {
+  background-color: #161616;
+  border: 1px solid #282828;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.artist-review-rect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.artist-review-rect-author {
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: #FFFFFF;
+}
+
+.artist-review-rect-stars {
+  color: #FFB300;
+  font-size: 0.88rem;
+  letter-spacing: 1px;
+}
+
+.artist-review-rect-sub {
+  color: #888888;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+}
+
+.artist-review-rect-comment {
+  color: #CCCCCC;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.booking-btn-quote {
+  width: 100%;
+  padding: 13px 20px;
+  margin-top: 10px;
+  background-color: #222222;
+  color: #FFFFFF;
+  font-size: 0.98rem;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid #363636;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.booking-btn-quote:hover {
+  background-color: #2A2A2A;
+  border-color: #555555;
+}
+
 .booking-check-icon {
-  color: #00E676;
+  color: #4ADE80;
   flex-shrink: 0;
+  font-weight: bold;
 }
 
 .booking-btn-shortlist {
@@ -914,6 +1242,19 @@
     position: static;
     margin-top: 24px;
   }
+
+  .artist-reel-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .artist-public-photos-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .artist-reviews-flex-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
 }
 
 @media (max-width: 680px) {
@@ -931,6 +1272,14 @@
   }
 
   .artist-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .artist-reel-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-public-photos-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 

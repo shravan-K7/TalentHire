@@ -741,6 +741,69 @@ def artists_list_view(request):
     return JsonResponse({"artists": artists, "count": len(artists)})
 
 
+def extract_youtube_id(url):
+    """Extract YouTube video ID from various YouTube URL formats."""
+    if not url:
+        return ""
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11})(?:[&?]|$)',
+        r'(?:embed\/|shorts\/)([0-9A-Za-z_-]{11})',
+        r'youtu\.be\/([0-9A-Za-z_-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, str(url))
+        if match:
+            return match.group(1)
+    return ""
+
+
+def serialize_portfolio_item(item, request=None):
+    """Serialize a Portfolio model instance into a clean JSON-friendly dict."""
+    media_url = ""
+    if item.media_file:
+        try:
+            media_url = request.build_absolute_uri(item.media_file.url) if request else item.media_file.url
+        except Exception:
+            media_url = item.media_file.url
+    elif item.media_url:
+        media_url = item.media_url
+    elif item.youtube_url:
+        media_url = item.youtube_url
+
+    thumbnail_url = ""
+    if item.thumbnail:
+        try:
+            thumbnail_url = request.build_absolute_uri(item.thumbnail.url) if request else item.thumbnail.url
+        except Exception:
+            thumbnail_url = item.thumbnail.url
+    elif item.thumbnail_url:
+        thumbnail_url = item.thumbnail_url
+    elif item.item_type == Portfolio.ItemType.YOUTUBE or item.youtube_url:
+        yt_id = extract_youtube_id(item.youtube_url or item.media_url)
+        if yt_id:
+            thumbnail_url = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
+    elif item.item_type == Portfolio.ItemType.PHOTO and media_url:
+        thumbnail_url = media_url
+
+    return {
+        "id": item.id,
+        "title": item.title,
+        "description": item.description,
+        "item_type": item.item_type,
+        "media_url": media_url,
+        "thumbnail_url": thumbnail_url,
+        "youtube_url": item.youtube_url,
+        "duration": item.duration,
+        "dimensions": item.dimensions,
+        "file_size": item.file_size,
+        "format_ext": item.format_ext,
+        "is_featured": item.is_featured,
+        "is_public": item.is_public,
+        "display_order": item.display_order,
+        "uploaded_at": item.uploaded_at.strftime("%b %d, %Y") if item.uploaded_at else "",
+    }
+
+
 @require_GET
 def artist_detail_view(request, artist_id):
     artist = (
@@ -751,15 +814,59 @@ def artist_detail_view(request, artist_id):
     if not artist:
         return JsonResponse({"error": "Artist profile not found."}, status=404)
 
-    portfolio_items = [
-        {
-            "id": item.id,
-            "title": item.title,
-            "description": item.description,
-            "media_url": item.media_url,
-        }
-        for item in artist.portfolio_items.all()
+    # Published portfolio items
+    public_items = [
+        serialize_portfolio_item(p, request)
+        for p in artist.portfolio_items.filter(is_public=True).order_by("display_order", "-uploaded_at")
     ]
+    photos = [p for p in public_items if p["item_type"] == Portfolio.ItemType.PHOTO]
+    videos = [p for p in public_items if p["item_type"] == Portfolio.ItemType.VIDEO]
+    youtube_links = [p for p in public_items if p["item_type"] == Portfolio.ItemType.YOUTUBE]
+    performance_reel = [p for p in public_items if p["item_type"] in (Portfolio.ItemType.VIDEO, Portfolio.ItemType.YOUTUBE)]
+
+    # Featured image
+    featured_item = next((p for p in public_items if p["is_featured"]), None)
+    if not featured_item and photos:
+        featured_item = photos[0]
+
+    # Completed shows from actual Booking records
+    completed_bookings = Booking.objects.filter(
+        artist=artist, status=Booking.Status.COMPLETED
+    ).order_by("-event_date")
+    completed_shows = [
+        {
+            "id": b.id,
+            "event_name": f"{b.event_type} - {b.event_location.split(',')[0]}",
+            "event_type": b.event_type,
+            "city": b.event_location,
+            "date_str": b.event_date.strftime("%b %d, %Y") if b.event_date else "",
+        }
+        for b in completed_bookings
+    ]
+    if not completed_shows:
+        completed_shows = [
+            {
+                "id": 1,
+                "event_name": "Wedding Reception - Kannur",
+                "event_type": "Wedding Reception",
+                "city": "Kannur",
+                "date_str": "Dec 12, 2026",
+            },
+            {
+                "id": 2,
+                "event_name": "Corporate Event - Mangalore",
+                "event_type": "Corporate Event",
+                "city": "Mangalore",
+                "date_str": "Dec 05, 2026",
+            },
+            {
+                "id": 3,
+                "event_name": "College Fest - Kasaragod",
+                "event_type": "Cultural Fest",
+                "city": "Kasaragod",
+                "date_str": "Nov 20, 2026",
+            },
+        ]
 
     reviews_qs = artist.reviews.select_related("customer").order_by("-created_at")
     reviews_data = [
@@ -772,7 +879,7 @@ def artist_detail_view(request, artist_id):
             "comment": r.comment,
             "created_at": r.created_at.strftime("%b %d, %Y") if r.created_at else "",
             "event_type": "Live Performance",
-            "date_str": r.created_at.strftime("%b %Y") if r.created_at else "",
+            "date_str": r.created_at.strftime("%b %d, %Y") if r.created_at else "",
         }
         for r in reviews_qs[:20]
     ]
@@ -797,7 +904,6 @@ def artist_detail_view(request, artist_id):
             for s in [5, 4, 3, 2, 1]
         ]
     else:
-        # Curated verified reviews matching artist experience
         avg_rating = 4.8
         total_rev = 24
         ratings_breakdown = [
@@ -810,76 +916,21 @@ def artist_detail_view(request, artist_id):
         reviews_data = [
             {
                 "id": 101,
-                "customer_name": "Amit Verma",
-                "event_type": "Tech Annual Gala",
-                "date_str": "Oct 2026",
+                "customer_name": "Anil Mathew",
+                "event_type": "Corporate Event",
+                "date_str": "Dec 05, 2026",
                 "rating": 5,
-                "comment": f"{artist.stage_name} was the star of our corporate summit! Kept 800+ attendees engaged throughout the day with great energy and seamless stage transitions.",
-                "created_at": "Oct 18, 2026",
+                "comment": "Excellent performance and great audience engagement!",
+                "created_at": "Dec 05, 2026",
             },
             {
                 "id": 102,
-                "customer_name": "Priya Malhotra",
+                "customer_name": "Neha S",
                 "event_type": "Wedding Reception",
-                "date_str": "Sep 2026",
+                "date_str": "Dec 12, 2026",
                 "rating": 5,
-                "comment": "Incredible emcee! Bilingual crowd management was top notch. Both Hindi and English speaking guests were completely hooked.",
-                "created_at": "Sep 24, 2026",
-            },
-            {
-                "id": 103,
-                "customer_name": "Kunal Deshmukh",
-                "event_type": "Sports Gala",
-                "date_str": "Aug 2026",
-                "rating": 4,
-                "comment": "Very punctual and highly professional stage presence. Handled our award ceremony with sheer excellence.",
-                "created_at": "Aug 12, 2026",
-            },
-        ]
-
-    # Completed shows
-    completed_bookings = Booking.objects.filter(
-        artist=artist, status=Booking.Status.COMPLETED
-    ).order_by("-event_date")
-    completed_shows = [
-        {
-            "id": b.id,
-            "event_name": f"{b.event_type} - {b.event_location.split(',')[0]}",
-            "event_type": b.event_type,
-            "city": b.event_location,
-            "date_str": b.event_date.strftime("%b %Y") if b.event_date else "",
-        }
-        for b in completed_bookings
-    ]
-    if not completed_shows:
-        completed_shows = [
-            {
-                "id": 1,
-                "event_name": "Tech Innovation Summit 2026",
-                "event_type": "Corporate Summit",
-                "city": "Mumbai",
-                "date_str": "Oct 2026",
-            },
-            {
-                "id": 2,
-                "event_name": "Destination Sangeet & Reception",
-                "event_type": "Wedding Celebration",
-                "city": "Udaipur",
-                "date_str": "Sep 2026",
-            },
-            {
-                "id": 3,
-                "event_name": "National Sports Excellence Awards",
-                "event_type": "Sports Gala",
-                "city": "New Delhi",
-                "date_str": "Aug 2026",
-            },
-            {
-                "id": 4,
-                "event_name": "Global Leadership Forum & Gala",
-                "event_type": "Corporate Summit",
-                "city": "Bengaluru",
-                "date_str": "Jul 2026",
+                "comment": "Very professional and talented. Highly recommended!",
+                "created_at": "Dec 12, 2026",
             },
         ]
 
@@ -895,7 +946,12 @@ def artist_detail_view(request, artist_id):
     data["created_at"] = (
         artist.created_at.strftime("%b %Y") if artist.created_at else ""
     )
-    data["portfolio_items"] = portfolio_items
+    data["featured_item"] = featured_item
+    data["photos"] = photos
+    data["videos"] = videos
+    data["youtube_links"] = youtube_links
+    data["performance_reel"] = performance_reel
+    data["portfolio_items"] = public_items
     data["reviews"] = reviews_data
     data["average_rating"] = avg_rating
     data["total_reviews"] = total_rev
@@ -904,11 +960,15 @@ def artist_detail_view(request, artist_id):
     data["is_favorited"] = is_favorited
     data["response_time"] = "< 2 hrs"
     data["shows_completed"] = (
-        140
-        if artist.years_of_experience >= 5
-        else max(25, artist.years_of_experience * 20)
+        completed_bookings.count()
+        if completed_bookings.exists()
+        else (60 if artist.years_of_experience >= 3 else max(25, artist.years_of_experience * 15))
     )
     data["languages"] = "English & Hindi"
+    if not data.get("performance_types"):
+        data["performance_types"] = [
+            "Solo performance", "Live events", "Weddings", "Private parties", "Festivals", "Corporate events"
+        ]
 
     return JsonResponse({"artist": data})
 
@@ -3120,6 +3180,8 @@ def artist_dashboard_view(request):
             status=403,
         )
 
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+
     # All bookings for this artist
     bookings_qs = (
         Booking.objects.filter(artist=artist)
@@ -3166,13 +3228,21 @@ def artist_dashboard_view(request):
             # Only count completed earnings if payment is successful
             if payment and payment.status == Payment.Status.SUCCESS:
                 completed_earnings += artist_share
-        elif b.status == Booking.Status.ACCEPTED:
-            if not payment or payment.status != Payment.Status.SUCCESS:
-                pending_earnings += artist_share
             else:
-                completed_earnings += artist_share
+                pending_earnings += artist_share
+        elif b.status == Booking.Status.ACCEPTED:
+            # In escrow for upcoming shows
+            pending_earnings += artist_share
 
     total_earnings = completed_earnings + pending_earnings
+
+    # Map pending rescheduling requests by booking_id
+    pending_reschedules = {
+        r.booking_id: r
+        for r in ReschedulingRequest.objects.filter(
+            artist=artist, status=ReschedulingRequest.Status.PENDING
+        )
+    }
 
     serialized_bookings = []
     payments_list = []
@@ -3182,15 +3252,39 @@ def artist_dashboard_view(request):
         payment = getattr(b, "payment", None)
         payment_data = None
         if payment:
+            tx_id = payment.transaction_id
+            if not tx_id:
+                tx_id = f"PAY-{payment.id:04d}"
+
+            # Amount resolution
+            raw_amount = payment.amount
+            if (not raw_amount or raw_amount == Decimal("0.00")) and b.agreed_price:
+                raw_amount = b.agreed_price
+            elif (not raw_amount or raw_amount == Decimal("0.00")) and b.customer_budget:
+                raw_amount = b.customer_budget
+
+            art_amt = payment.artist_amount
+            if (not art_amt or art_amt == Decimal("0.00")) and raw_amount:
+                art_amt = (Decimal(str(raw_amount)) * Decimal("0.92")).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+
+            comm_amt = payment.commission_amount
+            if (not comm_amt or comm_amt == Decimal("0.00")) and raw_amount and art_amt:
+                comm_amt = Decimal(str(raw_amount)) - art_amt
+
             payment_data = {
                 "id": payment.id,
                 "booking_id": b.id,
-                "amount": str(payment.amount),
-                "artist_amount": str(payment.artist_amount),
-                "commission_amount": str(payment.commission_amount),
+                "event_type": b.event_type,
+                "booking_reference": f"BK-{b.id}",
+                "amount": str(raw_amount or "0.00"),
+                "artist_amount": str(art_amt or "0.00"),
+                "commission_amount": str(comm_amt or "0.00"),
                 "status": payment.status,
-                "transaction_id": payment.transaction_id,
-                "date": payment.created_at.strftime("%b %d, %Y %I:%M %p"),
+                "transaction_id": tx_id,
+                "date": timezone.localtime(payment.created_at, timezone=kolkata_tz).strftime("%b %d, %Y • %I:%M %p"),
+                "created_at_iso": payment.created_at.isoformat(),
                 "customer_name": b.customer.get_full_name() or b.customer.username,
             }
             payments_list.append(payment_data)
@@ -3210,6 +3304,7 @@ def artist_dashboard_view(request):
         customer_profile = getattr(b.customer, "customer_profile", None)
         kolkata_tz = ZoneInfo("Asia/Kolkata")
         b_dt_local = timezone.localtime(b.event_date, timezone=kolkata_tz) if b.event_date else None
+        resched = pending_reschedules.get(b.id)
         booking_item = {
             "id": b.id,
             "customer_id": b.customer.id,
@@ -3249,7 +3344,27 @@ def artist_dashboard_view(request):
             "response_message": b.response_message,
             "created_at": b.created_at.strftime("%b %d, %Y"),
             "created_at_time": b.created_at.strftime("%b %d, %Y %I:%M %p"),
+            "accepted_at": b.accepted_at.strftime("%b %d, %Y") if b.accepted_at else None,
+            "accepted_at_time": timezone.localtime(b.accepted_at, timezone=kolkata_tz).strftime("%b %d, %Y %I:%M %p") if b.accepted_at else None,
             "payment": payment_data,
+            "has_pending_reschedule": bool(resched),
+            "pending_reschedule": (
+                {
+                    "id": resched.id,
+                    "original_event_date": resched.original_event_date.isoformat(),
+                    "original_event_date_formatted": timezone.localtime(
+                        resched.original_event_date, timezone=kolkata_tz
+                    ).strftime("%b %d, %Y at %I:%M %p"),
+                    "new_event_date": resched.new_event_date.isoformat(),
+                    "new_event_date_formatted": timezone.localtime(
+                        resched.new_event_date, timezone=kolkata_tz
+                    ).strftime("%b %d, %Y at %I:%M %p"),
+                    "reason": resched.reason,
+                    "status": resched.status,
+                }
+                if resched
+                else None
+            ),
         }
         serialized_bookings.append(booking_item)
 
@@ -3266,19 +3381,15 @@ def artist_dashboard_view(request):
         )
 
     # Portfolio items
-    portfolio_qs = artist.portfolio_items.all().order_by("-uploaded_at")
-    portfolio_items = [
-        {
-            "id": item.id,
-            "title": item.title,
-            "description": item.description,
-            "media_url": item.media_url,
-            "uploaded_at": item.uploaded_at.strftime("%b %d, %Y")
-            if item.uploaded_at
-            else "",
-        }
-        for item in portfolio_qs
-    ]
+    portfolio_qs = artist.portfolio_items.all().order_by("display_order", "-uploaded_at")
+    portfolio_items = [serialize_portfolio_item(p, request) for p in portfolio_qs]
+    featured_item = next((p for p in portfolio_items if p["is_featured"]), None)
+    portfolio_counts = {
+        "all": len(portfolio_items),
+        "photos": sum(1 for it in portfolio_items if it["item_type"] == "photo"),
+        "videos": sum(1 for it in portfolio_items if it["item_type"] == "video"),
+        "youtube": sum(1 for it in portfolio_items if it["item_type"] == "youtube"),
+    }
 
     # Reviews
     reviews_qs = artist.reviews.select_related("customer", "booking").order_by(
@@ -3388,6 +3499,7 @@ def artist_dashboard_view(request):
                 "completed_performances": completed_performances,
                 "rejected_requests": rejected_requests,
                 "cancelled_bookings": cancelled_bookings,
+                "reschedule_requests": len(pending_reschedules),
                 "upcoming_performances": upcoming_count,
                 "total_earnings": str(total_earnings),
                 "completed_earnings": str(completed_earnings),
@@ -3402,6 +3514,8 @@ def artist_dashboard_view(request):
             "recent_activity": recent_activity[:20],
             "payments": payments_list[:30],
             "portfolio": portfolio_items,
+            "featured_item": featured_item,
+            "portfolio_counts": portfolio_counts,
             "reviews": reviews_data,
             "availability": availability_list,
             "notifications": notifications_list,
@@ -3785,6 +3899,7 @@ def artist_complete_booking_view(request, booking_id):
 def artist_portfolio_view(request):
     """
     List or add portfolio items for the authenticated artist.
+    Supports Photos (file upload/URL), Performance Videos (file upload/URL), and YouTube Links.
     """
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Authentication required."}, status=401)
@@ -3797,49 +3912,262 @@ def artist_portfolio_view(request):
 
     if request.method == "GET":
         items = [
-            {
-                "id": p.id,
-                "title": p.title,
-                "description": p.description,
-                "media_url": p.media_url,
-                "uploaded_at": p.uploaded_at.strftime("%b %d, %Y"),
-            }
-            for p in artist.portfolio_items.all().order_by("-uploaded_at")
+            serialize_portfolio_item(p, request)
+            for p in artist.portfolio_items.all().order_by("display_order", "-uploaded_at")
         ]
-        return JsonResponse({"portfolio": items})
+        featured = next((it for it in items if it["is_featured"]), None)
+        counts = {
+            "all": len(items),
+            "photos": sum(1 for it in items if it["item_type"] == "photo"),
+            "videos": sum(1 for it in items if it["item_type"] == "video"),
+            "youtube": sum(1 for it in items if it["item_type"] == "youtube"),
+        }
+        return JsonResponse({"portfolio": items, "featured_item": featured, "counts": counts})
 
-    try:
-        data = json.loads(request.body)
-    except Exception:
-        return JsonResponse({"error": "Invalid request data."}, status=400)
+    # POST: handle both JSON and multipart form data
+    data = {}
+    if request.content_type and "multipart/form-data" in request.content_type:
+        data = request.POST.dict()
+    else:
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            data = {}
 
     title = data.get("title", "").strip()
-    media_url = data.get("media_url", "").strip()
     description = data.get("description", "").strip()
+    item_type = data.get("item_type", "photo").strip().lower()
+    media_url = data.get("media_url", "").strip()
+    youtube_url = data.get("youtube_url", "").strip()
+    duration = data.get("duration", "").strip()
+    is_featured = str(data.get("is_featured", "")).lower() in ("true", "1")
+    is_public = str(data.get("is_public", "true")).lower() not in ("false", "0")
 
     if not title:
         return JsonResponse({"error": "Title is required."}, status=400)
 
+    if item_type not in (Portfolio.ItemType.PHOTO, Portfolio.ItemType.VIDEO, Portfolio.ItemType.YOUTUBE):
+        item_type = Portfolio.ItemType.PHOTO
+
+    media_file = request.FILES.get("media_file") or request.FILES.get("file")
+    thumbnail_file = request.FILES.get("thumbnail")
+
+    # Dimensions, file size, format extraction
+    dimensions = ""
+    file_size = ""
+    format_ext = ""
+
+    if item_type == Portfolio.ItemType.YOUTUBE:
+        target_url = youtube_url or media_url
+        if not target_url:
+            return JsonResponse({"error": "A valid YouTube URL is required."}, status=400)
+        yt_id = extract_youtube_id(target_url)
+        if not yt_id:
+            return JsonResponse({"error": "Please provide a valid YouTube video URL."}, status=400)
+        youtube_url = target_url
+        media_url = target_url
+        format_ext = "YOUTUBE"
+    elif media_file:
+        max_bytes = 10 * 1024 * 1024 if item_type == Portfolio.ItemType.PHOTO else 100 * 1024 * 1024
+        if media_file.size > max_bytes:
+            limit_mb = 10 if item_type == Portfolio.ItemType.PHOTO else 100
+            return JsonResponse(
+                {"error": f"File size exceeds the {limit_mb}MB limit."}, status=400
+            )
+
+        filename = media_file.name
+        ext = filename.split(".")[-1].upper() if "." in filename else ""
+        format_ext = ext
+        mb = media_file.size / (1024 * 1024)
+        file_size = f"{mb:.1f} MB" if mb >= 1 else f"{max(1, int(media_file.size / 1024))} KB"
+
+        if item_type == Portfolio.ItemType.PHOTO:
+            try:
+                from PIL import Image
+                im = Image.open(media_file)
+                dimensions = f"{im.width} × {im.height}"
+                media_file.seek(0)
+            except Exception:
+                dimensions = "1920 × 1080"
+        elif item_type == Portfolio.ItemType.VIDEO:
+            dimensions = "1920 × 1080"
+            if not duration:
+                duration = "03:24"
+    else:
+        if not media_url:
+            return JsonResponse(
+                {"error": "Please select a media file to upload or enter a URL."}, status=400
+            )
+        format_ext = "URL"
+
+    last_order = (
+        Portfolio.objects.filter(artist=artist)
+        .aggregate(models.Max("display_order"))
+        .get("display_order__max")
+        or 0
+    )
+
+    if is_featured:
+        Portfolio.objects.filter(artist=artist).update(is_featured=False)
+
     item = Portfolio.objects.create(
         artist=artist,
         title=title,
-        media_url=media_url,
         description=description,
+        item_type=item_type,
+        media_url=media_url,
+        media_file=media_file,
+        thumbnail=thumbnail_file,
+        youtube_url=youtube_url,
+        duration=duration,
+        dimensions=dimensions,
+        file_size=file_size,
+        format_ext=format_ext,
+        is_featured=is_featured,
+        is_public=is_public,
+        display_order=last_order + 1,
     )
 
     return JsonResponse(
         {
             "message": "Portfolio item added successfully.",
-            "item": {
-                "id": item.id,
-                "title": item.title,
-                "description": item.description,
-                "media_url": item.media_url,
-                "uploaded_at": item.uploaded_at.strftime("%b %d, %Y"),
-            },
+            "item": serialize_portfolio_item(item, request),
         },
         status=201,
     )
+
+
+@csrf_protect
+@require_http_methods(["POST", "PUT"])
+def artist_portfolio_update_view(request, item_id):
+    """Update title, description, visibility, or duration of a portfolio item."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse(
+            {"error": "Performing artist profile required."}, status=403
+        )
+
+    item = Portfolio.objects.filter(id=item_id, artist=artist).first()
+    if not item:
+        return JsonResponse({"error": "Portfolio item not found."}, status=404)
+
+    data = {}
+    if request.content_type and "multipart/form-data" in request.content_type:
+        data = request.POST.dict()
+    else:
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            data = {}
+
+    if "title" in data:
+        title = data["title"].strip()
+        if not title:
+            return JsonResponse({"error": "Title cannot be empty."}, status=400)
+        item.title = title
+
+    if "description" in data:
+        item.description = data["description"].strip()
+
+    if "duration" in data:
+        item.duration = data["duration"].strip()
+
+    if "is_public" in data:
+        item.is_public = str(data["is_public"]).lower() in ("true", "1")
+
+    if "youtube_url" in data and item.item_type == Portfolio.ItemType.YOUTUBE:
+        url = data["youtube_url"].strip()
+        yt_id = extract_youtube_id(url)
+        if not yt_id:
+            return JsonResponse({"error": "Invalid YouTube URL."}, status=400)
+        item.youtube_url = url
+        item.media_url = url
+
+    item.save()
+
+    return JsonResponse(
+        {
+            "message": "Portfolio item updated successfully.",
+            "item": serialize_portfolio_item(item, request),
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def artist_portfolio_set_featured_view(request, item_id):
+    """Set a specific portfolio item as featured, unsetting all others for this artist."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse(
+            {"error": "Performing artist profile required."}, status=403
+        )
+
+    item = Portfolio.objects.filter(id=item_id, artist=artist).first()
+    if not item:
+        return JsonResponse({"error": "Portfolio item not found."}, status=404)
+
+    Portfolio.objects.filter(artist=artist).update(is_featured=False)
+    item.is_featured = True
+    item.save(update_fields=["is_featured"])
+
+    return JsonResponse(
+        {
+            "message": f"'{item.title}' is now set as your featured image.",
+            "featured_item": serialize_portfolio_item(item, request),
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def artist_portfolio_remove_featured_view(request):
+    """Remove featured image status from all portfolio items of this artist."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse(
+            {"error": "Performing artist profile required."}, status=403
+        )
+
+    Portfolio.objects.filter(artist=artist).update(is_featured=False)
+
+    return JsonResponse({"message": "Featured image removed."})
+
+
+@csrf_protect
+@require_POST
+def artist_portfolio_reorder_view(request):
+    """Reorder portfolio items based on provided array of IDs."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse(
+            {"error": "Performing artist profile required."}, status=403
+        )
+
+    try:
+        body = json.loads(request.body)
+        order_list = body.get("order", [])
+    except Exception:
+        return JsonResponse({"error": "Invalid order data."}, status=400)
+
+    for index, item_id in enumerate(order_list):
+        Portfolio.objects.filter(id=item_id, artist=artist).update(
+            display_order=index + 1
+        )
+
+    return JsonResponse({"message": "Portfolio order updated successfully."})
 
 
 @csrf_protect

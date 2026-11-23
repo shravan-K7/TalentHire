@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import gsap from "gsap";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import {
@@ -6,6 +7,9 @@ import {
   respondArtistBooking,
   completeArtistBooking,
   addArtistPortfolio,
+  updateArtistPortfolio,
+  setArtistPortfolioFeatured,
+  removeArtistPortfolioFeatured,
   deleteArtistPortfolio,
   updateArtistAvailability,
   deleteArtistAvailability,
@@ -34,6 +38,23 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  MapPin,
+  ChevronDown,
+  ArrowLeft,
+  Calendar,
+  Clock,
+  Users,
+  FileText,
+  Mail,
+  Phone,
+  Printer,
+  ExternalLink,
+  PhoneCall,
+  MessageCircle,
+  Plus,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  UploadCloud,
 } from "lucide-react";
 import "../css/CustomerDashboard.css";
 import "../css/ArtistDashboard.css";
@@ -60,6 +81,35 @@ function formatPrice(val) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function getWhatsAppUrl(phone, customerName = "", bookingId = "", eventType = "") {
+  if (!phone) return "#";
+  const digits = String(phone).replace(/\D/g, "");
+  if (!digits) return "#";
+  const fullNum = digits.length === 10 ? `91${digits}` : digits;
+  const msg = encodeURIComponent(
+    `Hi ${customerName || "there"}, I'm contacting you regarding TalentHire booking #BK-${bookingId || ""}${eventType ? ` (${eventType})` : ""}.`
+  );
+  return `https://wa.me/${fullNum}?text=${msg}`;
+}
+
+function getGmailUrl(email, customerName = "", bookingId = "", eventType = "", artistName = "") {
+  if (!email) return "#";
+  const subject = encodeURIComponent(`TalentHire Booking #BK-${bookingId || ""} - ${eventType || "Event"}`);
+  const body = encodeURIComponent(
+    `Hi ${customerName || "Host"},\n\nI am contacting you regarding your booking request #BK-${bookingId || ""} for ${eventType || "the performance"}.\n\nBest regards,\n${artistName || "Artist"}`
+  );
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${subject}&body=${body}`;
+}
+
+function getGmapsUrl(query, googleMapsUrl = null, lat = null, lng = null) {
+  if (googleMapsUrl) return googleMapsUrl;
+  if (lat != null && lng != null && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+    return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  }
+  if (!query) return "#";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function renderStars(rating = 5) {
@@ -98,6 +148,11 @@ const COMMON_PERFORMANCE_TYPES = [
   "Stage Emcee",
 ];
 
+const CURRENT_NOW = new Date();
+const CURRENT_MONTH = CURRENT_NOW.getMonth();
+const CURRENT_YEAR = CURRENT_NOW.getFullYear();
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -122,13 +177,29 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const [responding, setResponding] = useState(false);
   const [respondError, setRespondError] = useState("");
 
-  const [portfolioModalOpen, setPortfolioModalOpen] = useState(false);
-  const [portfolioForm, setPortfolioForm] = useState({
+  const timelineTrackRef = useRef(null);
+  const timelineStepperRef = useRef(null);
+
+  // Portfolio Management States
+  const [portfolioFilter, setPortfolioFilter] = useState("all"); // 'all' | 'photos' | 'videos' | 'youtube'
+  const [portfolioModal, setPortfolioModal] = useState({
+    open: false,
+    mode: "add", // 'add' | 'edit'
+    item_type: "photo", // 'photo' | 'video' | 'youtube'
+    id: null,
     title: "",
-    media_url: "",
     description: "",
+    media_file: null,
+    media_url: "",
+    youtube_url: "",
+    duration: "",
+    is_featured: false,
+    is_public: true,
+    saving: false,
+    error: "",
   });
-  const [portfolioSaving, setPortfolioSaving] = useState(false);
+  const [featuredModalOpen, setFeaturedModalOpen] = useState(false);
+  const portfolioFileInputRef = useRef(null);
 
   const [receiptItem, setReceiptItem] = useState(null);
 
@@ -139,6 +210,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     reason: "",
   });
   const [availSaving, setAvailSaving] = useState(false);
+  const [availMonth, setAvailMonth] = useState(() => new Date());
 
   // Edit Profile Form State
   const [editForm, setEditForm] = useState({
@@ -164,7 +236,28 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const fileInputRef = useRef(null);
 
   // Request filter state on requests tab
-  const [requestFilter, setRequestFilter] = useState("all"); // 'all' | 'pending' | 'accepted' | 'rejected'
+  const [requestFilter, setRequestFilter] = useState("all"); // 'all' | 'pending' | 'reschedule' | 'accepted' | 'declined' | 'completed'
+  const [sortBy, setSortBy] = useState("newest"); // 'newest' | 'oldest' | 'event_date_asc' | 'event_date_desc' | 'price_desc' | 'price_asc'
+  const [requestPage, setRequestPage] = useState(1);
+  const [rescheduleModal, setRescheduleModal] = useState({
+    open: false,
+    request: null,
+    booking: null,
+  });
+  const itemsPerPage = 5;
+
+  // Booking Calendar states
+  const [calendarFilter, setCalendarFilter] = useState("upcoming"); // 'upcoming' | 'completed' | 'all'
+  const [completeModal, setCompleteModal] = useState({
+    open: false,
+    booking: null,
+    loading: false,
+  });
+
+  // Payments & Earnings states
+  const [payStatusFilter, setPayStatusFilter] = useState("all");
+  const [payDateFilter, setPayDateFilter] = useState("all");
+  const [payPage, setPayPage] = useState(1);
 
   // Toast feedback
   const [toastMsg, setToastMsg] = useState("");
@@ -208,6 +301,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           const day = String(d.getDate()).padStart(2, "0");
           setSelectedScheduleDate(`${y}-${m}-${day}`);
           setScheduleMonth(new Date(y, d.getMonth(), 1));
+          setAvailMonth(new Date(y, d.getMonth(), 1));
           return;
         }
       }
@@ -231,6 +325,62 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       window.removeEventListener("popstate", handlePop);
     };
   }, []);
+
+  // GSAP animation for Booking Timeline track & steps
+  useEffect(() => {
+    if (activeTab === "booking-detail" && selectedBooking && timelineTrackRef.current) {
+      const b = selectedBooking;
+      const isDeclined = b.status === "rejected" || b.status === "declined";
+      const step2Done = ["accepted", "completed", "rejected", "declined"].includes(b.status);
+      const step3Done = Boolean(
+        b.payment?.status === "success" ||
+        b.payment?.status === "completed" ||
+        b.payment?.status === "held_in_escrow" ||
+        b.status === "completed"
+      );
+      const step4Done = b.status === "completed";
+
+      let targetProgress = "0%";
+      if (step4Done) targetProgress = "100%";
+      else if (step3Done) targetProgress = "66.6%";
+      else if (step2Done && !isDeclined) targetProgress = "33.3%";
+
+      const ctx = gsap.context(() => {
+        const tl = gsap.timeline();
+
+        // 1. Animate track progress width cleanly behind the icons
+        tl.fromTo(
+          timelineTrackRef.current,
+          { width: "0%" },
+          {
+            width: targetProgress,
+            duration: 1.1,
+            ease: "power1.inOut",
+          },
+          0
+        );
+
+        // 2. Pop each completed dot as the track reaches it without touching opacity
+        if (timelineStepperRef.current) {
+          const dots = timelineStepperRef.current.querySelectorAll(".artist-timeline-dot");
+          if (dots[0]) {
+            tl.fromTo(dots[0], { scale: 0.8 }, { scale: 1, duration: 0.35, ease: "back.out(2)" }, 0.05);
+          }
+          if (step2Done && dots[1]) {
+            tl.fromTo(dots[1], { scale: 0.8 }, { scale: 1, duration: 0.35, ease: "back.out(2)" }, 0.38);
+          }
+          if (step3Done && dots[2]) {
+            tl.fromTo(dots[2], { scale: 0.8 }, { scale: 1, duration: 0.35, ease: "back.out(2)" }, 0.75);
+          }
+          if (step4Done && dots[3]) {
+            tl.fromTo(dots[3], { scale: 0.8 }, { scale: 1, duration: 0.35, ease: "back.out(2)" }, 1.05);
+          }
+        }
+      });
+
+      return () => ctx.revert();
+    }
+  }, [activeTab, selectedBooking]);
 
   function switchTab(tabName) {
     setActiveTab(tabName);
@@ -563,42 +713,220 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     }
   }
 
-  // Handle Add Portfolio
-  async function handleAddPortfolioSubmit(e) {
-    e.preventDefault();
-    if (!portfolioForm.title.trim()) {
-      showToast("Title is required for portfolio item.");
-      return;
-    }
-
-    setPortfolioSaving(true);
+  // Handle Confirm Complete Booking Modal
+  async function handleConfirmCompleteBooking() {
+    if (!completeModal.booking) return;
+    setCompleteModal((prev) => ({ ...prev, loading: true }));
     try {
-      await addArtistPortfolio(portfolioForm);
-      showToast("Portfolio item added.");
-      setPortfolioForm({ title: "", media_url: "", description: "" });
-      setPortfolioModalOpen(false);
-      loadDashboard();
+      const res = await completeArtistBooking(completeModal.booking.id);
+      showToast(res.message || "Performance marked as completed.");
+      if (selectedBooking && selectedBooking.id === completeModal.booking.id) {
+        setSelectedBooking((prev) => ({ ...prev, status: "completed" }));
+      }
+      setCompleteModal({ open: false, booking: null, loading: false });
+      await loadDashboard();
     } catch (err) {
-      showToast(err.message || "Failed to add portfolio item.");
-    } finally {
-      setPortfolioSaving(false);
+      showToast(err.message || "Failed to complete performance.");
+      setCompleteModal((prev) => ({ ...prev, loading: false }));
     }
   }
 
-  // Handle Delete Portfolio
-  async function handleDeletePortfolio(itemId) {
-    if (
-      !window.confirm("Are you sure you want to delete this portfolio item?")
-    ) {
+  // Helper: Format Show Date for Booking Calendar
+  function formatShowDate(perf) {
+    const d = perf.event_date_iso
+      ? new Date(perf.event_date_iso)
+      : perf.event_date
+      ? new Date(perf.event_date)
+      : null;
+    const isValid = d && !isNaN(d.getTime());
+    const day = isValid ? String(d.getDate()).padStart(2, "0") : "--";
+    const month = isValid
+      ? d.toLocaleString("en-US", { month: "short" }).toUpperCase()
+      : "DATE";
+    const year = isValid ? String(d.getFullYear()) : "";
+
+    let timeStr = "";
+    if (isValid) {
+      timeStr = d.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } else if (perf.event_date) {
+      const parts = perf.event_date.split(" ");
+      timeStr = parts.slice(-2).join(" ");
+    }
+    return { day, month, year, timeStr };
+  }
+
+  // Portfolio Management Handlers
+  function handleOpenAddModal(defaultType = "photo") {
+    setPortfolioModal({
+      open: true,
+      mode: "add",
+      item_type: defaultType,
+      id: null,
+      title: "",
+      description: "",
+      media_file: null,
+      media_url: "",
+      youtube_url: "",
+      duration: defaultType === "video" ? "03:00" : "",
+      is_featured: false,
+      is_public: true,
+      saving: false,
+      error: "",
+    });
+  }
+
+  function handleOpenEditModal(item) {
+    setPortfolioModal({
+      open: true,
+      mode: "edit",
+      item_type: item.item_type || "photo",
+      id: item.id,
+      title: item.title || "",
+      description: item.description || "",
+      media_file: null,
+      media_url: item.media_url || "",
+      youtube_url: item.youtube_url || item.media_url || "",
+      duration: item.duration || "",
+      is_featured: Boolean(item.is_featured),
+      is_public: item.is_public !== false,
+      saving: false,
+      error: "",
+    });
+  }
+
+  async function handleSavePortfolioItem(e) {
+    e.preventDefault();
+    if (!portfolioModal.title.trim()) {
+      setPortfolioModal((prev) => ({ ...prev, error: "Title is required." }));
       return;
     }
 
+    if (
+      portfolioModal.item_type === "youtube" &&
+      !portfolioModal.youtube_url.trim() &&
+      !portfolioModal.media_url.trim()
+    ) {
+      setPortfolioModal((prev) => ({
+        ...prev,
+        error: "A valid YouTube URL is required.",
+      }));
+      return;
+    }
+
+    if (
+      portfolioModal.mode === "add" &&
+      portfolioModal.item_type !== "youtube" &&
+      !portfolioModal.media_file &&
+      !portfolioModal.media_url.trim()
+    ) {
+      setPortfolioModal((prev) => ({
+        ...prev,
+        error: "Please select a media file to upload or enter a URL.",
+      }));
+      return;
+    }
+
+    setPortfolioModal((prev) => ({ ...prev, saving: true, error: "" }));
+
+    try {
+      let payload;
+      if (portfolioModal.media_file) {
+        payload = new FormData();
+        payload.append("title", portfolioModal.title.trim());
+        payload.append("description", portfolioModal.description.trim());
+        payload.append("item_type", portfolioModal.item_type);
+        payload.append("media_file", portfolioModal.media_file);
+        payload.append("duration", portfolioModal.duration.trim());
+        payload.append("is_featured", portfolioModal.is_featured ? "true" : "false");
+        payload.append("is_public", portfolioModal.is_public ? "true" : "false");
+        if (portfolioModal.youtube_url) {
+          payload.append("youtube_url", portfolioModal.youtube_url.trim());
+        }
+      } else {
+        payload = {
+          title: portfolioModal.title.trim(),
+          description: portfolioModal.description.trim(),
+          item_type: portfolioModal.item_type,
+          media_url: portfolioModal.media_url.trim() || portfolioModal.youtube_url.trim(),
+          youtube_url: portfolioModal.youtube_url.trim(),
+          duration: portfolioModal.duration.trim(),
+          is_featured: portfolioModal.is_featured,
+          is_public: portfolioModal.is_public,
+        };
+      }
+
+      if (portfolioModal.mode === "edit") {
+        await updateArtistPortfolio(portfolioModal.id, payload);
+        showToast("Portfolio item updated.");
+      } else {
+        await addArtistPortfolio(payload);
+        showToast("Portfolio item added.");
+      }
+
+      setPortfolioModal((prev) => ({ ...prev, open: false, saving: false }));
+      loadDashboard();
+    } catch (err) {
+      setPortfolioModal((prev) => ({
+        ...prev,
+        saving: false,
+        error: err.message || "Failed to save portfolio item.",
+      }));
+    }
+  }
+
+  async function handleSetFeatured(itemId) {
+    try {
+      await setArtistPortfolioFeatured(itemId);
+      showToast("Featured image updated.");
+      setFeaturedModalOpen(false);
+      loadDashboard();
+    } catch (err) {
+      showToast(err.message || "Failed to set featured image.");
+    }
+  }
+
+  async function handleRemoveFeatured() {
+    try {
+      await removeArtistPortfolioFeatured();
+      showToast("Featured image removed.");
+      loadDashboard();
+    } catch (err) {
+      showToast(err.message || "Failed to remove featured image.");
+    }
+  }
+
+  async function handleToggleVisibility(item) {
+    try {
+      await updateArtistPortfolio(item.id, { is_public: !item.is_public });
+      showToast(item.is_public ? "Item hidden from public profile." : "Item visible on public profile.");
+      loadDashboard();
+    } catch (err) {
+      showToast(err.message || "Failed to update visibility.");
+    }
+  }
+
+  async function handleDeletePortfolioItem(itemId) {
+    if (!window.confirm("Are you sure you want to delete this portfolio item?")) {
+      return;
+    }
     try {
       await deleteArtistPortfolio(itemId);
       showToast("Portfolio item deleted.");
       loadDashboard();
     } catch (err) {
       showToast(err.message || "Failed to delete portfolio item.");
+    }
+  }
+
+  function handleViewPublicProfile() {
+    if (artist?.id) {
+      navigate(`/artists/${artist.id}`);
+    } else {
+      showToast("Artist profile not loaded yet.");
     }
   }
 
@@ -610,10 +938,19 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       return;
     }
 
+    // Client-side guard: Cannot block date with confirmed booking
+    if (!availForm.is_available && confirmedBookingsMap[availForm.date]) {
+      const b = confirmedBookingsMap[availForm.date];
+      showToast(
+        `Cannot block ${availForm.date}: Confirmed show "${b.event_type || "Booking"}" is already scheduled.`
+      );
+      return;
+    }
+
     setAvailSaving(true);
     try {
       await updateArtistAvailability(availForm);
-      showToast("Availability status saved.");
+      showToast(availForm.is_available ? "Date marked available." : "Date successfully blocked.");
       setAvailForm({ date: "", is_available: false, reason: "" });
       loadDashboard();
     } catch (err) {
@@ -627,7 +964,13 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   async function handleDeleteAvailability(availId) {
     try {
       await deleteArtistAvailability(availId);
-      showToast("Date override removed.");
+      showToast("Date block removed.");
+      setAvailForm((prev) => {
+        const wasDeleted = availability.find(
+          (av) => av.id === availId && av.date?.startsWith(prev.date)
+        );
+        return wasDeleted ? { date: "", is_available: false, reason: "" } : prev;
+      });
       loadDashboard();
     } catch (err) {
       showToast(err.message || "Failed to remove date override.");
@@ -752,6 +1095,10 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const recentActivity = data?.recent_activity || [];
   const payments = data?.payments || [];
   const portfolio = data?.portfolio || [];
+  const featuredItem = data?.featured_item || portfolio.find((p) => p.is_featured) || null;
+  const photos = portfolio.filter((p) => p.item_type === "photo");
+  const videos = portfolio.filter((p) => p.item_type === "video");
+  const youtubeLinks = portfolio.filter((p) => p.item_type === "youtube");
   const reviews = data?.reviews || [];
   const availability = data?.availability || [];
   const notifications = data?.notifications || [];
@@ -766,13 +1113,105 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     .substring(0, 2)
     .toUpperCase();
 
+  // Dynamic filter counts
+  const allRequestsCount = bookings.length;
+  const pendingActionCount = bookings.filter(
+    (b) => b.status === "pending" && !b.has_pending_reschedule
+  ).length;
+  const rescheduleRequestsCount = bookings.filter(
+    (b) => b.has_pending_reschedule
+  ).length;
+  const acceptedRequestsCount = bookings.filter(
+    (b) => b.status === "accepted" && !b.has_pending_reschedule
+  ).length;
+  const declinedRequestsCount = bookings.filter(
+    (b) => b.status === "rejected" || b.status === "declined"
+  ).length;
+  const completedRequestsCount = bookings.filter(
+    (b) => b.status === "completed"
+  ).length;
+
   // Filtered requests
   const filteredBookings = bookings.filter((b) => {
-    if (requestFilter === "pending") return b.status === "pending";
-    if (requestFilter === "accepted") return b.status === "accepted";
-    if (requestFilter === "rejected") return b.status === "rejected";
-    return true;
+    if (requestFilter === "pending") {
+      return b.status === "pending" && !b.has_pending_reschedule;
+    }
+    if (requestFilter === "reschedule") {
+      return b.has_pending_reschedule;
+    }
+    if (requestFilter === "accepted") {
+      return b.status === "accepted" && !b.has_pending_reschedule;
+    }
+    if (requestFilter === "declined" || requestFilter === "rejected") {
+      return b.status === "rejected" || b.status === "declined";
+    }
+    if (requestFilter === "completed") {
+      return b.status === "completed";
+    }
+    return true; // 'all'
   });
+
+  // Sorted requests
+  const sortedBookings = [...filteredBookings].sort((a, b) => {
+    if (sortBy === "newest") {
+      return (b.id || 0) - (a.id || 0);
+    }
+    if (sortBy === "oldest") {
+      return (a.id || 0) - (b.id || 0);
+    }
+    if (sortBy === "event_date_asc") {
+      const da = new Date(a.event_date_iso || a.event_date).getTime() || 0;
+      const db = new Date(b.event_date_iso || b.event_date).getTime() || 0;
+      return da - db;
+    }
+    if (sortBy === "event_date_desc") {
+      const da = new Date(a.event_date_iso || a.event_date).getTime() || 0;
+      const db = new Date(b.event_date_iso || b.event_date).getTime() || 0;
+      return db - da;
+    }
+    if (sortBy === "price_desc") {
+      const pa = Number(a.agreed_price || a.customer_budget || 0);
+      const pb = Number(b.agreed_price || b.customer_budget || 0);
+      return pb - pa;
+    }
+    if (sortBy === "price_asc") {
+      const pa = Number(a.agreed_price || a.customer_budget || 0);
+      const pb = Number(b.agreed_price || b.customer_budget || 0);
+      return pa - pb;
+    }
+    return 0;
+  });
+
+  // Paginated requests
+  const totalPages = Math.max(1, Math.ceil(sortedBookings.length / itemsPerPage));
+  const paginatedBookings = sortedBookings.slice(
+    (requestPage - 1) * itemsPerPage,
+    requestPage * itemsPerPage
+  );
+
+  function handleOpenRescheduleModal(booking) {
+    const matchingReq = pendingRescheduleRequests.find(
+      (r) => r.booking_id === booking.id
+    ) || {
+      request_id: booking.pending_reschedule?.id,
+      booking_id: booking.id,
+      customer_name: booking.customer_name,
+      customer_email: booking.customer_email,
+      event_type: booking.event_type,
+      original_event_date_formatted:
+        booking.pending_reschedule?.original_event_date_formatted ||
+        booking.event_date,
+      new_event_date_formatted:
+        booking.pending_reschedule?.new_event_date_formatted,
+      reason: booking.pending_reschedule?.reason,
+      status: booking.pending_reschedule?.status,
+    };
+    setRescheduleModal({
+      open: true,
+      request: matchingReq,
+      booking,
+    });
+  }
 
   const pendingBookingsList = bookings.filter((b) => b.status === "pending");
   const acceptedBookingsList = bookings.filter((b) => b.status === "accepted");
@@ -884,6 +1323,155 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
   const recentPayout = payments && payments.length > 0 ? payments[0] : null;
 
+  // Booking Calendar derived data
+  const upcomingShows = bookings
+    .filter((b) => b.status === "accepted")
+    .sort((a, b) => {
+      const da = new Date(a.event_date_iso || a.event_date).getTime() || 0;
+      const db = new Date(b.event_date_iso || b.event_date).getTime() || 0;
+      return da - db;
+    });
+
+  const completedShows = bookings
+    .filter((b) => b.status === "completed")
+    .sort((a, b) => {
+      const da = new Date(a.event_date_iso || a.event_date).getTime() || 0;
+      const db = new Date(b.event_date_iso || b.event_date).getTime() || 0;
+      return db - da;
+    });
+
+  const allShows = [...upcomingShows, ...completedShows];
+  const blockedDatesList = availability.filter((av) => !av.is_available);
+
+  // Helper: extract local YYYY-MM-DD from booking
+  function getBookingLocalDateStr(booking) {
+    if (!booking) return null;
+    const raw = booking.event_date_iso || booking.event_date;
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return null;
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  // Helper: format blocked date for table
+  function formatBlockedDate(rawDate) {
+    if (!rawDate) return "";
+    const d = new Date(rawDate.includes("T") ? rawDate : rawDate + "T00:00:00");
+    if (isNaN(d.getTime())) return rawDate;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
+  // Availability helpers and derived calendar data
+  const confirmedBookingsMap = {};
+  bookings.forEach((b) => {
+    if (b.status === "accepted" || b.status === "completed") {
+      const dStr = getBookingLocalDateStr(b);
+      if (dStr) {
+        confirmedBookingsMap[dStr] = b;
+      }
+    }
+  });
+
+  const blockedDatesMap = {};
+  availability.forEach((av) => {
+    if (!av.is_available && av.date) {
+      const dStr = av.date.slice(0, 10);
+      blockedDatesMap[dStr] = av;
+    }
+  });
+
+  // Calendar month computations
+  const availYear = availMonth.getFullYear();
+  const availMonthIndex = availMonth.getMonth();
+  const availMonthName = availMonth.toLocaleString("en-US", { month: "long" });
+  const availMonthHeaderTitle = `${availMonthName} ${availYear}`;
+
+  const availFirstDayOfWeek = new Date(availYear, availMonthIndex, 1).getDay();
+  const availTotalDaysInMonth = new Date(availYear, availMonthIndex + 1, 0).getDate();
+
+  let availableDaysThisMonthCount = 0;
+  for (let day = 1; day <= availTotalDaysInMonth; day++) {
+    const dStr = `${availYear}-${String(availMonthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const isBooked = Boolean(confirmedBookingsMap[dStr]);
+    const isBlocked = Boolean(blockedDatesMap[dStr]);
+    if (!isBooked && !isBlocked) {
+      availableDaysThisMonthCount++;
+    }
+  }
+
+  const availCalendarCells = [];
+  for (let i = 0; i < availFirstDayOfWeek; i++) {
+    availCalendarCells.push({ empty: true, key: `empty-${i}` });
+  }
+  for (let day = 1; day <= availTotalDaysInMonth; day++) {
+    const dateStr = `${availYear}-${String(availMonthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const bookedBooking = confirmedBookingsMap[dateStr];
+    const blockedOverride = blockedDatesMap[dateStr];
+
+    const isBooked = Boolean(bookedBooking);
+    const isBlocked = !isBooked && Boolean(blockedOverride);
+    const isAvailable = !isBooked && !isBlocked;
+    const isSelected = availForm.date === dateStr;
+
+    availCalendarCells.push({
+      empty: false,
+      day,
+      dateStr,
+      isBooked,
+      isBlocked,
+      isAvailable,
+      isSelected,
+      booking: bookedBooking,
+      override: blockedOverride,
+      key: dateStr,
+    });
+  }
+
+  const handleAvailPrevMonth = () => {
+    setAvailMonth(new Date(availYear, availMonthIndex - 1, 1));
+  };
+  const handleAvailNextMonth = () => {
+    setAvailMonth(new Date(availYear, availMonthIndex + 1, 1));
+  };
+
+  const handleSelectCalendarDate = (cell) => {
+    if (cell.empty) return;
+    setAvailForm({
+      date: cell.dateStr,
+      is_available: cell.override ? cell.override.is_available : false,
+      reason: cell.override ? (cell.override.reason || "") : "",
+    });
+  };
+
+  const handleEditBlockedRow = (av) => {
+    const dStr = av.date ? av.date.slice(0, 10) : "";
+    setAvailForm({
+      date: dStr,
+      is_available: false,
+      reason: av.reason || "",
+    });
+    if (av.date) {
+      const d = new Date(av.date.includes("T") ? av.date : av.date + "T00:00:00");
+      if (!isNaN(d.getTime())) {
+        setAvailMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+      }
+    }
+  };
+
+  const displayedShows =
+    calendarFilter === "completed"
+      ? completedShows
+      : calendarFilter === "all"
+      ? allShows
+      : upcomingShows;
+
   function getActivityBadgeInfo(act) {
     const title = (act.title || "").toLowerCase();
     if (title.includes("confirm") || title.includes("accept")) {
@@ -903,6 +1491,60 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     }
     return { label: act.title || "Activity", badgeClass: "badge-gray" };
   }
+
+  // Financial breakdown derived data
+  const grossBookingAmount = bookings.reduce((sum, b) => {
+    if (b.status === "accepted" || b.status === "completed") {
+      const p = Number(b.agreed_price || b.customer_budget || 0);
+      return sum + (isNaN(p) ? 0 : p);
+    }
+    return sum;
+  }, 0);
+
+  const platformCommission = Number((grossBookingAmount * 0.08).toFixed(2));
+  const netArtistEarnings = Number((grossBookingAmount * 0.92).toFixed(2));
+
+  // Transactions filtering and pagination
+  const filteredPayments = payments.filter((pay) => {
+    // Status filter
+    if (payStatusFilter !== "all") {
+      if (payStatusFilter === "pending" && pay.status !== "pending") return false;
+      if (payStatusFilter === "success" && pay.status !== "success") return false;
+      if (payStatusFilter === "refunded" && !pay.status.includes("refund")) return false;
+      if (payStatusFilter === "failed" && pay.status !== "failed") return false;
+    }
+
+    // Date range filter
+    if (payDateFilter !== "all" && (pay.created_at_iso || pay.date)) {
+      const rawDate = pay.created_at_iso || pay.date;
+      const payDate = new Date(rawDate);
+      const payTime = payDate.getTime();
+      if (!isNaN(payTime)) {
+        if (payDateFilter === "this_month") {
+          if (
+            payDate.getMonth() !== CURRENT_MONTH ||
+            payDate.getFullYear() !== CURRENT_YEAR
+          ) {
+            return false;
+          }
+        } else if (payDateFilter === "last_30_days") {
+          if (CURRENT_NOW.getTime() - payTime > THIRTY_DAYS_MS) return false;
+        } else if (payDateFilter === "this_year") {
+          if (payDate.getFullYear() !== CURRENT_YEAR) return false;
+        }
+      }
+    }
+
+    return true;
+  });
+
+  const payItemsPerPage = 5;
+  const payTotalPages = Math.max(1, Math.ceil(filteredPayments.length / payItemsPerPage));
+  const currentPayPage = Math.min(payPage, payTotalPages);
+  const paginatedPayments = filteredPayments.slice(
+    (currentPayPage - 1) * payItemsPerPage,
+    currentPayPage * payItemsPerPage
+  );
 
   if (loading) {
     return (
@@ -1185,7 +1827,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             ===================================================================== */}
         <main className="cd-main-panel" id="main-content">
           {/* Top Bar with actions / verification badge on secondary tabs */}
-          {activeTab !== "dashboard" && (
+          {activeTab !== "dashboard" && activeTab !== "requests" && activeTab !== "booking-detail" && activeTab !== "calendar" && (
             <div className="cd-content-topbar">
               <div className="cd-topbar-actions">
                 <span
@@ -1871,7 +2513,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     ₹{artist.starting_price || "0"}
                   </div>
                   <p
-                    style={{ fontSize: "0.85rem", color: "#888888", margin: 0 }}
+                    style={{ fontSize: "0.94rem", color: "#888888", margin: 0 }}
                   >
                     Base performance fee per celebration. Actual booking prices
                     may vary based on duration and requirements.
@@ -1893,7 +2535,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     <p
                       style={{
                         color: "#888888",
-                        fontSize: "0.88rem",
+                        fontSize: "0.96rem",
                         margin: "8px 0 0",
                       }}
                     >
@@ -1918,7 +2560,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 >
                   {artist.portfolio_url && (
                     <div>
-                      <div style={{ fontSize: "0.84rem", color: "#888888" }}>
+                      <div style={{ fontSize: "0.92rem", color: "#888888" }}>
                         External Showreel / Video Link:
                       </div>
                       <a
@@ -1939,7 +2581,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
                   {artist.additional_information && (
                     <div>
-                      <div style={{ fontSize: "0.84rem", color: "#888888" }}>
+                      <div style={{ fontSize: "0.92rem", color: "#888888" }}>
                         Special Skills, Equipment & Languages:
                       </div>
                       <p
@@ -2017,7 +2659,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     <p
                       style={{
                         margin: "6px 0 0",
-                        fontSize: "0.8rem",
+                        fontSize: "0.88rem",
                         color: "#777777",
                       }}
                     >
@@ -2305,450 +2947,807 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           )}
 
           {/* =================================================================
-              TAB 4: PORTFOLIO MANAGEMENT PAGE
+              TAB 4: PORTFOLIO MANAGEMENT PAGE (REDESIGNED TO REFERENCE UI)
               ================================================================= */}
           {activeTab === "portfolio" && (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <p style={{ margin: 0, color: "#A0A0A0", fontSize: "0.94rem" }}>
-                  Upload videos, performance links, and showreels for
-                  prospective event organizers.
-                </p>
+            <div className="artist-port-view">
+              {/* A. Portfolio Header */}
+              <div className="artist-port-header">
+                <div>
+                  <h1 className="artist-port-title">Portfolio Management</h1>
+                  <p className="artist-port-desc">
+                    Manage your photos, videos and performance links. These items appear on your public artist profile.
+                  </p>
+                </div>
+
+                <div className="artist-port-header-actions">
+                  <div className="artist-port-btn-group">
+                    <button
+                      type="button"
+                      className="artist-port-btn-primary"
+                      onClick={() => handleOpenAddModal("photo")}
+                    >
+                      <Plus size={16} />
+                      Add Portfolio Item
+                    </button>
+                    <button
+                      type="button"
+                      className="artist-port-btn-secondary"
+                      onClick={handleViewPublicProfile}
+                    >
+                      View Public Profile
+                    </button>
+                  </div>
+                  <p className="artist-port-preview-hint">
+                    Preview how your portfolio looks to event organizers.
+                  </p>
+                </div>
+              </div>
+
+              {/* Filter Tabs */}
+              <div className="artist-port-tabs-bar" role="tablist">
                 <button
                   type="button"
-                  className="cd-btn-primary cd-btn-sm"
-                  onClick={() => setPortfolioModalOpen(true)}
+                  className={`artist-port-tab ${portfolioFilter === "all" ? "active" : ""}`}
+                  onClick={() => setPortfolioFilter("all")}
                 >
-                  + Add Portfolio Item
+                  All Items ({portfolio.length})
+                </button>
+                <button
+                  type="button"
+                  className={`artist-port-tab ${portfolioFilter === "photos" ? "active" : ""}`}
+                  onClick={() => setPortfolioFilter("photos")}
+                >
+                  Photos ({photos.length})
+                </button>
+                <button
+                  type="button"
+                  className={`artist-port-tab ${portfolioFilter === "videos" ? "active" : ""}`}
+                  onClick={() => setPortfolioFilter("videos")}
+                >
+                  Videos ({videos.length})
+                </button>
+                <button
+                  type="button"
+                  className={`artist-port-tab ${portfolioFilter === "youtube" ? "active" : ""}`}
+                  onClick={() => setPortfolioFilter("youtube")}
+                >
+                  YouTube Links ({youtubeLinks.length})
                 </button>
               </div>
 
-              {portfolio.length === 0 ? (
-                <div className="cd-empty-state">
-                  <p className="cd-empty-title">No Portfolio Items Yet</p>
-                  <p className="cd-empty-text">
-                    Click "Add Portfolio Item" to showcase your performance
-                    showreels.
-                  </p>
-                </div>
-              ) : (
-                <div className="cd-portfolio-grid">
-                  {portfolio.map((item) => (
-                    <div key={item.id} className="cd-portfolio-card">
-                      <div className="cd-portfolio-media-box">
-                        {item.media_url ? (
-                          <a
-                            href={item.media_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="cd-portfolio-media-link"
-                          >
-                            <svg
-                              width="24"
-                              height="24"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="5 3 19 12 5 21 5 3" />
-                            </svg>
-                            <span>Watch Performance</span>
-                          </a>
-                        ) : (
-                          <span
-                            style={{ color: "#666666", fontSize: "0.85rem" }}
-                          >
-                            Audio / Showcase Media
-                          </span>
-                        )}
-                      </div>
+              {/* B. Featured Image Card */}
+              {(portfolioFilter === "all" || portfolioFilter === "photos") && (
+                <div className="artist-port-featured-card">
+                  <div className="artist-port-featured-left">
+                    <h3 className="artist-port-featured-title">Featured Image</h3>
+                    <p className="artist-port-featured-desc">
+                      The main image displayed at the top of your public profile.
+                    </p>
+                  </div>
 
-                      <div className="cd-portfolio-body">
-                        <h3 className="cd-portfolio-title">{item.title}</h3>
-                        <p className="cd-portfolio-desc">
-                          {item.description || "No description provided."}
-                        </p>
-
-                        <div className="cd-portfolio-footer">
-                          <span>{item.uploaded_at}</span>
-                          <button
-                            type="button"
-                            className="cd-btn-ghost cd-btn-sm"
-                            style={{ color: "#EF5350" }}
-                            onClick={() => handleDeletePortfolio(item.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
+                  <div className="artist-port-featured-preview-box">
+                    {featuredItem ? (
+                      <img
+                        src={featuredItem.media_url || featuredItem.thumbnail_url}
+                        alt={featuredItem.title}
+                        className="artist-port-featured-img"
+                      />
+                    ) : artist.profile_image ? (
+                      <img
+                        src={artist.profile_image}
+                        alt={artist.stage_name}
+                        className="artist-port-featured-img"
+                      />
+                    ) : (
+                      <div className="artist-port-featured-placeholder">
+                        <UploadCloud size={32} />
+                        <span>No featured image selected</span>
                       </div>
+                    )}
+                  </div>
+
+                  <div className="artist-port-featured-right">
+                    <span className="artist-port-featured-pill">
+                      Shown first on public profile
+                    </span>
+                    <h4 className="artist-port-featured-name" title={featuredItem?.title}>
+                      {featuredItem?.title || (artist.profile_image ? "Artist Profile Photo" : "No Featured Image")}
+                    </h4>
+                    <p className="artist-port-featured-meta">
+                      {featuredItem?.format_ext || "JPG"} • {featuredItem?.dimensions || "1920 × 1080"} • {featuredItem?.file_size || "2.4 MB"}
+                    </p>
+
+                    <div className="artist-port-featured-actions">
+                      <button
+                        type="button"
+                        className="artist-port-btn-change-feat"
+                        onClick={() => setFeaturedModalOpen(true)}
+                      >
+                        Change Featured Image
+                      </button>
+                      {featuredItem && (
+                        <button
+                          type="button"
+                          className="artist-port-btn-remove-feat"
+                          onClick={handleRemoveFeatured}
+                        >
+                          Remove Featured
+                        </button>
+                      )}
                     </div>
-                  ))}
+                  </div>
+                </div>
+              )}
+
+              {/* C. Photo Gallery Section */}
+              {(portfolioFilter === "all" || portfolioFilter === "photos") && (
+                <div className="artist-port-section-card">
+                  <div className="artist-port-section-top">
+                    <div>
+                      <h3 className="artist-port-section-heading">Photo Gallery</h3>
+                      <p className="artist-port-section-sub">
+                        Showcase your performances, events and stage presence with photos.
+                      </p>
+                    </div>
+                  </div>
+
+                  {photos.length === 0 ? (
+                    <div className="artist-port-empty-notice">
+                      No photos uploaded yet. Showcase your stage presence by adding high-quality photos.
+                    </div>
+                  ) : (
+                    <div className="artist-port-photo-grid">
+                      {photos.map((item) => (
+                        <div key={item.id} className="artist-port-photo-item">
+                          <div className="artist-port-photo-thumb-wrap">
+                            <img
+                              src={item.media_url || item.thumbnail_url}
+                              alt={item.title}
+                              className="artist-port-photo-thumb"
+                            />
+                          </div>
+                          <div className="artist-port-photo-body">
+                            <h4 className="artist-port-photo-title" title={item.title}>
+                              {item.title}
+                            </h4>
+                            <span
+                              className={`artist-port-pill ${item.is_public ? "visible" : "hidden"}`}
+                              onClick={() => handleToggleVisibility(item)}
+                              style={{ cursor: "pointer" }}
+                              title="Click to toggle visibility"
+                            >
+                              {item.is_public ? "Visible on profile" : "Hidden"}
+                            </span>
+                            <div className="artist-port-item-actions">
+                              {!item.is_featured ? (
+                                <button
+                                  type="button"
+                                  className="artist-port-action-link"
+                                  onClick={() => handleSetFeatured(item.id)}
+                                >
+                                  Set as Featured
+                                </button>
+                              ) : (
+                                <span style={{ color: "#4ADE80", fontWeight: 600 }}>Featured</span>
+                              )}
+                              <span>|</span>
+                              <button
+                                type="button"
+                                className="artist-port-action-link secondary"
+                                onClick={() => handleOpenEditModal(item)}
+                              >
+                                Edit
+                              </button>
+                              <span>|</span>
+                              <button
+                                type="button"
+                                className="artist-port-action-link danger"
+                                onClick={() => handleDeletePortfolioItem(item.id)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="artist-port-bottom-bar">
+                    <button
+                      type="button"
+                      className="artist-port-btn-add-photos"
+                      onClick={() => handleOpenAddModal("photo")}
+                    >
+                      Add Photos
+                    </button>
+                    <p className="artist-port-file-hint">
+                      Upload high-quality images (JPG, JPEG, PNG) • Max file size: 10 MB per image
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* D. Performance Videos Section */}
+              {(portfolioFilter === "all" || portfolioFilter === "videos") && (
+                <div className="artist-port-section-card">
+                  <div className="artist-port-section-top">
+                    <div>
+                      <h3 className="artist-port-section-heading">Performance Videos</h3>
+                      <p className="artist-port-section-sub">
+                        Add your performance reels or highlight videos.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="artist-port-btn-add-action"
+                      onClick={() => handleOpenAddModal("video")}
+                    >
+                      Add Video
+                    </button>
+                  </div>
+
+                  {videos.length === 0 ? (
+                    <div className="artist-port-empty-notice">
+                      No performance videos uploaded yet. Add video highlights to let clients see you in action.
+                    </div>
+                  ) : (
+                    <div className="artist-port-videos-list">
+                      {videos.map((item) => (
+                        <div key={item.id} className="artist-port-video-row">
+                          <div className="artist-port-video-thumb-box">
+                            <img
+                              src={item.thumbnail_url || item.media_url || "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80"}
+                              alt={item.title}
+                              className="artist-port-video-thumb"
+                            />
+                            <div className="artist-port-video-play-overlay">
+                              <div className="artist-port-play-icon">▶</div>
+                            </div>
+                            <span className="artist-port-duration-tag">
+                              {item.duration || "03:24"}
+                            </span>
+                          </div>
+
+                          <div className="artist-port-video-info">
+                            <h4 className="artist-port-video-title">{item.title}</h4>
+                            <p className="artist-port-video-desc">
+                              {item.description || "A compilation of live performances from recent events."}
+                            </p>
+                            <p className="artist-port-video-meta">
+                              {item.format_ext || "MP4"} • {item.dimensions || "1920 × 1080"} • {item.file_size || "85.4 MB"}
+                            </p>
+                          </div>
+
+                          <div className="artist-port-video-actions">
+                            <button
+                              type="button"
+                              className="artist-port-action-link secondary"
+                              onClick={() => handleOpenEditModal(item)}
+                            >
+                              Edit
+                            </button>
+                            <span style={{ color: "#555" }}>|</span>
+                            <button
+                              type="button"
+                              className="artist-port-action-link danger"
+                              onClick={() => handleDeletePortfolioItem(item.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* E. YouTube Performance Links Section */}
+              {(portfolioFilter === "all" || portfolioFilter === "youtube") && (
+                <div className="artist-port-section-card">
+                  <div className="artist-port-section-top">
+                    <div>
+                      <h3 className="artist-port-section-heading">YouTube Performance Links</h3>
+                      <p className="artist-port-section-sub">
+                        Add YouTube links to live performances or official videos.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="artist-port-btn-add-action"
+                      onClick={() => handleOpenAddModal("youtube")}
+                    >
+                      Add YouTube Link
+                    </button>
+                  </div>
+
+                  {youtubeLinks.length === 0 ? (
+                    <div className="artist-port-empty-notice">
+                      No YouTube links added yet. Paste YouTube links to stream highlights on your public profile.
+                    </div>
+                  ) : (
+                    <div className="artist-port-yt-table-wrap">
+                      <table className="artist-port-yt-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "25%" }}>Title</th>
+                            <th style={{ width: "45%" }}>YouTube URL</th>
+                            <th style={{ width: "15%" }}>Visibility</th>
+                            <th style={{ width: "15%", textAlign: "right" }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {youtubeLinks.map((item) => (
+                            <tr key={item.id}>
+                              <td>
+                                <span className="artist-port-yt-title">{item.title}</span>
+                              </td>
+                              <td>
+                                <a
+                                  href={item.youtube_url || item.media_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="artist-port-yt-link"
+                                >
+                                  {item.youtube_url || item.media_url}
+                                  <ExternalLink size={12} />
+                                </a>
+                              </td>
+                              <td>
+                                <span
+                                  className={`artist-port-pill ${item.is_public ? "visible" : "hidden"}`}
+                                  onClick={() => handleToggleVisibility(item)}
+                                  style={{ cursor: "pointer" }}
+                                  title="Click to toggle visibility"
+                                >
+                                  {item.is_public ? "Visible on profile" : "Hidden"}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <div style={{ display: "inline-flex", gap: "10px", alignItems: "center" }}>
+                                  <button
+                                    type="button"
+                                    className="artist-port-action-link secondary"
+                                    onClick={() => handleOpenEditModal(item)}
+                                  >
+                                    Edit
+                                  </button>
+                                  <span style={{ color: "#555" }}>|</span>
+                                  <button
+                                    type="button"
+                                    className="artist-port-action-link danger"
+                                    onClick={() => handleDeletePortfolioItem(item.id)}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
 
           {/* =================================================================
-              TAB 5: BOOKING REQUESTS PAGE
+              TAB 5: BOOKING REQUESTS PAGE (Matching Reference UI)
               ================================================================= */}
           {activeTab === "requests" && (
-            <div className="cd-view-container" style={{ gap: "20px" }}>
-              {/* Filter Tabs */}
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <div className="artist-req-page">
+              {/* Header: Title + Subtitle + Sort Dropdown */}
+              <div className="artist-req-header">
+                <div>
+                  <h1 className="artist-req-title">Booking Requests</h1>
+                  <p className="artist-req-subtext">
+                    Manage incoming requests, view details and take action.
+                  </p>
+                </div>
+
+                <div className="artist-req-sort-box">
+                  <select
+                    className="artist-req-sort-select"
+                    value={sortBy}
+                    onChange={(e) => {
+                      setSortBy(e.target.value);
+                      setRequestPage(1);
+                    }}
+                    aria-label="Sort booking requests"
+                  >
+                    <option value="newest">Sort: Newest First</option>
+                    <option value="oldest">Sort: Oldest First</option>
+                    <option value="event_date_asc">Sort: Event Date (Soonest)</option>
+                    <option value="event_date_desc">Sort: Event Date (Latest)</option>
+                    <option value="price_desc">Sort: Price (High to Low)</option>
+                    <option value="price_asc">Sort: Price (Low to High)</option>
+                  </select>
+                  <ChevronDown className="artist-req-sort-chevron" size={15} />
+                </div>
+              </div>
+
+              {/* Status Filter Tabs with Dynamic Counts */}
+              <div className="artist-req-tabs-bar" role="tablist">
                 <button
                   type="button"
-                  className={`cd-btn-${requestFilter === "all" ? "primary" : "secondary"} cd-btn-sm`}
-                  onClick={() => setRequestFilter("all")}
+                  className={`artist-req-tab ${requestFilter === "all" ? "active" : ""}`}
+                  onClick={() => {
+                    setRequestFilter("all");
+                    setRequestPage(1);
+                  }}
                 >
-                  All Requests ({bookings.length})
+                  <span>All Requests</span>
+                  <span className="artist-req-tab-badge">{allRequestsCount}</span>
                 </button>
+
                 <button
                   type="button"
-                  className={`cd-btn-${requestFilter === "pending" ? "primary" : "secondary"} cd-btn-sm`}
-                  onClick={() => setRequestFilter("pending")}
+                  className={`artist-req-tab ${requestFilter === "pending" ? "active" : ""}`}
+                  onClick={() => {
+                    setRequestFilter("pending");
+                    setRequestPage(1);
+                  }}
                 >
-                  Pending Action ({pendingBookingsList.length})
+                  <span>Pending Action</span>
+                  <span className="artist-req-tab-badge">{pendingActionCount}</span>
                 </button>
+
                 <button
                   type="button"
-                  className={`cd-btn-${requestFilter === "reschedule" ? "primary" : "secondary"} cd-btn-sm`}
-                  onClick={() => setRequestFilter("reschedule")}
+                  className={`artist-req-tab ${requestFilter === "reschedule" ? "active" : ""}`}
+                  onClick={() => {
+                    setRequestFilter("reschedule");
+                    setRequestPage(1);
+                  }}
                 >
-                  Reschedule Requests ({pendingRescheduleRequests.length})
+                  <span>Reschedule Requests</span>
+                  <span className="artist-req-tab-badge">{rescheduleRequestsCount}</span>
                 </button>
+
                 <button
                   type="button"
-                  className={`cd-btn-${requestFilter === "accepted" ? "primary" : "secondary"} cd-btn-sm`}
-                  onClick={() => setRequestFilter("accepted")}
+                  className={`artist-req-tab ${requestFilter === "accepted" ? "active" : ""}`}
+                  onClick={() => {
+                    setRequestFilter("accepted");
+                    setRequestPage(1);
+                  }}
                 >
-                  Accepted ({acceptedBookingsList.length})
+                  <span>Accepted</span>
+                  <span className="artist-req-tab-badge">{acceptedRequestsCount}</span>
                 </button>
+
                 <button
                   type="button"
-                  className={`cd-btn-${requestFilter === "rejected" ? "primary" : "secondary"} cd-btn-sm`}
-                  onClick={() => setRequestFilter("rejected")}
+                  className={`artist-req-tab ${requestFilter === "declined" ? "active" : ""}`}
+                  onClick={() => {
+                    setRequestFilter("declined");
+                    setRequestPage(1);
+                  }}
                 >
-                  Declined
+                  <span>Declined</span>
+                  <span className="artist-req-tab-badge">{declinedRequestsCount}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`artist-req-tab ${requestFilter === "completed" ? "active" : ""}`}
+                  onClick={() => {
+                    setRequestFilter("completed");
+                    setRequestPage(1);
+                  }}
+                >
+                  <span>Completed</span>
+                  <span className="artist-req-tab-badge">{completedRequestsCount}</span>
                 </button>
               </div>
 
-              {/* Phase 6: Pending Rescheduling Requests Section */}
-              {pendingRescheduleRequests.length > 0 &&
-                (requestFilter === "all" ||
-                  requestFilter === "pending" ||
-                  requestFilter === "reschedule") && (
-                  <div className="cd-reschedule-banner">
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: "12px",
+              {/* Booking Cards Stack in Table Structure */}
+              {paginatedBookings.length === 0 ? (
+                <div
+                  className="cd-empty-card"
+                  style={{
+                    padding: "48px 24px",
+                    textAlign: "center",
+                    background: "#161616",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: "12px",
+                  }}
+                >
+                  <h3
+                    style={{
+                      fontSize: "1.15rem",
+                      color: "#FFFFFF",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    No Booking Requests Found
+                  </h3>
+                  <p
+                    style={{
+                      color: "#8E8E93",
+                      fontSize: "0.9rem",
+                      margin: "0 0 16px 0",
+                    }}
+                  >
+                    No requests match the current "
+                    {requestFilter === "all" ? "All" : requestFilter}" filter
+                    selection.
+                  </p>
+                  {requestFilter !== "all" && (
+                    <button
+                      type="button"
+                      className="artist-btn-view"
+                      onClick={() => {
+                        setRequestFilter("all");
+                        setRequestPage(1);
                       }}
                     >
-                      <h3
-                        style={{
-                          margin: 0,
-                          fontSize: "1.05rem",
-                          fontWeight: 700,
-                          color: "#FFA726",
-                        }}
-                      >
-                        Pending Rescheduling Requests (
-                        {pendingRescheduleRequests.length})
-                      </h3>
-                      <span style={{ fontSize: "0.82rem", color: "#A0A0A0" }}>
-                        Action required to accept or decline date changes
-                      </span>
-                    </div>
+                      Show All Requests
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="artist-req-table-wrapper">
+                  <div className="artist-req-list">
+                    {paginatedBookings.map((b) => {
+                      const rawDate = b.event_date_iso || b.event_date;
+                      const d = rawDate ? new Date(rawDate) : null;
+                      const isValidDate = d && !isNaN(d.getTime());
+                      const day = isValidDate
+                        ? String(d.getDate()).padStart(2, "0")
+                        : "--";
+                      const month = isValidDate
+                        ? d
+                            .toLocaleString("en-US", { month: "short" })
+                            .toUpperCase()
+                        : "DATE";
+                      const year = isValidDate ? d.getFullYear() : "2026";
+                      const timeStr = isValidDate
+                        ? d.toLocaleTimeString("en-US", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: true,
+                          })
+                        : b.event_date
+                          ? b.event_date.split(" ").slice(-2).join(" ")
+                          : "--";
 
-                    {pendingRescheduleRequests.map((req) => (
-                      <div
-                        key={req.request_id}
-                        className="cd-reschedule-card"
-                      >
-                        <div className="cd-reschedule-card-header">
-                          <div>
-                            <span
-                              className="cd-booking-code"
-                              style={{ marginRight: "8px" }}
-                            >
-                              #BK-{req.booking_id}
-                            </span>
-                            <span
-                              style={{ fontWeight: 700, color: "#FFFFFF" }}
-                            >
-                              {req.customer_name}
-                            </span>{" "}
-                            <span
-                              style={{
-                                color: "#888888",
-                                fontSize: "0.86rem",
-                              }}
-                            >
-                              ({req.customer_email})
-                            </span>
-                            <div
-                              style={{
-                                color: "#CCCCCC",
-                                fontSize: "0.88rem",
-                                marginTop: "2px",
-                              }}
-                            >
-                              Event: <strong>{req.event_type}</strong>
+                      const duration = b.performance_duration
+                        ? b.performance_duration.toLowerCase().includes("hour")
+                          ? b.performance_duration
+                          : `${b.performance_duration} Hours`
+                        : "—";
+
+                      const audience = b.expected_audience_size
+                        ? String(b.expected_audience_size)
+                        : "—";
+                      const priceVal =
+                        b.status === "pending"
+                          ? b.customer_budget || b.agreed_price
+                          : b.agreed_price || b.customer_budget;
+
+                      let statusBadge = {
+                        label: "Pending Action",
+                        className: "status-pending",
+                      };
+                      if (b.has_pending_reschedule) {
+                        statusBadge = {
+                          label: "Reschedule Request",
+                          className: "status-reschedule",
+                        };
+                      } else if (b.status === "accepted") {
+                        statusBadge = {
+                          label: "Accepted",
+                          className: "status-accepted",
+                        };
+                      } else if (
+                        b.status === "rejected" ||
+                        b.status === "declined"
+                      ) {
+                        statusBadge = {
+                          label: "Declined",
+                          className: "status-declined",
+                        };
+                      } else if (b.status === "completed") {
+                        statusBadge = {
+                          label: "Completed",
+                          className: "status-completed",
+                        };
+                      } else if (b.status === "cancelled") {
+                        statusBadge = {
+                          label: "Cancelled",
+                          className: "status-declined",
+                        };
+                      }
+
+                      return (
+                        <div key={b.id} className="artist-req-card">
+                          {/* Col 1: Date Box */}
+                          <div className="artist-req-date-box">
+                            <span className="artist-req-date-day">{day}</span>
+                            <span className="artist-req-date-month">{month}</span>
+                            <span className="artist-req-date-year">{year}</span>
+                          </div>
+
+                          {/* Col 2: Main Event & Host Info */}
+                          <div className="artist-req-main-info">
+                            <h3 className="artist-req-event-title">
+                              {b.event_type}
+                            </h3>
+                            <div className="artist-req-host">
+                              Host: {b.customer_name}
+                            </div>
+                            <div className="artist-req-location">
+                              <MapPin
+                                size={13}
+                                style={{ color: "#FF5722", flexShrink: 0 }}
+                              />
+                              <span>
+                                {b.event_location || b.city || "Location TBD"}
+                              </span>
                             </div>
                           </div>
-                          <span className="cd-history-badge pending">
-                            Pending Artist Approval
-                          </span>
-                        </div>
 
-                        <div className="cd-reschedule-dates-grid">
-                          <div className="cd-reschedule-date-box">
-                            <span
-                              style={{
-                                fontSize: "0.76rem",
-                                color: "#888888",
-                                textTransform: "uppercase",
-                              }}
-                            >
-                              Current Scheduled Date
+                          {/* Col 3: Event Time */}
+                          <div className="artist-req-meta-col">
+                            <span className="artist-req-meta-lbl">
+                              Event Time
                             </span>
-                            <strong
-                              style={{
-                                color: "#D4D4D4",
-                                fontSize: "0.92rem",
-                              }}
-                            >
-                              {req.original_event_date_formatted}
-                            </strong>
-                          </div>
-                          <div className="cd-reschedule-arrow">➔</div>
-                          <div className="cd-reschedule-date-box">
-                            <span
-                              style={{
-                                fontSize: "0.76rem",
-                                color: "#FF5722",
-                                textTransform: "uppercase",
-                              }}
-                            >
-                              Proposed New Date
+                            <span className="artist-req-meta-val">
+                              {timeStr}
                             </span>
-                            <strong
-                              style={{
-                                color: "#FF5722",
-                                fontSize: "0.92rem",
+                          </div>
+
+                          {/* Col 4: Duration */}
+                          <div className="artist-req-meta-col">
+                            <span className="artist-req-meta-lbl">
+                              Duration
+                            </span>
+                            <span className="artist-req-meta-val">
+                              {duration}
+                            </span>
+                          </div>
+
+                          {/* Col 5: Audience */}
+                          <div className="artist-req-meta-col">
+                            <span className="artist-req-meta-lbl">
+                              Audience
+                            </span>
+                            <span className="artist-req-meta-val">
+                              {audience}
+                            </span>
+                          </div>
+
+                          {/* Col 6: Offered Price */}
+                          <div className="artist-req-meta-col">
+                            <span className="artist-req-meta-lbl">
+                              Offered Price
+                            </span>
+                            <span className="artist-req-meta-val price">
+                              ₹{formatPrice(priceVal)}
+                            </span>
+                          </div>
+
+                          {/* Col 7: Status Indicator */}
+                          <div className="artist-req-status-col">
+                            <span
+                              className={`artist-req-status-pill ${statusBadge.className}`}
+                            >
+                              {statusBadge.label}
+                            </span>
+                          </div>
+
+                          {/* Col 8: Actions */}
+                          <div className="artist-req-actions">
+                            <button
+                              type="button"
+                              className="artist-btn-view"
+                              onClick={() => {
+                                setSelectedBooking(b);
+                                switchTab("booking-detail");
                               }}
                             >
-                              {req.new_event_date_formatted}
-                            </strong>
+                              View Details
+                            </button>
+
+                            {b.has_pending_reschedule ? (
+                              <button
+                                type="button"
+                                className="artist-btn-respond"
+                                onClick={() => handleOpenRescheduleModal(b)}
+                              >
+                                Respond
+                              </button>
+                            ) : b.status === "pending" ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="artist-btn-accept"
+                                  onClick={() => openRespondModal("accept", b)}
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  className="artist-btn-decline"
+                                  onClick={() => openRespondModal("reject", b)}
+                                >
+                                  Decline
+                                </button>
+                              </>
+                            ) : b.status === "accepted" ? (
+                              <button
+                                type="button"
+                                className="artist-btn-complete"
+                                onClick={() => handleCompleteBooking(b.id)}
+                              >
+                                Mark Completed
+                              </button>
+                            ) : null}
                           </div>
                         </div>
-
-                        {req.reason && (
-                          <div
-                            style={{
-                              fontSize: "0.88rem",
-                              color: "#B0B0B0",
-                              background: "#151515",
-                              padding: "8px 12px",
-                              borderRadius: "6px",
-                            }}
-                          >
-                            <strong style={{ color: "#FFFFFF" }}>
-                              Host Note:
-                            </strong>{" "}
-                            "{req.reason}"
-                          </div>
-                        )}
-
-                        <div className="cd-reschedule-actions">
-                          <button
-                            type="button"
-                            className="cd-btn-primary cd-btn-sm"
-                            disabled={
-                              rescheduleActionLoadingId === req.request_id
-                            }
-                            onClick={() => handleApproveReschedule(req)}
-                          >
-                            {rescheduleActionLoadingId === req.request_id
-                              ? "Updating..."
-                              : "Approve New Date"}
-                          </button>
-                          <button
-                            type="button"
-                            className="cd-btn-ghost cd-btn-sm"
-                            style={{ color: "#EF5350" }}
-                            disabled={
-                              rescheduleActionLoadingId === req.request_id
-                            }
-                            onClick={() =>
-                              setRejectNoteModal({
-                                open: true,
-                                request: req,
-                                reason: "",
-                              })
-                            }
-                          >
-                            Decline Request
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                )}
-
-              {requestFilter === "reschedule" &&
-              pendingRescheduleRequests.length === 0 ? (
-                <div className="cd-empty-card">
-                  <h3>No Rescheduling Requests Found</h3>
-                  <p>
-                    No customer rescheduling requests are awaiting your
-                    approval at this time.
-                  </p>
                 </div>
-              ) : requestFilter !== "reschedule" &&
-                filteredBookings.length === 0 ? (
-                <div className="cd-empty-card">
-                  <h3>No Booking Requests Found</h3>
-                  <p>No booking requests match the current filter selection.</p>
-                </div>
-              ) : requestFilter !== "reschedule" ? (
-                <div className="cd-bookings-list">
-                  {filteredBookings.map((b) => (
-                    <div key={b.id} className="cd-booking-row-card">
-                      <div className="cd-booking-id-block">
-                        <span className="cd-booking-code">#BK-{b.id}</span>
-                        <span className="cd-booking-artist-sub">
-                          {b.event_type} · Host: {b.customer_name}
-                        </span>
-                        {b.message && (
-                          <div
-                            style={{
-                              fontSize: "0.86rem",
-                              color: "#B0B0B0",
-                              fontStyle: "italic",
-                              marginTop: "4px",
-                            }}
-                          >
-                            "{b.message}"
-                          </div>
-                        )}
-                        {b.response_message && (
-                          <div
-                            style={{
-                              fontSize: "0.82rem",
-                              color: "#FF9800",
-                              marginTop: "4px",
-                            }}
-                          >
-                            Artist Note: {b.response_message}
-                          </div>
-                        )}
-                      </div>
+              )}
 
-                      <div className="cd-booking-date-block">
-                        <span className="cd-booking-date-text">
-                          {b.event_date || "Date TBD"}
-                        </span>
-                        <span className="cd-booking-location-text">
-                          {b.event_location}
-                        </span>
-                      </div>
+              {/* Footer / Pagination */}
+              {sortedBookings.length > 0 && (
+                <div className="artist-req-footer">
+                  <div className="artist-req-count-text">
+                    {sortedBookings.length <= itemsPerPage
+                      ? `Showing ${sortedBookings.length} requests`
+                      : `Showing ${(requestPage - 1) * itemsPerPage + 1}–${Math.min(
+                          requestPage * itemsPerPage,
+                          sortedBookings.length,
+                        )} of ${sortedBookings.length} requests`}
+                  </div>
 
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          gap: "2px",
-                        }}
+                  {totalPages > 1 && (
+                    <div className="artist-req-pagination">
+                      <button
+                        type="button"
+                        className="artist-page-nav-btn"
+                        disabled={requestPage <= 1}
+                        onClick={() =>
+                          setRequestPage((p) => Math.max(1, p - 1))
+                        }
                       >
-                        <span className={`cd-status-pill status-${b.status}`}>
-                          {formatBookingStatus(b.status)}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "0.72rem",
-                            color: "#A0A0A0",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.04em",
-                            marginTop: "2px",
-                          }}
-                        >
-                          {b.status === "pending" ? "Offered Price" : "Agreed Fee"}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "1.05rem",
-                            fontWeight: 800,
-                            color: "#FF5722",
-                          }}
-                        >
-                          ₹{b.status === "pending" && b.customer_budget
-                            ? formatPrice(b.customer_budget)
-                            : formatPrice(b.agreed_price)}
-                        </span>
-                      </div>
+                        &lt; Previous
+                      </button>
 
-                      <div className="cd-booking-actions-block">
-                        <button
-                          type="button"
-                          className="cd-btn-secondary cd-btn-sm"
-                          onClick={() => {
-                            setSelectedBooking(b);
-                            switchTab("booking-detail");
-                          }}
-                        >
-                          Details
-                        </button>
-
-                        {b.status === "pending" && (
-                          <>
-                            <button
-                              type="button"
-                              className="cd-btn-primary cd-btn-sm"
-                              onClick={() => openRespondModal("accept", b)}
-                            >
-                              Accept
-                            </button>
-                            <button
-                              type="button"
-                              className="cd-btn-ghost cd-btn-sm"
-                              style={{ color: "#EF5350" }}
-                              onClick={() => openRespondModal("reject", b)}
-                            >
-                              Decline
-                            </button>
-                          </>
-                        )}
-
-                        {b.status === "accepted" && (
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                        (pageNum) => (
                           <button
+                            key={pageNum}
                             type="button"
-                            className="cd-btn-secondary cd-btn-sm"
-                            style={{ borderColor: "#4CAF50", color: "#4CAF50" }}
-                            onClick={() => handleCompleteBooking(b.id)}
+                            className={`artist-page-num-btn ${pageNum === requestPage ? "active" : ""}`}
+                            onClick={() => setRequestPage(pageNum)}
                           >
-                            Mark Completed
+                            {pageNum}
                           </button>
-                        )}
-                      </div>
+                        ),
+                      )}
+
+                      <button
+                        type="button"
+                        className="artist-page-nav-btn"
+                        disabled={requestPage >= totalPages}
+                        onClick={() =>
+                          setRequestPage((p) => Math.min(totalPages, p + 1))
+                        }
+                      >
+                        Next &gt;
+                      </button>
                     </div>
-                  ))}
+                  )}
                 </div>
-              ) : null}
+              )}
             </div>
           )}
 
@@ -2756,38 +3755,25 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 6: BOOKING DETAILS PAGE
               ================================================================= */}
           {activeTab === "booking-detail" && (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
+            <div className="artist-booking-detail-page">
+              <button
+                type="button"
+                className="artist-detail-back-btn"
+                onClick={() => switchTab("requests")}
               >
-                <button
-                  type="button"
-                  className="cd-btn-secondary cd-btn-sm"
-                  onClick={() => switchTab("requests")}
-                >
-                  ← Back to Booking Requests
-                </button>
-                {selectedBooking && (
-                  <span
-                    className={`cd-status-pill status-${selectedBooking.status}`}
-                  >
-                    {formatBookingStatus(selectedBooking.status)}
-                  </span>
-                )}
+                <ArrowLeft size={14} />
+                Back to Booking Requests
+              </button>
+              <div className="artist-detail-header-text">
+                <h1>Booking Details</h1>
+                <p>Complete information about this booking request.</p>
               </div>
 
               {!selectedBooking ? (
                 <div className="cd-empty-state">
                   <p className="cd-empty-title">No Booking Selected</p>
                   <p className="cd-empty-text">
-                    Please select a booking from the Booking Requests list to
-                    view complete details.
+                    Please select a booking from the Booking Requests list to view complete details.
                   </p>
                   <button
                     type="button"
@@ -2797,509 +3783,640 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     Go to Booking Requests
                   </button>
                 </div>
-              ) : (
-                <div className="cd-profile-card">
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
-                      paddingBottom: "16px",
-                    }}
-                  >
-                    <div>
-                      <h2
-                        className="cd-card-title"
-                        style={{ fontSize: "1.4rem" }}
-                      >
-                        {selectedBooking.event_type}
-                      </h2>
-                      <p
-                        style={{
-                          margin: "4px 0 0",
-                          color: "#888888",
-                          fontSize: "0.9rem",
-                        }}
-                      >
-                        Reference Code: BK-{selectedBooking.id} · Requested on{" "}
-                        {selectedBooking.created_at}
-                      </p>
+              ) : (() => {
+                const b = selectedBooking;
+
+                // Status Badge logic
+                let summaryBadge = {
+                  label: "Pending Action",
+                  className: "status-pending",
+                };
+                if (b.has_pending_reschedule) {
+                  summaryBadge = {
+                    label: "Reschedule Request",
+                    className: "status-reschedule",
+                  };
+                } else if (b.status === "completed") {
+                  summaryBadge = {
+                    label: "Completed",
+                    className: "status-completed",
+                  };
+                } else if (b.status === "accepted") {
+                  summaryBadge = {
+                    label: "Accepted",
+                    className: "status-accepted",
+                  };
+                } else if (b.status === "rejected" || b.status === "declined") {
+                  summaryBadge = {
+                    label: "Declined",
+                    className: "status-declined",
+                  };
+                } else if (b.status === "cancelled") {
+                  summaryBadge = {
+                    label: "Cancelled",
+                    className: "status-declined",
+                  };
+                }
+
+                // Event Date & Time formatting: e.g. "Nov 10, 2026 • 06:00 PM"
+                let eventDateTime = b.event_date || "Date & Time TBD";
+                const dateParts = (b.event_date || "").split(" ");
+                if (dateParts.length >= 5) {
+                  eventDateTime = `${dateParts.slice(0, 3).join(" ")} • ${dateParts.slice(3).join(" ")}`;
+                }
+
+                const venue = b.venue_name || b.event_location || b.event_area || "Venue TBD";
+                const locationArea = [
+                  b.event_area,
+                  b.city || b.event_location,
+                ].filter(Boolean).join(", ") || b.event_location || "Location TBD";
+
+                const duration = b.performance_duration
+                  ? b.performance_duration.toLowerCase().includes("hour")
+                    ? b.performance_duration
+                    : `${b.performance_duration} Hours`
+                  : "Not Specified";
+
+                const audience = b.expected_audience_size ? String(b.expected_audience_size) : "Not Specified";
+
+                const offeredPrice = b.customer_budget || b.agreed_price || "0.00";
+                const agreedFee = b.agreed_price || b.customer_budget || "0.00";
+
+                let payBadge = {
+                  text: "Payment Pending",
+                  isPending: true,
+                };
+                if (b.status === "completed") {
+                  payBadge = { text: "Escrow Completed", isPending: false };
+                } else if (b.payment?.status === "held_in_escrow") {
+                  payBadge = { text: "Escrow Held", isPending: false };
+                } else if (b.payment?.status === "completed" || b.payment?.status === "success") {
+                  payBadge = { text: "Escrow Completed", isPending: false };
+                } else if (b.payment?.status === "refunded") {
+                  payBadge = { text: "Refunded", isPending: true };
+                } else if (b.status === "accepted") {
+                  payBadge = { text: "Awaiting Escrow Deposit", isPending: true };
+                }
+
+                // Stepper Calculations
+                const isDeclined = b.status === "rejected" || b.status === "declined";
+                const step1Done = true;
+                const step1Date = b.created_at || "Recent";
+
+                const step2Done = ["accepted", "completed", "rejected", "declined"].includes(b.status);
+                const step2Date = b.accepted_at || (["accepted", "completed"].includes(b.status) ? b.created_at : "Pending");
+
+                const step3Done = Boolean(
+                  b.payment?.status === "success" ||
+                  b.payment?.status === "completed" ||
+                  b.payment?.status === "held_in_escrow" ||
+                  b.status === "completed"
+                );
+                const step3Date = b.payment?.date
+                  ? b.payment.date.split(" ").slice(0, 3).join(" ")
+                  : (b.status === "completed" ? (b.accepted_at || b.created_at) : "Pending");
+
+                const step4Done = b.status === "completed";
+                const step4Date = b.status === "completed"
+                  ? (b.event_date ? b.event_date.split(" ").slice(0, 3).join(" ") : "Completed")
+                  : "Pending";
+
+                let progressWidth = "0%";
+                if (step4Done) {
+                  progressWidth = "100%";
+                } else if (step3Done) {
+                  progressWidth = "66.6%";
+                } else if (step2Done && !isDeclined) {
+                  progressWidth = "33.3%";
+                }
+
+                return (
+                  <>
+                    {/* 1. Booking Summary */}
+                    <div className="artist-detail-summary-card">
+                      <div>
+                        <h2 className="artist-detail-summary-title">
+                          {b.event_type || "Event"}
+                        </h2>
+                        <p className="artist-detail-summary-ref">
+                          Reference Code: BK-{b.id} • Requested on {b.created_at || "Recent"}
+                        </p>
+                      </div>
+                      <span className={`artist-req-status-pill ${summaryBadge.className}`}>
+                        {summaryBadge.label}
+                      </span>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      {selectedBooking.status === "pending" ? (
-                        <>
-                          <div style={{ fontSize: "0.82rem", color: "#A0A0A0" }}>
-                            Offered Price
+
+                    {/* 2. Middle 2-Column Grid */}
+                    <div className="artist-detail-grid">
+                      {/* Left Column */}
+                      <div className="artist-detail-left-col">
+                        {/* Event Details */}
+                        <div className="artist-detail-card">
+                          <h3 className="artist-detail-card-title">Event Details</h3>
+                          <div className="artist-detail-rows">
+                            <div className="artist-detail-row">
+                              <span className="artist-detail-row-lbl">
+                                <Calendar size={14} />
+                                Event Date & Time
+                              </span>
+                              <span className="artist-detail-row-val">{eventDateTime}</span>
+                            </div>
+
+                            <div className="artist-detail-row">
+                              <span className="artist-detail-row-lbl">
+                                <MapPin size={14} />
+                                Event Venue
+                              </span>
+                              <span className="artist-detail-row-val" style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                <span>{venue}</span>
+                                {venue && venue !== "Venue not specified" && (
+                                  <a
+                                    href={getGmapsUrl(venue, b.google_maps_url, b.latitude, b.longitude)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="artist-info-action-btn map"
+                                    title="Open Venue in Google Maps"
+                                  >
+                                    <ExternalLink size={11} /> See Location
+                                  </a>
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="artist-detail-row">
+                              <span className="artist-detail-row-lbl">
+                                <MapPin size={14} />
+                                Location / Area
+                              </span>
+                              <span className="artist-detail-row-val" style={{ display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                <span>{locationArea}</span>
+                                {locationArea && locationArea !== "Location not specified" && (
+                                  <a
+                                    href={getGmapsUrl(locationArea, null, b.area_latitude, b.area_longitude)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="artist-info-action-btn map"
+                                    title="Open Location in Google Maps"
+                                  >
+                                    <ExternalLink size={11} /> See Location
+                                  </a>
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="artist-detail-row">
+                              <span className="artist-detail-row-lbl">
+                                <Clock size={14} />
+                                Performance Duration
+                              </span>
+                              <span className="artist-detail-row-val">{duration}</span>
+                            </div>
+
+                            <div className="artist-detail-row">
+                              <span className="artist-detail-row-lbl">
+                                <Users size={14} />
+                                Expected Audience
+                              </span>
+                              <span className="artist-detail-row-val">{audience}</span>
+                            </div>
                           </div>
-                          <div
-                            style={{
-                              fontSize: "1.6rem",
-                              fontWeight: 800,
-                              color: "#FF5722",
-                            }}
-                          >
-                            ₹{selectedBooking.customer_budget
-                              ? formatPrice(selectedBooking.customer_budget)
-                              : formatPrice(selectedBooking.agreed_price)}
+                        </div>
+
+                        {/* Host's Event Notes & Special Inquiries */}
+                        <div className="artist-detail-card">
+                          <h3 className="artist-detail-card-title">
+                            <FileText size={16} />
+                            Host&apos;s Event Notes & Special Inquiries
+                          </h3>
+                          <div className="artist-detail-notes-box">
+                            {b.message ? (
+                              b.message
+                            ) : (
+                              <span style={{ color: "#777777", fontStyle: "italic" }}>
+                                No special instructions submitted by host.
+                              </span>
+                            )}
                           </div>
-                          <div
-                            style={{
-                              fontSize: "0.76rem",
-                              color: "#888888",
-                              marginTop: "2px",
-                            }}
-                          >
-                            Pending Artist Acceptance
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div style={{ fontSize: "0.82rem", color: "#A0A0A0" }}>
-                            Agreed Performance Fee
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "1.6rem",
-                              fontWeight: 800,
-                              color: "#FF5722",
-                            }}
-                          >
-                            ₹{formatPrice(selectedBooking.agreed_price)}
-                          </div>
-                          {selectedBooking.customer_budget && (
-                            <div
-                              style={{
-                                fontSize: "0.8rem",
-                                color: "#888888",
-                                marginTop: "3px",
-                              }}
-                            >
-                              Offered: ₹{formatPrice(selectedBooking.customer_budget)}
+                          {b.response_message && (
+                            <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                              <div style={{ fontSize: "0.86rem", fontWeight: 700, color: "#FF5722", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>
+                                Artist Response Note
+                              </div>
+                              <div style={{ fontSize: "0.95rem", color: "#E0E0E0" }}>
+                                {b.response_message}
+                              </div>
                             </div>
                           )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Grid details */}
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(280px, 1fr))",
-                      gap: "20px",
-                      marginTop: "20px",
-                    }}
-                  >
-                    <div>
-                      <h4
-                        style={{
-                          color: "#FF5722",
-                          textTransform: "uppercase",
-                          fontSize: "0.82rem",
-                          letterSpacing: "0.06em",
-                        }}
-                      >
-                        Event Host Information
-                      </h4>
-                      <p
-                        style={{
-                          fontSize: "1.05rem",
-                          fontWeight: 700,
-                          margin: "8px 0 4px",
-                          color: "#F7F7F7",
-                        }}
-                      >
-                        {selectedBooking.customer_name}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: "0.92rem",
-                          color: "#A0A0A0",
-                          margin: "2px 0",
-                        }}
-                      >
-                        Email:{" "}
-                        {selectedBooking.customer_email || "Not provided"}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: "0.92rem",
-                          color: "#A0A0A0",
-                          margin: "2px 0",
-                        }}
-                      >
-                        Phone:{" "}
-                        {selectedBooking.customer_phone || "Not provided"}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: "0.92rem",
-                          color: "#A0A0A0",
-                          margin: "2px 0",
-                        }}
-                      >
-                        Host City:{" "}
-                        {selectedBooking.customer_location || "Not provided"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <h4
-                        style={{
-                          color: "#FF5722",
-                          textTransform: "uppercase",
-                          fontSize: "0.82rem",
-                          letterSpacing: "0.06em",
-                        }}
-                      >
-                        Schedule & Location
-                      </h4>
-                      <p
-                        style={{
-                          fontSize: "1.05rem",
-                          fontWeight: 700,
-                          margin: "8px 0 4px",
-                          color: "#F7F7F7",
-                        }}
-                      >
-                        {selectedBooking.event_date || "Date not finalized"}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: "0.92rem",
-                          color: "#A0A0A0",
-                          margin: "2px 0",
-                        }}
-                      >
-                        Venue:{" "}
-                        <strong style={{ color: "#F7F7F7" }}>
-                          {selectedBooking.venue_name || selectedBooking.event_location || "Venue TBD"}
-                        </strong>
-                      </p>
-                      {selectedBooking.event_area && (
-                        <p
-                          style={{
-                            fontSize: "0.92rem",
-                            color: "#A0A0A0",
-                            margin: "2px 0",
-                          }}
-                        >
-                          Area / Locality:{" "}
-                          <strong style={{ color: "#F7F7F7" }}>
-                            {selectedBooking.event_area}
-                          </strong>
-                          {selectedBooking.city ? `, ${selectedBooking.city}` : ""}
-                          {selectedBooking.state ? `, ${selectedBooking.state}` : ""}
-                        </p>
-                      )}
-                      {selectedBooking.event_address && selectedBooking.event_address !== selectedBooking.event_area && (
-                        <p
-                          style={{
-                            fontSize: "0.92rem",
-                            color: "#A0A0A0",
-                            margin: "2px 0",
-                          }}
-                        >
-                          Address: {selectedBooking.event_address}
-                        </p>
-                      )}
-                      {(selectedBooking.latitude != null && selectedBooking.longitude != null) && (
-                        <p
-                          style={{
-                            fontSize: "0.92rem",
-                            color: "#A0A0A0",
-                            margin: "2px 0",
-                          }}
-                        >
-                          Coordinates: {selectedBooking.latitude},{" "}
-                          {selectedBooking.longitude}
-                        </p>
-                      )}
-                      {(selectedBooking.google_maps_url || (selectedBooking.latitude != null && selectedBooking.longitude != null)) && (
-                        <p
-                          style={{
-                            fontSize: "0.92rem",
-                            color: "#FF5722",
-                            margin: "4px 0",
-                          }}
-                        >
-                          <a
-                            href={
-                              selectedBooking.google_maps_url ||
-                              `https://www.google.com/maps/search/?api=1&query=${selectedBooking.latitude},${selectedBooking.longitude}`
-                            }
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              color: "#FF8A65",
-                              textDecoration: "underline",
-                              fontWeight: 600,
-                            }}
-                          >
-                            Open in Google Maps
-                          </a>
-                        </p>
-                      )}
-                      {selectedBooking.location_instructions && (
-                        <p
-                          style={{
-                            fontSize: "0.90rem",
-                            color: "#CCCCCC",
-                            margin: "6px 0 2px",
-                            background: "rgba(255,255,255,0.04)",
-                            padding: "8px 10px",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          Directions / Instructions: {selectedBooking.location_instructions}
-                        </p>
-                      )}
-                      <p
-                        style={{
-                          fontSize: "0.92rem",
-                          color: "#A0A0A0",
-                          margin: "2px 0",
-                        }}
-                      >
-                        Payment Status:{" "}
-                        {selectedBooking.payment
-                          ? formatBookingStatus(selectedBooking.payment.status)
-                          : "Pending Escrow"}
-                      </p>
-                      {selectedBooking.customer_budget && (
-                        <p
-                          style={{
-                            fontSize: "0.92rem",
-                            color: "#A0A0A0",
-                            margin: "2px 0",
-                          }}
-                        >
-                          Offered Price:{" "}
-                          <strong style={{ color: "#F7F7F7" }}>
-                            ₹{formatPrice(selectedBooking.customer_budget)}
-                          </strong>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Message box */}
-                  <div
-                    style={{
-                      marginTop: "20px",
-                      background: "#191919",
-                      padding: "16px",
-                      borderRadius: "6px",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "0.84rem",
-                        color: "#888888",
-                        textTransform: "uppercase",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      Host's Event Notes & Special Inquiries
-                    </div>
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: "0.94rem",
-                        color: "#E0E0E0",
-                        lineHeight: 1.5,
-                        whiteSpace: "pre-line",
-                      }}
-                    >
-                      {selectedBooking.message ||
-                        "No special instructions submitted by host."}
-                    </p>
-                  </div>
-
-                  {selectedBooking.response_message && (
-                    <div
-                      style={{
-                        marginTop: "14px",
-                        background: "rgba(255,87,34,0.08)",
-                        padding: "14px",
-                        borderRadius: "6px",
-                        borderLeft: "3px solid #FF5722",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "0.82rem",
-                          color: "#FF5722",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Artist Response Note
+                        </div>
                       </div>
-                      <p
-                        style={{
-                          margin: "4px 0 0",
-                          fontSize: "0.92rem",
-                          color: "#F7F7F7",
-                        }}
-                      >
-                        {selectedBooking.response_message}
-                      </p>
+
+                      {/* Right Column */}
+                      <div className="artist-detail-right-col">
+                        {/* Host Information */}
+                        <div className="artist-detail-card">
+                          <h3 className="artist-detail-card-title">Host Information</h3>
+                          <div className="artist-host-name">
+                            {b.customer_name || "Host"}
+                          </div>
+                          <div className="artist-host-info-list">
+                            <div className="artist-host-row">
+                              <div className="artist-host-row-left">
+                                <Mail size={14} style={{ color: "#8E8E93", flexShrink: 0 }} />
+                                {b.customer_email ? (
+                                  <span className="artist-host-text" title={b.customer_email}>
+                                    {b.customer_email}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#777777" }}>Not Provided</span>
+                                )}
+                              </div>
+                              {b.customer_email && (
+                                <a
+                                  href={getGmailUrl(
+                                    b.customer_email,
+                                    b.customer_name,
+                                    b.id,
+                                    b.event_type,
+                                    artist.stage_name || user?.username,
+                                  )}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="artist-info-action-btn mail"
+                                  title="Compose email via Gmail"
+                                >
+                                  <Mail size={12} /> Mail
+                                </a>
+                              )}
+                            </div>
+
+                            <div className="artist-host-row">
+                              <div className="artist-host-row-left">
+                                <Phone size={14} style={{ color: "#8E8E93", flexShrink: 0 }} />
+                                {b.customer_phone ? (
+                                  <span className="artist-host-text">
+                                    {b.customer_phone}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#777777" }}>Not Provided</span>
+                                )}
+                              </div>
+                              {b.customer_phone && (
+                                <div style={{ display: "inline-flex", gap: "6px", flexShrink: 0 }}>
+                                  <a
+                                    href={`tel:${String(b.customer_phone).replace(/\s+/g, "")}`}
+                                    className="artist-info-action-btn call"
+                                    title="Call Host"
+                                  >
+                                    <PhoneCall size={12} /> Call
+                                  </a>
+                                  <a
+                                    href={getWhatsAppUrl(
+                                      b.customer_phone,
+                                      b.customer_name,
+                                      b.id,
+                                      b.event_type,
+                                    )}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="artist-info-action-btn whatsapp"
+                                    title="Chat on WhatsApp"
+                                  >
+                                    <MessageCircle size={12} /> WhatsApp
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="artist-host-row">
+                              <div className="artist-host-row-left">
+                                <MapPin size={14} style={{ color: "#8E8E93", flexShrink: 0 }} />
+                                {b.customer_location || b.city ? (
+                                  <span className="artist-host-text" title={b.customer_location || b.city}>
+                                    {b.customer_location || b.city}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: "#777777" }}>Not Provided</span>
+                                )}
+                              </div>
+                              {(b.customer_location || b.city) && (
+                                <a
+                                  href={getGmapsUrl(b.customer_location || b.city)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="artist-info-action-btn map"
+                                  title="Open in Google Maps"
+                                >
+                                  <ExternalLink size={12} /> See Location
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Offer & Payment */}
+                        <div className="artist-detail-card">
+                          <h3 className="artist-detail-card-title">Offer & Payment</h3>
+                          <div className="artist-pay-rows">
+                            <div className="artist-pay-row">
+                              <span className="artist-pay-lbl">Offered Price</span>
+                              <span className="artist-pay-val">₹{formatPrice(offeredPrice)}</span>
+                            </div>
+                            <div className="artist-pay-row">
+                              <span className="artist-pay-lbl">Agreed Performance Fee</span>
+                              <span className="artist-pay-val orange">₹{formatPrice(agreedFee)}</span>
+                            </div>
+                            <div className="artist-pay-row">
+                              <span className="artist-pay-lbl">Payment Status</span>
+                              <span className={`artist-pay-badge ${payBadge.isPending ? "pending" : ""}`}>
+                                {payBadge.text}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  )}
 
-                  {/* Actions */}
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "12px",
-                      marginTop: "24px",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    {selectedBooking.status === "pending" && (
-                      <>
-                        <button
-                          type="button"
-                          className="cd-btn-primary"
-                          onClick={() => openRespondModal("accept", selectedBooking)}
-                        >
-                          Accept Booking Request
-                        </button>
-                        <button
-                          type="button"
-                          className="cd-btn-secondary"
-                          style={{ borderColor: "#EF5350", color: "#EF5350" }}
-                          onClick={() => openRespondModal("reject", selectedBooking)}
-                        >
-                          Decline Request
-                        </button>
-                      </>
-                    )}
+                    {/* 3. Booking Timeline */}
+                    <div className="artist-timeline-card">
+                      <h3 className="artist-timeline-title">Booking Timeline</h3>
+                      <div className="artist-timeline-stepper" ref={timelineStepperRef}>
+                        <div className="artist-timeline-track">
+                          <div
+                            ref={timelineTrackRef}
+                            className="artist-timeline-track-progress"
+                            style={{ width: progressWidth }}
+                          />
+                        </div>
 
-                    {selectedBooking.status === "accepted" && (
-                      <>
-                        <button
-                          type="button"
-                          className="cd-btn-primary"
-                          onClick={() =>
-                            handleCompleteBooking(selectedBooking.id)
-                          }
-                        >
-                          Mark Performance as Completed
-                        </button>
-                        <button
-                          type="button"
-                          className="cd-btn-secondary"
-                          style={{ borderColor: "#EF5350", color: "#EF5350" }}
-                          onClick={() => openArtistCancelModal(selectedBooking)}
-                        >
-                          Cancel Booking (100% Refund)
-                        </button>
-                      </>
-                    )}
+                        {/* Step 1: Request Received */}
+                        <div className={`artist-timeline-step ${step1Done ? "completed" : ""}`}>
+                          <div className="artist-timeline-dot">
+                            <Check size={16} strokeWidth={2.5} />
+                          </div>
+                          <span className="artist-timeline-step-label">Request Received</span>
+                          <span className="artist-timeline-step-date">{step1Date}</span>
+                        </div>
 
-                    <button
-                      type="button"
-                      className="cd-btn-secondary"
-                      onClick={() => window.print()}
-                    >
-                      Print Event Specification
-                    </button>
-                  </div>
-                </div>
-              )}
+                        {/* Step 2: Accepted or Declined */}
+                        <div className={`artist-timeline-step ${isDeclined ? "declined" : (step2Done ? "completed" : "")}`}>
+                          <div className="artist-timeline-dot">
+                            {isDeclined ? "✕" : (step2Done ? <Check size={16} strokeWidth={2.5} /> : "2")}
+                          </div>
+                          <span className="artist-timeline-step-label">
+                            {isDeclined ? "Declined" : "Accepted"}
+                          </span>
+                          <span className="artist-timeline-step-date">{step2Date}</span>
+                        </div>
+
+                        {/* Step 3: Payment Completed */}
+                        <div className={`artist-timeline-step ${step3Done ? "completed" : ""}`}>
+                          <div className="artist-timeline-dot">
+                            {step3Done ? <Check size={16} strokeWidth={2.5} /> : "3"}
+                          </div>
+                          <span className="artist-timeline-step-label">Payment Completed</span>
+                          <span className="artist-timeline-step-date">{step3Date}</span>
+                        </div>
+
+                        {/* Step 4: Completed */}
+                        <div className={`artist-timeline-step ${step4Done ? "completed" : ""}`}>
+                          <div className="artist-timeline-dot">
+                            {step4Done ? <Check size={16} strokeWidth={2.5} /> : "4"}
+                          </div>
+                          <span className="artist-timeline-step-label">Completed</span>
+                          <span className="artist-timeline-step-date">{step4Date}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 4. Actions Bottom Bar */}
+                    <div className="artist-detail-bottom-bar">
+                      <button
+                        type="button"
+                        className="artist-detail-btn"
+                        onClick={() => window.print()}
+                      >
+                        <Printer size={15} />
+                        Print Event Specification
+                      </button>
+
+                      {/* Contextual actions */}
+                      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        {b.status === "pending" && (
+                          <>
+                            <button
+                              type="button"
+                              className="cd-btn-primary"
+                              onClick={() => openRespondModal("accept", b)}
+                            >
+                              Accept Booking Request
+                            </button>
+                            <button
+                              type="button"
+                              className="cd-btn-secondary"
+                              style={{ borderColor: "#EF5350", color: "#EF5350" }}
+                              onClick={() => openRespondModal("reject", b)}
+                            >
+                              Decline Request
+                            </button>
+                          </>
+                        )}
+
+                        {b.status === "accepted" && (
+                          <>
+                            <button
+                              type="button"
+                              className="cd-btn-primary"
+                              onClick={() => handleCompleteBooking(b.id)}
+                            >
+                              Mark Completed
+                            </button>
+                            <button
+                              type="button"
+                              className="cd-btn-secondary"
+                              style={{ borderColor: "#EF5350", color: "#EF5350" }}
+                              onClick={() => openArtistCancelModal(b)}
+                            >
+                              Cancel Booking
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
           {/* =================================================================
-              TAB 7: BOOKING CALENDAR PAGE
+              TAB 7: BOOKING CALENDAR PAGE (REDESIGNED)
               ================================================================= */}
           {activeTab === "calendar" && (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <p style={{ margin: 0, color: "#A0A0A0", fontSize: "0.94rem" }}>
-                  Confirmed celebration schedule and performance agenda.
-                </p>
+            <div className="artist-cal-view">
+              {/* Header */}
+              <div className="artist-cal-header">
+                <div>
+                  <h1 className="artist-cal-title">Booking Calendar</h1>
+                  <p className="artist-cal-desc">
+                    Your confirmed performances and schedule.
+                  </p>
+                </div>
+                <div>
+                  <span
+                    className={`cd-topbar-badge ${artist.is_verified ? "" : "pending"}`}
+                  >
+                    <Check size={13} strokeWidth={3} />
+                    {artist.is_verified
+                      ? "Verified Performing Artist"
+                      : "Verification Under Review"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Summary Cards Row */}
+              <div className="artist-cal-stats-row">
+                <div className="artist-cal-stats-group">
+                  <div
+                    className={`artist-cal-stat-card ${calendarFilter === "upcoming" ? "active" : ""}`}
+                    onClick={() => setCalendarFilter("upcoming")}
+                    role="button"
+                    tabIndex={0}
+                    title="View Upcoming Shows"
+                  >
+                    <div className="artist-cal-stat-lbl">Upcoming Shows</div>
+                    <div className="artist-cal-stat-val">{upcomingShows.length}</div>
+                  </div>
+
+                  <div
+                    className={`artist-cal-stat-card ${calendarFilter === "completed" ? "active" : ""}`}
+                    onClick={() => setCalendarFilter("completed")}
+                    role="button"
+                    tabIndex={0}
+                    title="View Completed Shows"
+                  >
+                    <div className="artist-cal-stat-lbl">Completed Shows</div>
+                    <div className="artist-cal-stat-val">{completedShows.length}</div>
+                  </div>
+
+                  <div
+                    className="artist-cal-stat-card"
+                    onClick={() => switchTab("availability")}
+                    role="button"
+                    tabIndex={0}
+                    title="Manage Blocked Dates in Availability"
+                  >
+                    <div className="artist-cal-stat-lbl">Blocked Dates</div>
+                    <div className="artist-cal-stat-val">{blockedDatesList.length}</div>
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  className="cd-btn-secondary cd-btn-sm"
+                  className="artist-cal-manage-btn"
                   onClick={() => switchTab("availability")}
                 >
                   Manage Blocked Dates
                 </button>
               </div>
 
-              {upcomingPerformances.length === 0 ? (
-                <div className="cd-empty-state">
-                  <p className="cd-empty-title">Calendar Schedule Clear</p>
-                  <p className="cd-empty-text">
-                    No confirmed performances are currently scheduled on your
-                    calendar.
+              {/* Filter Tabs */}
+              <div className="artist-cal-filter-tabs">
+                <button
+                  type="button"
+                  className={`artist-cal-tab-btn ${calendarFilter === "upcoming" ? "active" : ""}`}
+                  onClick={() => setCalendarFilter("upcoming")}
+                >
+                  Upcoming ({upcomingShows.length})
+                </button>
+                <button
+                  type="button"
+                  className={`artist-cal-tab-btn ${calendarFilter === "completed" ? "active" : ""}`}
+                  onClick={() => setCalendarFilter("completed")}
+                >
+                  Completed ({completedShows.length})
+                </button>
+                <button
+                  type="button"
+                  className={`artist-cal-tab-btn ${calendarFilter === "all" ? "active" : ""}`}
+                  onClick={() => setCalendarFilter("all")}
+                >
+                  All Shows ({allShows.length})
+                </button>
+              </div>
+
+              {/* Performance List or Empty State */}
+              {displayedShows.length === 0 ? (
+                <div className="artist-cal-empty">
+                  <p className="artist-cal-empty-title">
+                    {calendarFilter === "upcoming"
+                      ? "No upcoming shows"
+                      : calendarFilter === "completed"
+                      ? "No completed shows"
+                      : "No shows found"}
+                  </p>
+                  <p className="artist-cal-empty-text">
+                    {calendarFilter === "upcoming"
+                      ? "You have no confirmed performances scheduled on your calendar."
+                      : calendarFilter === "completed"
+                      ? "You haven't marked any performances as completed yet."
+                      : "No confirmed or completed performances scheduled on your calendar."}
                   </p>
                 </div>
               ) : (
-                <div className="cd-timeline">
-                  {upcomingPerformances.map((perf) => {
-                    const eventDateObj = new Date(
-                      perf.event_date_iso || perf.event_date,
-                    );
+                <div className="artist-cal-list">
+                  {displayedShows.map((perf) => {
+                    const { day, month, year, timeStr } = formatShowDate(perf);
+                    const venueStr =
+                      perf.venue_name || perf.event_location || perf.city || "Venue not specified";
+
                     return (
-                      <div key={perf.id} className="cd-timeline-item">
-                        <div className="cd-timeline-date-box">
-                          <div className="cd-timeline-date-day">
-                            {!isNaN(eventDateObj.getTime())
-                              ? eventDateObj.getDate()
-                              : "--"}
-                          </div>
-                          <div className="cd-timeline-date-sub">
-                            {!isNaN(eventDateObj.getTime())
-                              ? eventDateObj.toLocaleString("default", {
-                                  month: "short",
-                                })
-                              : "DATE"}
-                          </div>
+                      <div key={perf.id} className="artist-cal-card">
+                        {/* Date Badge */}
+                        <div className="artist-cal-date-badge">
+                          <span className="artist-cal-date-day">{day}</span>
+                          <span className="artist-cal-date-month">{month}</span>
+                          <span className="artist-cal-date-year">{year}</span>
                         </div>
 
-                        <div className="cd-timeline-info">
-                          <h3 className="cd-timeline-title">
-                            {perf.event_type}
+                        {/* Center Info */}
+                        <div className="artist-cal-info">
+                          <h3 className="artist-cal-name">
+                            {perf.event_type || perf.event_name || "Performance"}
                           </h3>
-                          <div className="cd-timeline-sub">
-                            Host:{" "}
-                            <strong style={{ color: "#F7F7F7" }}>
-                              {perf.customer_name}
-                            </strong>{" "}
-                            · Venue: {perf.event_location}
+                          <div className="artist-cal-meta-row">
+                            <span>
+                              Host:{" "}
+                              <strong className="artist-cal-highlight">
+                                {perf.customer_name || "Host"}
+                              </strong>
+                            </span>
+                            <span className="artist-cal-sep">|</span>
+                            <span>
+                              Venue:{" "}
+                              <span className="artist-cal-highlight">{venueStr}</span>
+                            </span>
                           </div>
-                          <div
-                            style={{
-                              fontSize: "0.86rem",
-                              color: "#A0A0A0",
-                              marginTop: "2px",
-                            }}
-                          >
-                            Time: {perf.event_date} · Agreed Fee:{" "}
-                            <strong style={{ color: "#FF5722" }}>
-                              ₹{perf.agreed_price}
-                            </strong>
+                          <div className="artist-cal-meta-row">
+                            <span>
+                              Event Time:{" "}
+                              <span className="artist-cal-highlight">{timeStr}</span>
+                            </span>
+                            <span className="artist-cal-sep">|</span>
+                            <span>
+                              Agreed Fee:{" "}
+                              <strong className="artist-cal-fee">
+                                ₹{formatPrice(perf.agreed_price)}
+                              </strong>
+                            </span>
                           </div>
                         </div>
 
-                        <div style={{ display: "flex", gap: "8px" }}>
+                        {/* Actions */}
+                        <div className="artist-cal-actions">
                           <button
                             type="button"
-                            className="cd-btn-secondary cd-btn-sm"
+                            className="artist-cal-btn-details"
                             onClick={() => {
                               setSelectedBooking(perf);
                               switchTab("booking-detail");
@@ -3307,13 +4424,25 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           >
                             Details
                           </button>
-                          <button
-                            type="button"
-                            className="cd-btn-primary cd-btn-sm"
-                            onClick={() => handleCompleteBooking(perf.id)}
-                          >
-                            Complete
-                          </button>
+                          {perf.status === "accepted" ? (
+                            <button
+                              type="button"
+                              className="artist-cal-btn-complete"
+                              onClick={() =>
+                                setCompleteModal({
+                                  open: true,
+                                  booking: perf,
+                                  loading: false,
+                                })
+                              }
+                            >
+                              Mark Completed
+                            </button>
+                          ) : perf.status === "completed" ? (
+                            <span className="artist-cal-status-completed">
+                              Completed
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -3373,7 +4502,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         </span>
                         <span
                           style={{
-                            fontSize: "0.72rem",
+                            fontSize: "0.85rem",
                             color: "#A0A0A0",
                             textTransform: "uppercase",
                             letterSpacing: "0.04em",
@@ -3428,120 +4557,265 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           )}
 
           {/* =================================================================
-              TAB 9: PAYMENT & EARNINGS PAGE
+              TAB 9: PAYMENT & EARNINGS PAGE (REDESIGNED)
               ================================================================= */}
           {activeTab === "earnings" && (
-            <div className="cd-view-container" style={{ gap: "24px" }}>
-              <div
-                className="cd-overview-stats-grid"
-                style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
-              >
-                <div className="cd-stat-box accent-earnings">
-                  <div className="cd-stat-lbl">Total Earnings</div>
-                  <div className="cd-stat-num payments">
-                    ₹{stats.total_earnings ?? "0.00"}
+            <div className="artist-pay-view">
+              {/* Header */}
+              <div className="artist-pay-header">
+                <div>
+                  <h1 className="artist-pay-title">Payments & Earnings</h1>
+                  <p className="artist-pay-desc">
+                    Track your earnings, payouts and transaction history.
+                  </p>
+                </div>
+                <div>
+                  <span
+                    className={`cd-topbar-badge ${artist.is_verified ? "" : "pending"}`}
+                  >
+                    <Check size={13} strokeWidth={3} />
+                    {artist.is_verified
+                      ? "Verified Performing Artist"
+                      : "Verification Under Review"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 1. Summary Cards (Row of 4) */}
+              <div className="artist-pay-stats-grid">
+                <div className="artist-pay-stat-card green-accent">
+                  <div className="artist-pay-stat-lbl">Total Earnings</div>
+                  <div className="artist-pay-stat-val green">
+                    ₹{formatPrice(stats.total_earnings ?? netArtistEarnings)}
                   </div>
-                  <div className="cd-stat-sub">Across all bookings</div>
+                  <div className="artist-pay-stat-sub">Across all bookings</div>
                 </div>
 
-                <div className="cd-stat-box">
-                  <div className="cd-stat-lbl" style={{ color: "#4CAF50" }}>
-                    Completed Payouts
+                <div className="artist-pay-stat-card">
+                  <div className="artist-pay-stat-lbl">Completed Payouts</div>
+                  <div className="artist-pay-stat-val white">
+                    ₹{formatPrice(stats.completed_earnings ?? "0.00")}
                   </div>
-                  <div className="cd-stat-num confirmed">
-                    ₹{stats.completed_earnings ?? "0.00"}
-                  </div>
-                  <div className="cd-stat-sub">Delivered performances</div>
+                  <div className="artist-pay-stat-sub">Transferred to your account</div>
                 </div>
 
-                <div className="cd-stat-box accent-pending">
-                  <div className="cd-stat-lbl" style={{ color: "#FF9800" }}>
-                    Pending Payouts
+                <div className="artist-pay-stat-card orange-accent">
+                  <div className="artist-pay-stat-lbl">Pending Payouts</div>
+                  <div className="artist-pay-stat-val orange">
+                    ₹{formatPrice(stats.pending_earnings ?? netArtistEarnings)}
                   </div>
-                  <div className="cd-stat-num pending">
-                    ₹{stats.pending_earnings ?? "0.00"}
+                  <div className="artist-pay-stat-sub">In escrow for upcoming shows</div>
+                </div>
+
+                <div className="artist-pay-stat-card">
+                  <div className="artist-pay-stat-lbl">Total Bookings</div>
+                  <div className="artist-pay-stat-val white">
+                    {bookings.length}
                   </div>
-                  <div className="cd-stat-sub">
-                    In escrow for upcoming shows
+                  <div className="artist-pay-stat-sub">Paid and unpaid</div>
+                </div>
+              </div>
+
+              {/* 2. Middle Section: Earnings Breakdown & Escrow Protection */}
+              <div className="artist-pay-middle-grid">
+                {/* Earnings Breakdown */}
+                <div className="artist-pay-card">
+                  <h3 className="artist-pay-card-title">Earnings Breakdown</h3>
+                  <div className="artist-pay-breakdown-list">
+                    <div className="artist-pay-breakdown-row">
+                      <span>Gross Booking Amount</span>
+                      <span className="artist-pay-breakdown-val">
+                        ₹{formatPrice(grossBookingAmount)}
+                      </span>
+                    </div>
+
+                    <div className="artist-pay-breakdown-row">
+                      <span>Platform Commission (8%)</span>
+                      <span className="artist-pay-breakdown-val">
+                        - ₹{formatPrice(platformCommission)}
+                      </span>
+                    </div>
+
+                    <div className="artist-pay-divider" />
+
+                    <div className="artist-pay-breakdown-total">
+                      <span className="artist-pay-total-lbl">Your Earnings</span>
+                      <span className="artist-pay-total-val">
+                        ₹{formatPrice(netArtistEarnings || stats.total_earnings)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Escrow Protection & Terms */}
+                <div className="artist-pay-card">
+                  <h3 className="artist-pay-card-title">Escrow Protection & Payouts</h3>
+                  <div className="artist-pay-escrow-list">
+                    <div className="artist-pay-escrow-item secure">
+                      <span className="artist-pay-escrow-dot" />
+                      <div>
+                        <div className="artist-pay-escrow-heading">100% Escrow Protection</div>
+                        <p className="artist-pay-escrow-desc">
+                          Client booking funds are charged and deposited safely in TalentHire escrow upon booking confirmation.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="artist-pay-escrow-item">
+                      <span className="artist-pay-escrow-dot" />
+                      <div>
+                        <div className="artist-pay-escrow-heading">Automated Settlement</div>
+                        <p className="artist-pay-escrow-desc">
+                          Payouts are released directly to your account immediately after show delivery and completion verification.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="artist-pay-escrow-item">
+                      <span className="artist-pay-escrow-dot" />
+                      <div>
+                        <div className="artist-pay-escrow-heading">Transparent Pricing</div>
+                        <p className="artist-pay-escrow-desc">
+                          Platform commission is fixed at 8%, covering payment gateway charges, contracts, and artist guarantee.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Transactions Table */}
-              <div className="cd-table-card">
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "16px",
-                  }}
-                >
-                  <h3 className="cd-table-title" style={{ margin: 0 }}>
+              {/* 3. Payment & Transaction History Card */}
+              <div className="artist-pay-table-card">
+                <div className="artist-pay-tx-top">
+                  <h3 className="artist-pay-card-title" style={{ margin: 0 }}>
                     Payment & Transaction History
                   </h3>
-                  <button
-                    type="button"
-                    className="cd-btn-secondary cd-btn-sm"
-                    onClick={() => window.print()}
-                  >
-                    Print Statement
-                  </button>
+                  <div className="artist-pay-tx-controls">
+                    {/* Status filter */}
+                    <select
+                      className="artist-pay-filter-select"
+                      value={payStatusFilter}
+                      onChange={(e) => {
+                        setPayStatusFilter(e.target.value);
+                        setPayPage(1);
+                      }}
+                      aria-label="Filter by payment status"
+                    >
+                      <option value="all">All Transactions</option>
+                      <option value="pending">Pending</option>
+                      <option value="success">Completed / Success</option>
+                      <option value="refunded">Refunded</option>
+                      <option value="failed">Failed</option>
+                    </select>
+
+                    {/* Date filter */}
+                    <select
+                      className="artist-pay-filter-select"
+                      value={payDateFilter}
+                      onChange={(e) => {
+                        setPayDateFilter(e.target.value);
+                        setPayPage(1);
+                      }}
+                      aria-label="Filter by date range"
+                    >
+                      <option value="all">All Time</option>
+                      <option value="this_month">This Month</option>
+                      <option value="last_30_days">Last 30 Days</option>
+                      <option value="this_year">This Year</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      className="artist-pay-btn-print"
+                      onClick={() => window.print()}
+                      title="Print Financial Statement"
+                    >
+                      Print Statement
+                    </button>
+                  </div>
                 </div>
 
-                {payments.length === 0 ? (
-                  <div className="cd-empty-state">
-                    <p className="cd-empty-title">No Transactions Recorded</p>
-                    <p className="cd-empty-text">
-                      Transactions will appear as booking agreements and payouts
-                      are processed.
+                {paginatedPayments.length === 0 ? (
+                  <div className="artist-pay-empty-box">
+                    <p className="artist-pay-empty-title">No Transactions Recorded</p>
+                    <p className="artist-pay-empty-text">
+                      {filteredPayments.length === 0 && (payStatusFilter !== "all" || payDateFilter !== "all")
+                        ? "No transactions match your selected filter criteria."
+                        : "Transactions will appear as booking agreements and payouts are processed."}
                     </p>
                   </div>
                 ) : (
-                  <div className="cd-table-wrapper">
-                    <table className="cd-table">
+                  <div className="artist-pay-table-wrap">
+                    <table className="artist-pay-table">
                       <thead>
                         <tr>
                           <th>Transaction ID</th>
-                          <th>Host / Customer</th>
-                          <th>Date</th>
+                          <th>Booking / Event</th>
+                          <th>Customer</th>
+                          <th>Date & Time</th>
                           <th>Amount</th>
                           <th>Status</th>
-                          <th>Actions</th>
+                          <th style={{ textAlign: "right" }}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {payments.map((pay) => (
+                        {paginatedPayments.map((pay) => (
                           <tr key={pay.id}>
                             <td>
-                              <span
-                                style={{
-                                  fontFamily: "monospace",
-                                  color: "#A0A0A0",
-                                }}
-                              >
-                                {pay.transaction_id || "Pending"}
-                              </span>
-                            </td>
-                            <td>{pay.customer_name}</td>
-                            <td>{pay.date}</td>
-                            <td>
-                              <strong style={{ color: "#F7F7F7" }}>
-                                ₹{pay.artist_amount || pay.amount}
-                              </strong>
-                            </td>
-                            <td>
-                              <span
-                                className={`cd-status-pill status-${pay.status}`}
-                              >
-                                {formatBookingStatus(pay.status)}
+                              <span className="artist-pay-tx-id">
+                                {pay.transaction_id || `PAY-${String(pay.id).padStart(4, "0")}`}
                               </span>
                             </td>
                             <td>
+                              <div className="artist-pay-event-cell">
+                                <span className="artist-pay-event-title">
+                                  {pay.event_type || "Booking"}
+                                </span>
+                                <span className="artist-pay-booking-ref">
+                                  {pay.booking_reference || `BK-${pay.booking_id}`}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <span className="artist-pay-customer">
+                                {pay.customer_name}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="artist-pay-datetime">
+                                {pay.date}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="artist-pay-amount">
+                                ₹{formatPrice(pay.artist_amount || pay.amount)}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={`artist-pay-pill ${
+                                  pay.status === "success"
+                                    ? "success"
+                                    : pay.status === "pending"
+                                    ? "pending"
+                                    : pay.status?.includes("refund")
+                                    ? "refunded"
+                                    : "failed"
+                                }`}
+                              >
+                                {pay.status === "success"
+                                  ? "Completed"
+                                  : pay.status === "pending"
+                                  ? "Pending"
+                                  : formatBookingStatus(pay.status)}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
                               <button
                                 type="button"
-                                className="cd-btn-ghost cd-btn-sm"
+                                className="artist-pay-btn-receipt"
                                 onClick={() => setReceiptItem(pay)}
+                                title="View transaction receipt"
                               >
                                 View Receipt
                               </button>
@@ -3550,6 +4824,48 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+
+                {/* Footer with counts and pagination */}
+                {filteredPayments.length > 0 && (
+                  <div className="artist-pay-footer">
+                    <span className="artist-pay-count-text">
+                      Showing {paginatedPayments.length} of {filteredPayments.length} {filteredPayments.length === 1 ? "transaction" : "transactions"}
+                    </span>
+
+                    {payTotalPages > 1 && (
+                      <div className="artist-pay-pagination">
+                        <button
+                          type="button"
+                          className="artist-pay-page-nav-btn"
+                          disabled={currentPayPage <= 1}
+                          onClick={() => setPayPage((p) => Math.max(1, p - 1))}
+                        >
+                          &lt; Previous
+                        </button>
+
+                        {Array.from({ length: payTotalPages }, (_, i) => i + 1).map((page) => (
+                          <button
+                            key={page}
+                            type="button"
+                            className={`artist-pay-page-number ${page === currentPayPage ? "active" : ""}`}
+                            onClick={() => setPayPage(page)}
+                          >
+                            {page}
+                          </button>
+                        ))}
+
+                        <button
+                          type="button"
+                          className="artist-pay-page-nav-btn"
+                          disabled={currentPayPage >= payTotalPages}
+                          onClick={() => setPayPage((p) => Math.min(payTotalPages, p + 1))}
+                        >
+                          Next &gt;
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -3756,130 +5072,303 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           )}
 
           {/* =================================================================
-              TAB 12: AVAILABILITY MANAGEMENT PAGE
+              TAB 12: AVAILABILITY MANAGEMENT PAGE (REDESIGNED)
               ================================================================= */}
           {activeTab === "availability" && (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "24px" }}
-            >
-              {/* Form to Set Availability */}
-              <div className="cd-form-card">
-                <h3 className="cd-card-title" style={{ marginBottom: "14px" }}>
-                  Set Date Availability Status
-                </h3>
-                <form onSubmit={handleSaveAvailability} className="cd-form">
-                  <div className="cd-form-grid">
-                    <div className="cd-form-group">
-                      <label className="cd-label" htmlFor="avail_date">
-                        Select Date *
-                      </label>
-                      <input
-                        id="avail_date"
-                        type="date"
-                        className="cd-input"
-                        value={availForm.date}
-                        onChange={(e) =>
-                          setAvailForm((p) => ({ ...p, date: e.target.value }))
-                        }
-                        required
-                      />
+            <div className="artist-avail-view">
+              {/* Header */}
+              <div className="artist-avail-header">
+                <div>
+                  <h1 className="artist-avail-title">Availability Management</h1>
+                  <p className="artist-avail-desc">
+                    Set your available and unavailable dates to manage bookings.
+                  </p>
+                </div>
+                <div>
+                  <span
+                    className={`cd-topbar-badge ${artist.is_verified ? "" : "pending"}`}
+                  >
+                    <Check size={13} strokeWidth={3} />
+                    {artist.is_verified
+                      ? "Verified Performing Artist"
+                      : "Verification Under Review"}
+                  </span>
+                </div>
+              </div>
+
+              {/* 1. Summary Cards Row */}
+              <div className="artist-avail-stats-row">
+                <div className="artist-avail-stat-card active">
+                  <div className="artist-avail-stat-lbl">Upcoming Shows</div>
+                  <div className="artist-avail-stat-val">{upcomingShows.length}</div>
+                </div>
+
+                <div className="artist-avail-stat-card">
+                  <div className="artist-avail-stat-lbl">Blocked Dates</div>
+                  <div className="artist-avail-stat-val">{blockedDatesList.length}</div>
+                </div>
+
+                <div className="artist-avail-stat-card">
+                  <div className="artist-avail-stat-lbl">Available Dates (This Month)</div>
+                  <div className="artist-avail-stat-val">{availableDaysThisMonthCount}</div>
+                </div>
+              </div>
+
+              {/* 2. Middle Grid: Monthly Calendar & Set Date Availability */}
+              <div className="artist-avail-middle-grid">
+                {/* Left Column: Monthly Calendar */}
+                <div className="artist-avail-cal-card">
+                  {/* Month Navigation */}
+                  <div className="artist-avail-cal-nav">
+                    <button
+                      type="button"
+                      className="artist-avail-cal-nav-btn"
+                      onClick={handleAvailPrevMonth}
+                      aria-label="Previous Month"
+                      title="Previous Month"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <span className="artist-avail-cal-month-title">
+                      {availMonthHeaderTitle}
+                    </span>
+                    <button
+                      type="button"
+                      className="artist-avail-cal-nav-btn"
+                      onClick={handleAvailNextMonth}
+                      aria-label="Next Month"
+                      title="Next Month"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+
+                  {/* Day of Week Headers */}
+                  <div className="artist-avail-cal-dow-row">
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((dow) => (
+                      <div key={dow} className="artist-avail-cal-dow">
+                        {dow}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Calendar Days Grid */}
+                  <div className="artist-avail-cal-days-grid">
+                    {availCalendarCells.map((cell) => {
+                      if (cell.empty) {
+                        return (
+                          <div
+                            key={cell.key}
+                            className="artist-avail-cal-cell empty"
+                          />
+                        );
+                      }
+                      const cellClass = [
+                        "artist-avail-cal-cell",
+                        cell.isBooked
+                          ? "booked"
+                          : cell.isBlocked
+                          ? "blocked"
+                          : "available",
+                        cell.isSelected ? "selected" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+
+                      return (
+                        <button
+                          key={cell.key}
+                          type="button"
+                          className={cellClass}
+                          onClick={() => handleSelectCalendarDate(cell)}
+                          title={
+                            cell.isBooked
+                              ? `Booked: ${cell.booking?.event_type || "Confirmed Show"}`
+                              : cell.isBlocked
+                              ? `Blocked: ${cell.override?.reason || "Unavailable"}`
+                              : `Available (Click to select ${cell.dateStr})`
+                          }
+                        >
+                          {cell.day}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Legend */}
+                  <div className="artist-avail-cal-legend">
+                    <div className="artist-avail-legend-item">
+                      <span className="artist-avail-legend-dot booked" />
+                      <span>Booked / Confirmed</span>
+                    </div>
+                    <div className="artist-avail-legend-item">
+                      <span className="artist-avail-legend-dot blocked" />
+                      <span>Unavailable / Blocked</span>
+                    </div>
+                    <div className="artist-avail-legend-item">
+                      <span className="artist-avail-legend-dot available" />
+                      <span>Available</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Set Date Availability Form */}
+                <div className="artist-avail-form-card">
+                  <h3 className="artist-avail-card-title">Set Date Availability</h3>
+                  <form onSubmit={handleSaveAvailability} className="artist-avail-form">
+                    <div className="artist-avail-form-row">
+                      <div className="artist-avail-form-group">
+                        <label className="artist-avail-label" htmlFor="avail_date_picker">
+                          Date *
+                        </label>
+                        <input
+                          id="avail_date_picker"
+                          type="date"
+                          className="artist-avail-input"
+                          value={availForm.date}
+                          onChange={(e) =>
+                            setAvailForm((prev) => ({
+                              ...prev,
+                              date: e.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+
+                      <div className="artist-avail-form-group">
+                        <label className="artist-avail-label" htmlFor="avail_status_selector">
+                          Status *
+                        </label>
+                        <select
+                          id="avail_status_selector"
+                          className="artist-avail-select"
+                          value={availForm.is_available ? "available" : "unavailable"}
+                          onChange={(e) =>
+                            setAvailForm((prev) => ({
+                              ...prev,
+                              is_available: e.target.value === "available",
+                            }))
+                          }
+                        >
+                          <option value="unavailable">Unavailable / Blocked Date</option>
+                          <option value="available">Available</option>
+                        </select>
+                      </div>
                     </div>
 
-                    <div className="cd-form-group">
-                      <label className="cd-label" htmlFor="avail_status">
-                        Status *
-                      </label>
-                      <select
-                        id="avail_status"
-                        className="cd-select"
-                        value={availForm.is_available ? "true" : "false"}
-                        onChange={(e) =>
-                          setAvailForm((p) => ({
-                            ...p,
-                            is_available: e.target.value === "true",
-                          }))
-                        }
-                      >
-                        <option value="false">
-                          Unavailable / Blocked Date
-                        </option>
-                        <option value="true">Available for Bookings</option>
-                      </select>
-                    </div>
-
-                    <div className="cd-form-group">
-                      <label className="cd-label" htmlFor="avail_reason">
+                    <div className="artist-avail-form-group">
+                      <label className="artist-avail-label" htmlFor="avail_reason_input">
                         Reason / Note (Optional)
                       </label>
                       <input
-                        id="avail_reason"
+                        id="avail_reason_input"
                         type="text"
-                        className="cd-input"
-                        placeholder="e.g. Studio recording, Out of town, Private event"
+                        className="artist-avail-input"
+                        placeholder="e.g. Personal commitment, Out of town, Private event"
                         value={availForm.reason}
                         onChange={(e) =>
-                          setAvailForm((p) => ({
-                            ...p,
+                          setAvailForm((prev) => ({
+                            ...prev,
                             reason: e.target.value,
                           }))
                         }
                       />
                     </div>
-                  </div>
 
-                  <div className="cd-form-actions">
-                    <button
-                      type="submit"
-                      className="cd-btn-primary cd-btn-sm"
-                      disabled={availSaving}
-                    >
-                      {availSaving ? "Saving..." : "Save Date Status"}
-                    </button>
-                  </div>
-                </form>
+                    {/* Conflict Alert if date is booked */}
+                    {availForm.date && confirmedBookingsMap[availForm.date] && (
+                      <div className="artist-avail-conflict-alert">
+                        Cannot block this date: Confirmed booking (
+                        <strong>{confirmedBookingsMap[availForm.date].event_type || "Event"}</strong>)
+                        is already scheduled. Confirmed bookings take precedence.
+                      </div>
+                    )}
+
+                    {/* Notice if editing existing override */}
+                    {availForm.date &&
+                      !confirmedBookingsMap[availForm.date] &&
+                      blockedDatesMap[availForm.date] && (
+                        <div className="artist-avail-info-alert">
+                          Currently configured as blocked ({blockedDatesMap[availForm.date].reason || "Unavailable"}).
+                          Updating this form will modify or unblock this date.
+                        </div>
+                      )}
+
+                    <div className="artist-avail-form-actions">
+                      <button
+                        type="submit"
+                        className="artist-avail-submit-btn"
+                        disabled={
+                          availSaving ||
+                          (Boolean(availForm.date && confirmedBookingsMap[availForm.date]) &&
+                            !availForm.is_available)
+                        }
+                      >
+                        {availSaving ? "Saving..." : "Save Availability"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
 
-              {/* List of Custom Date Overrides */}
-              <div className="cd-profile-card">
-                <h3 className="cd-card-title" style={{ marginBottom: "14px" }}>
-                  Configured Date Overrides
-                </h3>
-                {availability.length === 0 ? (
-                  <p style={{ color: "#888888", fontSize: "0.92rem" }}>
-                    No dates are currently marked unavailable. Your profile
-                    appears open for inquiries on all regular calendar dates.
-                  </p>
+              {/* 3. Bottom Table: Configured Unavailable Dates */}
+              <div className="artist-avail-table-card">
+                <h3 className="artist-avail-card-title">Configured Unavailable Dates</h3>
+                {blockedDatesList.length === 0 ? (
+                  <div className="artist-avail-empty-box">
+                    <p className="artist-avail-empty-title">No blocked dates configured</p>
+                    <p className="artist-avail-empty-text">
+                      All calendar dates without confirmed bookings are open for inquiries.
+                    </p>
+                  </div>
                 ) : (
-                  <div className="cd-avail-grid">
-                    {availability.map((av) => (
-                      <div key={av.id} className="cd-avail-card">
-                        <div>
-                          <div className="cd-avail-date">
-                            {av.date_formatted}
-                          </div>
-                          <span
-                            className={`cd-status-pill ${av.is_available ? "status-accepted" : "status-cancelled"}`}
-                            style={{
-                              display: "inline-block",
-                              marginTop: "6px",
-                            }}
+                  <div className="artist-avail-table-wrap">
+                    <table className="artist-avail-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Status</th>
+                          <th>Reason / Note</th>
+                          <th style={{ textAlign: "right" }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {blockedDatesList.map((av) => (
+                          <tr
+                            key={av.id}
+                            onClick={() => handleEditBlockedRow(av)}
+                            style={{ cursor: "pointer" }}
+                            title="Click to edit in availability form"
                           >
-                            {av.is_available ? "Available" : "Unavailable"}
-                          </span>
-                          {av.reason && (
-                            <div className="cd-avail-reason">{av.reason}</div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          className="cd-btn-ghost cd-btn-sm"
-                          style={{ color: "#EF5350" }}
-                          onClick={() => handleDeleteAvailability(av.id)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
+                            <td className="artist-avail-td-date">
+                              {av.date_formatted || formatBlockedDate(av.date)}
+                            </td>
+                            <td>
+                              <span className="artist-avail-status-blocked">
+                                Unavailable
+                              </span>
+                            </td>
+                            <td className="artist-avail-td-reason">
+                              {av.reason || "—"}
+                            </td>
+                            <td
+                              style={{ textAlign: "right" }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                className="artist-avail-btn-remove"
+                                onClick={() => handleDeleteAvailability(av.id)}
+                                title="Remove blocked date"
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
@@ -3987,6 +5476,165 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           )}
         </main>
       </div>
+
+      {/* =====================================================================
+          MODAL: RESPOND TO RESCHEDULING REQUEST
+          ===================================================================== */}
+      {rescheduleModal.open && rescheduleModal.request && (
+        <div
+          className="cd-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={() =>
+            setRescheduleModal({ open: false, request: null, booking: null })
+          }
+        >
+          <div
+            className="cd-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "520px" }}
+          >
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title">Customer Rescheduling Request</h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() =>
+                  setRescheduleModal({ open: false, request: null, booking: null })
+                }
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="cd-modal-body">
+              <p
+                style={{
+                  color: "#D4D4D4",
+                  fontSize: "0.92rem",
+                  margin: "0 0 16px 0",
+                }}
+              >
+                <strong>{rescheduleModal.request.customer_name}</strong> requested
+                a date change for{" "}
+                <strong>{rescheduleModal.request.event_type}</strong>.
+              </p>
+
+              <div
+                className="cd-reschedule-dates-grid"
+                style={{ marginBottom: "16px" }}
+              >
+                <div className="cd-reschedule-date-box">
+                  <span
+                    style={{
+                      fontSize: "0.85rem",
+                      color: "#8E8E93",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Current Date
+                  </span>
+                  <strong style={{ color: "#FFFFFF", fontSize: "0.98rem" }}>
+                    {rescheduleModal.request.original_event_date_formatted ||
+                      rescheduleModal.request.original_event_date}
+                  </strong>
+                </div>
+                <div className="cd-reschedule-arrow">➔</div>
+                <div className="cd-reschedule-date-box">
+                  <span
+                    style={{
+                      fontSize: "0.85rem",
+                      color: "#FF5722",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Proposed New Date
+                  </span>
+                  <strong style={{ color: "#FF5722", fontSize: "0.98rem" }}>
+                    {rescheduleModal.request.new_event_date_formatted ||
+                      rescheduleModal.request.new_event_date}
+                  </strong>
+                </div>
+              </div>
+
+              {rescheduleModal.request.reason && (
+                <div
+                  style={{
+                    background: "#1C1C1E",
+                    padding: "12px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    fontSize: "0.88rem",
+                    color: "#B0B0B0",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <strong style={{ color: "#FFFFFF" }}>Host Note:</strong> "
+                  {rescheduleModal.request.reason}"
+                </div>
+              )}
+            </div>
+
+            <div className="cd-modal-actions">
+              <button
+                type="button"
+                className="cd-btn-primary"
+                disabled={
+                  rescheduleActionLoadingId ===
+                  rescheduleModal.request.request_id
+                }
+                onClick={async () => {
+                  await handleApproveReschedule(rescheduleModal.request);
+                  setRescheduleModal({
+                    open: false,
+                    request: null,
+                    booking: null,
+                  });
+                }}
+              >
+                {rescheduleActionLoadingId ===
+                rescheduleModal.request.request_id
+                  ? "Approving..."
+                  : "Approve New Date"}
+              </button>
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                style={{ borderColor: "#EF5350", color: "#EF5350" }}
+                disabled={
+                  rescheduleActionLoadingId ===
+                  rescheduleModal.request.request_id
+                }
+                onClick={() => {
+                  const req = rescheduleModal.request;
+                  setRescheduleModal({
+                    open: false,
+                    request: null,
+                    booking: null,
+                  });
+                  setRejectNoteModal({ open: true, request: req, reason: "" });
+                }}
+              >
+                Decline Request
+              </button>
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() =>
+                  setRescheduleModal({
+                    open: false,
+                    request: null,
+                    booking: null,
+                  })
+                }
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =====================================================================
           MODAL: RESPOND TO BOOKING (ACCEPT / DECLINE)
@@ -4168,110 +5816,489 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       )}
 
       {/* =====================================================================
-          MODAL: ADD PORTFOLIO ITEM
+          MODAL: ADD / EDIT PORTFOLIO ITEM
           ===================================================================== */}
-      {portfolioModalOpen && (
+      {portfolioModal.open && (
         <div className="cd-modal-backdrop" role="dialog" aria-modal="true">
-          <div className="cd-modal-card">
+          <div className="cd-modal-card" style={{ maxWidth: "560px" }}>
             <div className="cd-modal-header">
-              <h3 className="cd-modal-title">Add Portfolio Showreel</h3>
+              <h3 className="cd-modal-title">
+                {portfolioModal.mode === "edit"
+                  ? "Edit Portfolio Item"
+                  : "Add Portfolio Item"}
+              </h3>
               <button
                 type="button"
                 className="cd-modal-close"
-                onClick={() => setPortfolioModalOpen(false)}
+                disabled={portfolioModal.saving}
+                onClick={() =>
+                  setPortfolioModal((p) => ({ ...p, open: false, error: "" }))
+                }
                 aria-label="Close"
               >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                &times;
               </button>
             </div>
 
-            <form onSubmit={handleAddPortfolioSubmit}>
-              <div className="cd-modal-body">
+            <form onSubmit={handleSavePortfolioItem} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+              <div className="cd-modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px", flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: "6px" }}>
+                {portfolioModal.error && (
+                  <div
+                    className="cd-alert cd-alert-error"
+                    role="alert"
+                    style={{ marginBottom: "8px" }}
+                  >
+                    {portfolioModal.error}
+                  </div>
+                )}
+
+                {/* Type Switcher Tabs (Only selectable in Add mode) */}
+                {portfolioModal.mode === "add" && (
+                  <div>
+                    <label className="cd-label">Item Category</label>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+                      <button
+                        type="button"
+                        className={`artist-port-tab ${portfolioModal.item_type === "photo" ? "active" : ""}`}
+                        style={{ justifyContent: "center", width: "100%" }}
+                        onClick={() =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            item_type: "photo",
+                            error: "",
+                          }))
+                        }
+                      >
+                        <ImageIcon size={14} />
+                        Photo
+                      </button>
+                      <button
+                        type="button"
+                        className={`artist-port-tab ${portfolioModal.item_type === "video" ? "active" : ""}`}
+                        style={{ justifyContent: "center", width: "100%" }}
+                        onClick={() =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            item_type: "video",
+                            error: "",
+                          }))
+                        }
+                      >
+                        <VideoIcon size={14} />
+                        Video
+                      </button>
+                      <button
+                        type="button"
+                        className={`artist-port-tab ${portfolioModal.item_type === "youtube" ? "active" : ""}`}
+                        style={{ justifyContent: "center", width: "100%" }}
+                        onClick={() =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            item_type: "youtube",
+                            error: "",
+                          }))
+                        }
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" />
+                          <polygon points="10 15 15 12 10 9" />
+                        </svg>
+                        YouTube Link
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="cd-form-group">
-                  <label className="cd-label" htmlFor="port_title">
+                  <label className="cd-label" htmlFor="port_item_title">
                     Performance Title *
                   </label>
                   <input
-                    id="port_title"
+                    id="port_item_title"
                     type="text"
                     className="cd-input"
-                    placeholder="e.g. Live at Royal Opera Gala 2026"
-                    value={portfolioForm.title}
+                    placeholder="e.g. Live Concert Performance"
+                    value={portfolioModal.title}
                     onChange={(e) =>
-                      setPortfolioForm((p) => ({ ...p, title: e.target.value }))
+                      setPortfolioModal((p) => ({ ...p, title: e.target.value, error: "" }))
                     }
                     required
                   />
                 </div>
 
                 <div className="cd-form-group">
-                  <label className="cd-label" htmlFor="port_url">
-                    Media / Showreel URL (YouTube / Vimeo / SoundCloud) *
-                  </label>
-                  <input
-                    id="port_url"
-                    type="url"
-                    className="cd-input"
-                    placeholder="https://youtube.com/watch?v=..."
-                    value={portfolioForm.media_url}
-                    onChange={(e) =>
-                      setPortfolioForm((p) => ({
-                        ...p,
-                        media_url: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="cd-form-group">
-                  <label className="cd-label" htmlFor="port_desc">
-                    Description
+                  <label className="cd-label" htmlFor="port_item_desc">
+                    Description (Optional)
                   </label>
                   <textarea
-                    id="port_desc"
+                    id="port_item_desc"
                     rows="3"
                     className="cd-textarea"
-                    placeholder="Describe the set, genre, and celebration..."
-                    value={portfolioForm.description}
+                    placeholder="Provide details about the venue, crowd, and highlights..."
+                    value={portfolioModal.description}
                     onChange={(e) =>
-                      setPortfolioForm((p) => ({
+                      setPortfolioModal((p) => ({
                         ...p,
                         description: e.target.value,
                       }))
                     }
                   />
                 </div>
+
+                {/* Photo Specific Inputs */}
+                {portfolioModal.item_type === "photo" && (
+                  <>
+                    <div className="cd-form-group">
+                      <label className="cd-label">Upload Photo File</label>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        ref={portfolioFileInputRef}
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setPortfolioModal((p) => ({
+                              ...p,
+                              media_file: file,
+                              error: "",
+                            }));
+                          }
+                        }}
+                      />
+                      <div
+                        style={{
+                          border: "1px dashed rgba(255,255,255,0.2)",
+                          borderRadius: "8px",
+                          padding: "16px",
+                          textAlign: "center",
+                          background: "#18181A",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => portfolioFileInputRef.current?.click()}
+                      >
+                        <UploadCloud size={24} style={{ color: "#FF5722", marginBottom: "6px" }} />
+                        <div style={{ color: "#FFFFFF", fontSize: "0.92rem", fontWeight: 500 }}>
+                          {portfolioModal.media_file
+                            ? portfolioModal.media_file.name
+                            : "Click to choose image file"}
+                        </div>
+                        <span style={{ fontSize: "0.78rem", color: "#8E8E93" }}>
+                          JPG, JPEG, PNG, WEBP (Max 10 MB)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="cd-form-group">
+                      <label className="cd-label" htmlFor="port_photo_url">
+                        Or External Image URL
+                      </label>
+                      <input
+                        id="port_photo_url"
+                        type="url"
+                        className="cd-input"
+                        placeholder="https://..."
+                        value={portfolioModal.media_url}
+                        onChange={(e) =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            media_url: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                      <input
+                        id="port_set_feat_check"
+                        type="checkbox"
+                        checked={portfolioModal.is_featured}
+                        onChange={(e) =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            is_featured: e.target.checked,
+                          }))
+                        }
+                        style={{ width: "16px", height: "16px", accentColor: "#FF5722" }}
+                      />
+                      <label htmlFor="port_set_feat_check" style={{ color: "#E0E0E0", fontSize: "0.90rem", cursor: "pointer" }}>
+                        Set as Featured Image on public profile
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                {/* Video Specific Inputs */}
+                {portfolioModal.item_type === "video" && (
+                  <>
+                    <div className="cd-form-group">
+                      <label className="cd-label">Upload Video File</label>
+                      <input
+                        type="file"
+                        accept="video/mp4,video/webm,video/quicktime"
+                        ref={portfolioFileInputRef}
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setPortfolioModal((p) => ({
+                              ...p,
+                              media_file: file,
+                              error: "",
+                            }));
+                          }
+                        }}
+                      />
+                      <div
+                        style={{
+                          border: "1px dashed rgba(255,255,255,0.2)",
+                          borderRadius: "8px",
+                          padding: "16px",
+                          textAlign: "center",
+                          background: "#18181A",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => portfolioFileInputRef.current?.click()}
+                      >
+                        <VideoIcon size={24} style={{ color: "#FF5722", marginBottom: "6px" }} />
+                        <div style={{ color: "#FFFFFF", fontSize: "0.92rem", fontWeight: 500 }}>
+                          {portfolioModal.media_file
+                            ? portfolioModal.media_file.name
+                            : "Click to choose video file"}
+                        </div>
+                        <span style={{ fontSize: "0.78rem", color: "#8E8E93" }}>
+                          MP4, WEBM, MOV (Max 100 MB)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="cd-form-group">
+                      <label className="cd-label" htmlFor="port_video_duration">
+                        Video Duration (mm:ss)
+                      </label>
+                      <input
+                        id="port_video_duration"
+                        type="text"
+                        className="cd-input"
+                        placeholder="e.g. 03:24"
+                        value={portfolioModal.duration}
+                        onChange={(e) =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            duration: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="cd-form-group">
+                      <label className="cd-label" htmlFor="port_video_url">
+                        Or Video Stream URL
+                      </label>
+                      <input
+                        id="port_video_url"
+                        type="url"
+                        className="cd-input"
+                        placeholder="https://..."
+                        value={portfolioModal.media_url}
+                        onChange={(e) =>
+                          setPortfolioModal((p) => ({
+                            ...p,
+                            media_url: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* YouTube Link Specific Inputs */}
+                {portfolioModal.item_type === "youtube" && (
+                  <div className="cd-form-group">
+                    <label className="cd-label" htmlFor="port_yt_url">
+                      YouTube Performance URL *
+                    </label>
+                    <input
+                      id="port_yt_url"
+                      type="url"
+                      className="cd-input"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      value={portfolioModal.youtube_url || portfolioModal.media_url}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPortfolioModal((p) => ({
+                          ...p,
+                          youtube_url: val,
+                          media_url: val,
+                          error: "",
+                        }));
+                      }}
+                      required
+                    />
+                    <small style={{ color: "#727272", display: "block", marginTop: "4px" }}>
+                      Supports standard youtube.com/watch?v=, youtu.be/, and embed URLs.
+                    </small>
+                  </div>
+                )}
+
+                {/* Visibility Option */}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                  <input
+                    id="port_public_check"
+                    type="checkbox"
+                    checked={portfolioModal.is_public}
+                    onChange={(e) =>
+                      setPortfolioModal((p) => ({
+                        ...p,
+                        is_public: e.target.checked,
+                      }))
+                    }
+                    style={{ width: "16px", height: "16px", accentColor: "#FF5722" }}
+                  />
+                  <label htmlFor="port_public_check" style={{ color: "#E0E0E0", fontSize: "0.90rem", cursor: "pointer" }}>
+                    Visible on public artist profile
+                  </label>
+                </div>
               </div>
 
-              <div className="cd-modal-actions">
+              <div className="cd-modal-actions" style={{ flexShrink: 0, marginTop: "16px", paddingTop: "14px" }}>
                 <button
                   type="submit"
                   className="cd-btn-primary"
-                  disabled={portfolioSaving}
+                  disabled={portfolioModal.saving}
                 >
-                  {portfolioSaving ? "Adding..." : "Add Portfolio Item"}
+                  {portfolioModal.saving
+                    ? "Saving..."
+                    : portfolioModal.mode === "edit"
+                    ? "Update Item"
+                    : "Save Portfolio Item"}
                 </button>
                 <button
                   type="button"
                   className="cd-btn-secondary"
-                  onClick={() => setPortfolioModalOpen(false)}
+                  disabled={portfolioModal.saving}
+                  onClick={() =>
+                    setPortfolioModal((p) => ({ ...p, open: false, error: "" }))
+                  }
                 >
                   Cancel
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL: CHANGE FEATURED IMAGE
+          ===================================================================== */}
+      {featuredModalOpen && (
+        <div className="cd-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="cd-modal-card" style={{ maxWidth: "640px" }}>
+            <div className="cd-modal-header">
+              <h3 className="cd-modal-title">Select Featured Image</h3>
+              <button
+                type="button"
+                className="cd-modal-close"
+                onClick={() => setFeaturedModalOpen(false)}
+                aria-label="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="cd-modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <p style={{ margin: 0, color: "#8E8E93", fontSize: "0.92rem" }}>
+                Select an image from your portfolio to display as the primary hero image on your public artist profile.
+              </p>
+
+              {photos.length === 0 ? (
+                <div className="artist-port-empty-notice">
+                  You don't have any photos uploaded yet. Add photos to your portfolio to set one as featured.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "12px",
+                    maxHeight: "360px",
+                    overflowY: "auto",
+                    padding: "4px",
+                  }}
+                >
+                  {photos.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        background: item.is_featured ? "rgba(255, 87, 34, 0.12)" : "#1B1B1D",
+                        border: item.is_featured ? "2px solid #FF5722" : "1px solid rgba(255, 255, 255, 0.08)",
+                        borderRadius: "8px",
+                        overflow: "hidden",
+                        display: "flex",
+                        flexDirection: "column",
+                        cursor: "pointer",
+                        transition: "all 0.18s ease",
+                      }}
+                      onClick={() => handleSetFeatured(item.id)}
+                    >
+                      <div style={{ width: "100%", aspectRatio: "16 / 10", overflow: "hidden", background: "#252525" }}>
+                        <img
+                          src={item.media_url || item.thumbnail_url}
+                          alt={item.title}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      </div>
+                      <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span
+                          style={{
+                            fontSize: "0.84rem",
+                            fontWeight: 600,
+                            color: "#FFFFFF",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            maxWidth: "110px",
+                          }}
+                          title={item.title}
+                        >
+                          {item.title}
+                        </span>
+                        {item.is_featured ? (
+                          <span style={{ fontSize: "0.72rem", color: "#FF5722", fontWeight: 700 }}>
+                            Current
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: "0.72rem", color: "#8E8E93" }}>
+                            Select
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="cd-modal-actions" style={{ justifyContent: "space-between" }}>
+              <button
+                type="button"
+                className="artist-port-btn-primary"
+                onClick={() => {
+                  setFeaturedModalOpen(false);
+                  handleOpenAddModal("photo");
+                }}
+              >
+                + Upload New Photo
+              </button>
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                onClick={() => setFeaturedModalOpen(false)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -4327,9 +6354,24 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 >
                   <span style={{ color: "#888888" }}>Transaction ID:</span>
                   <strong style={{ color: "#F7F7F7", fontFamily: "monospace" }}>
-                    {receiptItem.transaction_id || "Pending"}
+                    {receiptItem.transaction_id || `PAY-${String(receiptItem.id).padStart(4, "0")}`}
                   </strong>
                 </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: "8px",
+                  }}
+                >
+                  <span style={{ color: "#888888" }}>Booking Reference:</span>
+                  <strong style={{ color: "#F7F7F7" }}>
+                    {receiptItem.booking_reference || `BK-${receiptItem.booking_id}`}
+                    {receiptItem.event_type ? ` • ${receiptItem.event_type}` : ""}
+                  </strong>
+                </div>
+
                 <div
                   style={{
                     display: "flex",
@@ -4342,36 +6384,93 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     {receiptItem.customer_name}
                   </strong>
                 </div>
+
                 <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    marginBottom: "8px",
+                    marginBottom: "12px",
                   }}
                 >
-                  <span style={{ color: "#888888" }}>Date:</span>
-                  <span>{receiptItem.date}</span>
+                  <span style={{ color: "#888888" }}>Date & Time:</span>
+                  <span style={{ color: "#ccc" }}>{receiptItem.date}</span>
                 </div>
+
+                <div
+                  style={{
+                    height: "1px",
+                    background: "rgba(255,255,255,0.08)",
+                    margin: "10px 0",
+                  }}
+                />
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: "6px",
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  <span style={{ color: "#888888" }}>Gross Booking Amount:</span>
+                  <span style={{ color: "#F7F7F7" }}>
+                    ₹{formatPrice(receiptItem.gross_amount || receiptItem.amount)}
+                  </span>
+                </div>
+
                 <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
                     marginBottom: "8px",
+                    fontSize: "0.95rem",
                   }}
                 >
-                  <span style={{ color: "#888888" }}>Payout Amount:</span>
+                  <span style={{ color: "#888888" }}>Platform Commission (8%):</span>
+                  <span style={{ color: "#888888" }}>
+                    - ₹{formatPrice(receiptItem.commission_amount || (Number(receiptItem.gross_amount || receiptItem.amount) * 0.08))}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: "12px",
+                    paddingTop: "6px",
+                    borderTop: "1px dashed rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <span style={{ color: "#FF5722", fontWeight: 600 }}>Net Artist Payout:</span>
                   <strong style={{ color: "#FF5722", fontSize: "1.2rem" }}>
-                    ₹{receiptItem.amount}
+                    ₹{formatPrice(receiptItem.artist_amount || (Number(receiptItem.gross_amount || receiptItem.amount) * 0.92))}
                   </strong>
                 </div>
+
                 <div
-                  style={{ display: "flex", justifyContent: "space-between" }}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
                 >
                   <span style={{ color: "#888888" }}>Status:</span>
                   <span
-                    className={`cd-status-pill status-${receiptItem.status}`}
+                    className={`artist-pay-pill ${
+                      receiptItem.status === "success"
+                        ? "success"
+                        : receiptItem.status === "pending"
+                        ? "pending"
+                        : receiptItem.status?.includes("refund")
+                        ? "refunded"
+                        : "failed"
+                    }`}
                   >
-                    {formatBookingStatus(receiptItem.status)}
+                    {receiptItem.status === "success"
+                      ? "Completed"
+                      : receiptItem.status === "pending"
+                      ? "Pending"
+                      : formatBookingStatus(receiptItem.status)}
                   </span>
                 </div>
               </div>
@@ -4674,6 +6773,90 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                 rejectNoteModal.request?.request_id
                   ? "Declining..."
                   : "Decline Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mark Completed Confirmation Modal */}
+      {completeModal.open && completeModal.booking && (
+        <div
+          className="cd-modal-overlay"
+          onClick={() => {
+            if (!completeModal.loading) {
+              setCompleteModal({ open: false, booking: null, loading: false });
+            }
+          }}
+        >
+          <div
+            className="cd-modal-card"
+            style={{ maxWidth: "460px" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cd-modal-header">
+              <h3 style={{ margin: 0, color: "#FFFFFF", fontSize: "1.2rem", fontWeight: 700 }}>
+                Mark Performance Completed
+              </h3>
+            </div>
+            <div className="cd-modal-body" style={{ color: "#CCCCCC", fontSize: "0.92rem", lineHeight: 1.6 }}>
+              <p style={{ marginTop: 0 }}>
+                Are you sure you want to mark this performance as successfully completed?
+              </p>
+              <div
+                style={{
+                  background: "#161618",
+                  padding: "14px 16px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                  fontSize: "0.88rem",
+                  margin: "14px 0",
+                }}
+              >
+                <div>
+                  <span style={{ color: "#8E8E93" }}>Event: </span>
+                  <strong style={{ color: "#FFFFFF" }}>
+                    {completeModal.booking.event_type || "Performance"}
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: "#8E8E93" }}>Host: </span>
+                  <strong style={{ color: "#FFFFFF" }}>
+                    {completeModal.booking.customer_name || "Host"}
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: "#8E8E93" }}>Agreed Fee: </span>
+                  <strong style={{ color: "#FF5722" }}>
+                    ₹{formatPrice(completeModal.booking.agreed_price)}
+                  </strong>
+                </div>
+              </div>
+              <p style={{ margin: 0, fontSize: "0.92rem", color: "#8E8E93" }}>
+                This will update the booking record and notify the host to leave a review.
+              </p>
+            </div>
+            <div className="cd-modal-actions" style={{ justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
+              <button
+                type="button"
+                className="cd-btn-secondary"
+                disabled={completeModal.loading}
+                onClick={() =>
+                  setCompleteModal({ open: false, booking: null, loading: false })
+                }
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="cd-btn-primary"
+                disabled={completeModal.loading}
+                onClick={handleConfirmCompleteBooking}
+              >
+                {completeModal.loading ? "Completing..." : "Confirm Completion"}
               </button>
             </div>
           </div>

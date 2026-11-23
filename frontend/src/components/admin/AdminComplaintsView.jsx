@@ -70,7 +70,7 @@ export default function AdminComplaintsView({ onCountChange }) {
       </div>
 
       {feedback && (
-        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.85rem" }}>
+        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.95rem" }}>
           {feedback}
         </div>
       )}
@@ -105,7 +105,7 @@ export default function AdminComplaintsView({ onCountChange }) {
                     <td>
                       <div>
                         <div style={{ fontWeight: 600, color: "var(--admin-text-primary)" }}>{c.username}</div>
-                        <div style={{ fontSize: "0.78rem", color: "var(--admin-text-muted)" }}>{c.user_role}</div>
+                        <div style={{ fontSize: "0.88rem", color: "var(--admin-text-muted)" }}>{c.user_role}</div>
                       </div>
                     </td>
                     <td>{c.user_email || "N/A"}</td>
@@ -133,7 +133,7 @@ export default function AdminComplaintsView({ onCountChange }) {
                           <span>Resolve</span>
                         </button>
                       ) : (
-                        <span style={{ fontSize: "0.8rem", color: "var(--admin-status-success)", fontWeight: 600 }}>
+                        <span style={{ fontSize: "0.9rem", color: "var(--admin-status-success)", fontWeight: 600 }}>
                           Resolved
                         </span>
                       )}
@@ -169,7 +169,7 @@ export default function AdminComplaintsView({ onCountChange }) {
 
             <form onSubmit={handleResolveSubmit}>
               <div className="admin-modal-body">
-                <div style={{ background: "var(--admin-card-subtle)", padding: "14px", borderRadius: "6px", fontSize: "0.85rem" }}>
+                <div style={{ background: "var(--admin-card-subtle)", padding: "14px", borderRadius: "6px", fontSize: "0.95rem" }}>
                   <div style={{ fontWeight: 600, color: "var(--admin-text-primary)", marginBottom: "4px" }}>
                     From: {selectedTicket.username} ({selectedTicket.user_role})
                   </div>

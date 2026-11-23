@@ -65,7 +65,7 @@ export default function AdminChatbotView() {
       <div className="admin-kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="admin-kpi-card">
           <div className="admin-kpi-label">Chatbot Health Status</div>
-          <div className="admin-kpi-value" style={{ color: "var(--admin-status-success)", fontSize: "1.4rem" }}>
+          <div className="admin-kpi-value" style={{ color: "var(--admin-status-success)", fontSize: "1.6rem" }}>
             Operational
           </div>
         </div>
@@ -114,10 +114,10 @@ export default function AdminChatbotView() {
             {(stats?.recent_queries || []).map((q, i) => (
               <div key={i} className="admin-action-row" style={{ cursor: "default" }}>
                 <div>
-                  <div style={{ fontSize: "0.86rem", color: "var(--admin-text-primary)", fontWeight: 500 }}>
+                  <div style={{ fontSize: "0.96rem", color: "var(--admin-text-primary)", fontWeight: 500 }}>
                     "{q.query}"
                   </div>
-                  <div style={{ fontSize: "0.76rem", color: "var(--admin-text-muted)" }}>{q.category}</div>
+                  <div style={{ fontSize: "0.86rem", color: "var(--admin-text-muted)" }}>{q.category}</div>
                 </div>
                 <span className="admin-action-badge badge-orange">{q.frequency} queries</span>
               </div>
@@ -130,11 +130,11 @@ export default function AdminChatbotView() {
       <div className="admin-panel-card" style={{ padding: "24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
           <Sparkles size={18} style={{ color: "var(--admin-accent)" }} />
-          <h3 style={{ margin: 0, fontSize: "1.05rem", color: "var(--admin-text-primary)", fontWeight: 600 }}>
+          <h3 style={{ margin: 0, fontSize: "1.2rem", color: "var(--admin-text-primary)", fontWeight: 600 }}>
             Chatbot Knowledge Simulator
           </h3>
         </div>
-        <p style={{ margin: "0 0 16px", fontSize: "0.85rem", color: "var(--admin-text-muted)" }}>
+        <p style={{ margin: "0 0 16px", fontSize: "0.95rem", color: "var(--admin-text-muted)" }}>
           Test customer prompts to verify knowledge base matching and response accuracy.
         </p>
 
@@ -152,7 +152,7 @@ export default function AdminChatbotView() {
         </form>
 
         {testResponse && (
-          <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "6px", border: "1px solid var(--admin-border)", fontSize: "0.86rem", color: "var(--admin-text-primary)", whiteSpace: "pre-line", lineHeight: 1.5 }}>
+          <div style={{ background: "var(--admin-card-subtle)", padding: "16px", borderRadius: "6px", border: "1px solid var(--admin-border)", fontSize: "0.96rem", color: "var(--admin-text-primary)", whiteSpace: "pre-line", lineHeight: 1.5 }}>
             {testResponse}
           </div>
         )}

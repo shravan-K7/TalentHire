@@ -66,14 +66,14 @@ export default function AdminNotificationsView() {
       </div>
 
       {feedback && (
-        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.85rem" }}>
+        <div style={{ padding: "10px 16px", background: "rgba(16, 185, 129, 0.15)", color: "var(--admin-status-success)", borderRadius: "6px", marginBottom: "16px", fontSize: "0.95rem" }}>
           {feedback}
         </div>
       )}
 
       {/* Broadcast Form Card */}
       <div className="admin-panel-card" style={{ padding: "24px", marginBottom: "24px" }}>
-        <h3 style={{ margin: "0 0 16px", fontSize: "1.05rem", color: "var(--admin-text-primary)", fontWeight: 600 }}>
+        <h3 style={{ margin: "0 0 16px", fontSize: "1.2rem", color: "var(--admin-text-primary)", fontWeight: 600 }}>
           Broadcast New Announcement
         </h3>
 
