@@ -533,9 +533,20 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
 
                 {/* Subtitle Line */}
                 <div className="artist-meta-subtitle">
-                  <span>{artist.location || 'Kasaragod'}</span>
+                  <span className="meta-icon-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                      <circle cx="12" cy="10" r="3" />
+                    </svg>
+                    <span>{artist.location || 'India'}</span>
+                  </span>
                   <span className="meta-divider">•</span>
-                  <span>{artist.travel_availability_display || 'Across my state'}</span>
+                  <span className="meta-icon-item artist-travel-meta">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+                    </svg>
+                    <span>Travel: <strong>{artist.travel_availability_display || 'Across my state'}</strong></span>
+                  </span>
                   <span className="meta-divider">•</span>
                   <span>{artist.languages || 'English & Hindi'}</span>
                   <span className="meta-divider">•</span>
@@ -548,7 +559,7 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                   </span>
                 </div>
 
-                {/* 4 Key Stat Cards */}
+                {/* 5 Key Stat Cards */}
                 <section className="artist-stats-grid" aria-label="Key artist statistics">
                   <div className="artist-stat-card">
                     <span className="artist-stat-value">
@@ -562,6 +573,13 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                       {artist.shows_completed || 60}
                     </span>
                     <span className="artist-stat-label">Shows completed</span>
+                  </div>
+
+                  <div className="artist-stat-card">
+                    <span className="artist-stat-value highlight-travel-stat">
+                      {artist.travel_availability_display || 'Across my state'}
+                    </span>
+                    <span className="artist-stat-label">Travel availability</span>
                   </div>
 
                   <div className="artist-stat-card">
@@ -739,6 +757,20 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                   </div>
                   <div className="booking-fee-note">
                     Final quote depends on duration and location.
+                  </div>
+
+                  <div className="booking-travel-highlight">
+                    <div className="booking-travel-icon-wrap" aria-hidden="true">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+                      </svg>
+                    </div>
+                    <div className="booking-travel-content">
+                      <span className="booking-travel-title">Travel Availability</span>
+                      <span className="booking-travel-value">
+                        {artist.travel_availability_display || 'Across my state'}
+                      </span>
+                    </div>
                   </div>
 
                   {isOwner ? (

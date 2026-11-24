@@ -308,6 +308,9 @@ function CustomerDashboard({
     const params = new URLSearchParams(window.location.search);
     const tabFromUrl = params.get("tab");
     if (tabFromUrl && tabFromUrl !== activeTab) {
+      if (tabFromUrl === "bookings") {
+        setSelectedBooking(null);
+      }
       setActiveTab(tabFromUrl);
     }
   }
@@ -442,13 +445,27 @@ function CustomerDashboard({
     }
   }
 
-  function switchTab(tabName) {
+  function switchTab(tabName, bookingId = null) {
     setActiveTab(tabName);
     const currentUrl = new URL(window.location.href);
     if (tabName === "profile") {
       currentUrl.searchParams.delete("tab");
+      currentUrl.searchParams.delete("id");
+      currentUrl.searchParams.delete("booking_id");
+      sessionStorage.removeItem("th_customer_selected_booking_id");
     } else {
       currentUrl.searchParams.set("tab", tabName);
+      if (tabName === "booking-detail") {
+        const idToStore = bookingId || selectedBooking?.id;
+        if (idToStore) {
+          currentUrl.searchParams.set("id", String(idToStore));
+          sessionStorage.setItem("th_customer_selected_booking_id", String(idToStore));
+        }
+      } else {
+        currentUrl.searchParams.delete("id");
+        currentUrl.searchParams.delete("booking_id");
+        sessionStorage.removeItem("th_customer_selected_booking_id");
+      }
     }
     window.history.replaceState(
       null,
@@ -462,9 +479,16 @@ function CustomerDashboard({
       const res = await fetchCustomerDashboard();
       setData(res);
       if (res && res.bookings) {
+        const params = new URLSearchParams(window.location.search);
+        const targetBookingId =
+          params.get("id") ||
+          params.get("booking_id") ||
+          sessionStorage.getItem("th_customer_selected_booking_id");
+
         setSelectedBooking((prevSelected) => {
-          if (!prevSelected) return prevSelected;
-          const updated = res.bookings.find((b) => b.id === prevSelected.id);
+          const searchId = prevSelected?.id || targetBookingId;
+          if (!searchId) return prevSelected;
+          const updated = res.bookings.find((b) => String(b.id) === String(searchId));
           return updated || prevSelected;
         });
       }
@@ -486,6 +510,19 @@ function CustomerDashboard({
     }
   }, []);
 
+  // Refresh dashboard data and reset booking detail view when arriving at My Bookings
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabFromUrl = params.get("tab");
+    const path = window.location.pathname.toLowerCase();
+    if (tabFromUrl === "bookings" || path === "/my-bookings" || path === "/bookings") {
+      setSelectedBooking((prev) => (prev !== null ? null : prev));
+      if (typeof refreshDashboard === "function") {
+        refreshDashboard();
+      }
+    }
+  }, [currentPath, refreshDashboard]);
+
   useEffect(() => {
     if (!user) {
       return;
@@ -498,6 +535,21 @@ function CustomerDashboard({
         const res = await fetchCustomerDashboard();
         if (!ignore) {
           setData(res);
+          if (res && res.bookings) {
+            const params = new URLSearchParams(window.location.search);
+            const targetBookingId =
+              params.get("id") ||
+              params.get("booking_id") ||
+              sessionStorage.getItem("th_customer_selected_booking_id");
+            if (targetBookingId) {
+              const matched = res.bookings.find(
+                (b) => String(b.id) === String(targetBookingId),
+              );
+              if (matched) {
+                setSelectedBooking(matched);
+              }
+            }
+          }
           const prof = res.profile || {};
           setProfileForm({
             first_name: prof.first_name || "",
@@ -1791,7 +1843,7 @@ function CustomerDashboard({
               onRefresh={refreshDashboard}
               onViewDetails={(b) => {
                 setSelectedBooking(b);
-                switchTab("booking-detail");
+                switchTab("booking-detail", b?.id);
               }}
               onPayNow={(b) => handlePayNow(b)}
               onReschedule={(b) => openRescheduleModal(b)}
@@ -1807,19 +1859,35 @@ function CustomerDashboard({
           {/* =======================================================================
               SCREEN 4: BOOKING DETAILS PAGE (Exact layout from reference PDF)
               ======================================================================= */}
-          {activeTab === "booking-detail" && (
-            <CustomerBookingDetail
-              booking={selectedBooking || bookings[0]}
-              onBack={() => switchTab("bookings")}
-              onReschedule={(b) => openRescheduleModal(b)}
-              onCancelBooking={(b) => openCancelModal(b)}
-              onOpenReceipt={(b) => handleOpenReceipt(b)}
-              onPayNow={(b) => handlePayNow(b)}
-              navigate={navigate}
-              onContactSupport={() => switchTab("support")}
-              onRefresh={refreshDashboard}
-            />
-          )}
+          {activeTab === "booking-detail" && (() => {
+            const currentIdParam =
+              new URLSearchParams(window.location.search).get("id") ||
+              new URLSearchParams(window.location.search).get("booking_id") ||
+              sessionStorage.getItem("th_customer_selected_booking_id");
+            const resolvedBooking =
+              selectedBooking ||
+              (currentIdParam && bookings.length > 0
+                ? bookings.find((b) => String(b.id) === String(currentIdParam))
+                : null) ||
+              bookings[0];
+
+            return (
+              <CustomerBookingDetail
+                booking={resolvedBooking}
+                onBack={() => {
+                  setSelectedBooking(null);
+                  switchTab("bookings");
+                }}
+                onReschedule={(b) => openRescheduleModal(b)}
+                onCancelBooking={(b) => openCancelModal(b)}
+                onOpenReceipt={(b) => handleOpenReceipt(b)}
+                onPayNow={(b) => handlePayNow(b)}
+                navigate={navigate}
+                onContactSupport={() => switchTab("support")}
+                onRefresh={refreshDashboard}
+              />
+            );
+          })()}
 
           {/* =======================================================================
               SCREEN 5: PAYMENT HISTORY PAGE (Exact layout from reference PDF)
@@ -1834,7 +1902,7 @@ function CustomerDashboard({
               onPayNow={(booking) => handlePayNow(booking)}
               onViewDetails={(booking) => {
                 setSelectedBooking(booking);
-                switchTab("booking-detail");
+                switchTab("booking-detail", booking?.id);
               }}
               paymentLoadingId={paymentLoadingId}
               showToast={showToast}

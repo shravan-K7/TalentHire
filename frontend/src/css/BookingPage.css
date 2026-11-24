@@ -130,6 +130,28 @@
   line-height: 1.35;
 }
 
+.booking-travel-note-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 87, 34, 0.08);
+  border: 1px solid rgba(255, 87, 34, 0.24);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  color: #D1D5DB;
+  font-size: 0.86rem;
+}
+
+.booking-travel-note-banner svg {
+  flex-shrink: 0;
+}
+
+.booking-travel-note-banner strong {
+  color: #FF5722;
+  margin-left: 4px;
+}
+
 /* Grid Layouts */
 .booking-grid-two-col {
   display: grid;
@@ -1197,6 +1219,48 @@ select.booking-control option {
   font-size: 1.15rem;
 }
 
+.booking-artist-travel-box {
+  margin-top: 14px;
+  background: rgba(255, 87, 34, 0.06);
+  border: 1px solid rgba(255, 87, 34, 0.22);
+  border-radius: 8px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.booking-artist-travel-icon-wrap {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 87, 34, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.booking-artist-travel-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.booking-artist-travel-label {
+  color: #8E95A2;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.booking-artist-travel-val {
+  color: #FFFFFF;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
 /* 2. Live Booking Summary Card */
 .booking-summary-card {
   background: #141414;
@@ -1323,6 +1387,56 @@ select.booking-control option {
   padding: 12px 16px;
   border-radius: 8px;
   font-size: 0.90rem;
+}
+
+.booking-duplicate-warning-box {
+  background: rgba(255, 152, 0, 0.1);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.booking-duplicate-warning-title {
+  color: #FFA726;
+  font-weight: 700;
+  font-size: 0.94rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.booking-duplicate-warning-desc {
+  color: #D1D5DB;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.booking-duplicate-warning-desc strong {
+  color: #FFFFFF;
+}
+
+.booking-duplicate-link-btn {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid #FFA726;
+  color: #FFA726;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: all 0.18s ease;
+}
+
+.booking-duplicate-link-btn:hover {
+  background: #FFA726;
+  color: #121212;
 }
 
 .booking-loading-box {

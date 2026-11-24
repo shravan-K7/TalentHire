@@ -243,6 +243,24 @@
   grid-column: 1 / -1;
 }
 
+.artist-other-category-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: artistFadeIn 0.25s ease-out;
+}
+
+@keyframes artistFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .artist-grid input,
 .artist-grid select,
 .artist-grid textarea {

@@ -5,6 +5,7 @@ import EventDetails from '../components/booking/EventDetails';
 import EventLocation from '../components/booking/EventLocation';
 import PerformanceRequirements from '../components/booking/PerformanceRequirements';
 import BookingSummary from '../components/booking/BookingSummary';
+import BookingConfirmationModal from '../components/booking/BookingConfirmationModal';
 import {
   fetchArtistDetail,
   createBooking,
@@ -19,6 +20,8 @@ const DEFAULT_ARTIST = {
   location: '',
   starting_price: 0,
   profile_image: null,
+  travel_availability: 'state',
+  travel_availability_display: 'Across my state',
 };
 
 export default function BookingPage({ artistId = '4', user, onLogout, navigate, checking = false }) {
@@ -57,9 +60,13 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
   const [submitError, setSubmitError] = useState('');
   const [fieldError, setFieldError] = useState({ field: '', message: '' });
   const [bookingSuccessData, setBookingSuccessData] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [countdownSeconds, setCountdownSeconds] = useState(3);
+  const [isSuccess, setIsSuccess] = useState(false);
 
   // Artist availability state
   const [unavailableDates, setUnavailableDates] = useState(null);
+  const [customerBookings, setCustomerBookings] = useState([]);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState('');
   const [currentMonth, setCurrentMonth] = useState('2026-11');
@@ -83,12 +90,14 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
       const data = await fetchPublicArtistAvailability(aid, monthStr);
       if (reqId === availabilityReqIdRef.current) {
         setUnavailableDates(data.unavailable_dates || []);
+        setCustomerBookings(data.customer_bookings || []);
         setAvailabilityError('');
       }
     } catch (err) {
       if (reqId === availabilityReqIdRef.current) {
         console.warn('Failed to load artist availability:', err);
         setUnavailableDates(null);
+        setCustomerBookings([]);
         setAvailabilityError(err.message || 'Unable to load artist schedule. Please try again.');
       }
     } finally {
@@ -210,7 +219,13 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
     }
   }
 
-  async function handleSubmit(e) {
+  // Detect whether the logged-in customer already has a pending or accepted booking with this artist on the selected date
+  const duplicateCustomerBooking = useMemo(() => {
+    if (!formData.event_date || !Array.isArray(customerBookings)) return null;
+    return customerBookings.find((b) => b.date === formData.event_date) || null;
+  }, [formData.event_date, customerBookings]);
+
+  function handleSubmit(e) {
     e.preventDefault();
 
     if (!user) {
@@ -311,7 +326,48 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
       }
     }
 
+    // 9. Duplicate Booking Prevention Check
+    if (duplicateCustomerBooking) {
+      pointOutField(
+        'eventDateTimeSection',
+        'You already have a booking request with this artist on this date. Please visit My Bookings to manage your existing request.'
+      );
+      return;
+    }
+
+    // All validations passed -> Open Confirmation Modal with details
+    setShowConfirmModal(true);
+  }
+
+  async function handleConfirmSendBooking() {
+    if (!user) {
+      const targetId = artist?.id || artistId || 4;
+      const redirectPath = `/book-artist/${targetId}`;
+      const loginUrl = `/login?redirect=${encodeURIComponent(redirectPath)}`;
+      if (navigate) {
+        navigate(loginUrl);
+      } else {
+        window.location.assign(loginUrl);
+      }
+      return;
+    }
+
+    if (duplicateCustomerBooking) {
+      setSubmitError(
+        'You already have a booking request with this artist on this date. Please visit My Bookings to manage your existing request.'
+      );
+      setShowConfirmModal(false);
+      return;
+    }
+
     setSubmitting(true);
+    setSubmitError('');
+    setIsSuccess(false);
+    setCountdownSeconds(3);
+
+    const timerInterval = setInterval(() => {
+      setCountdownSeconds((prev) => Math.max(1, prev - 1));
+    }, 1000);
 
     try {
       const combinedLocation = [formData.venue_name.trim(), formData.event_area.trim()].filter(Boolean).join(', ');
@@ -344,9 +400,27 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
         message: formData.additional_requirements.trim(),
       };
 
-      const result = await createBooking(payload);
+      // Ensure 3 seconds loading state in parallel with API submission
+      const [result] = await Promise.all([
+        createBooking(payload),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+
+      clearInterval(timerInterval);
       setBookingSuccessData(result);
+      setIsSuccess(true);
+
+      // Brief delay to showcase checkmark then redirect to customer dashboard My Bookings
+      setTimeout(() => {
+        if (navigate) {
+          navigate('/customer-dashboard?tab=bookings');
+        } else {
+          window.location.assign('/customer-dashboard?tab=bookings');
+        }
+      }, 500);
     } catch (err) {
+      clearInterval(timerInterval);
+      setSubmitting(false);
       const errorMsg = err.message || 'Failed to submit booking request. Please check inputs and try again.';
       setSubmitError(errorMsg);
 
@@ -363,11 +437,10 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
       }
 
       if (err.status === 409 || errorMsg.toLowerCase().includes('already has a booking') || errorMsg.toLowerCase().includes('active reservation')) {
+        setShowConfirmModal(false);
         pointOutField('eventDateTimeSection', errorMsg);
         loadAvailability(currentMonthRef.current);
       }
-    } finally {
-      setSubmitting(false);
     }
   }
 
@@ -528,6 +601,9 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
                 availabilityError={availabilityError}
                 fieldError={fieldError}
                 onFocusField={handleFocusField}
+                duplicateCustomerBooking={duplicateCustomerBooking}
+                artistName={displayStageName}
+                navigate={navigate}
               />
 
               {/* Card 2: Event Location */}
@@ -536,6 +612,7 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
                 setFormData={setFormData}
                 fieldError={fieldError}
                 onFocusField={handleFocusField}
+                travelAvailability={currentArtist.travel_availability_display || currentArtist.travel_availability || 'Across my state'}
               />
 
               {/* Card 3: Contact & Performance Requirements */}
@@ -551,9 +628,13 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
                 <button
                   type="submit"
                   className="booking-submit-btn"
-                  disabled={submitting}
+                  disabled={submitting || Boolean(duplicateCustomerBooking)}
                 >
-                  {submitting ? 'Submitting Request...' : 'Send Booking Request'}
+                  {submitting
+                    ? 'Submitting Request...'
+                    : duplicateCustomerBooking
+                    ? 'Date Already Booked by You'
+                    : 'Proceed to Confirmation'}
                 </button>
                 <div className="booking-required-notice">* Required fields</div>
               </div>
@@ -566,6 +647,23 @@ export default function BookingPage({ artistId = '4', user, onLogout, navigate, 
             />
           </div>
         )}
+
+        {/* Booking Confirmation Review Modal */}
+        <BookingConfirmationModal
+          isOpen={showConfirmModal}
+          onClose={() => {
+            if (!submitting) {
+              setShowConfirmModal(false);
+            }
+          }}
+          onConfirm={handleConfirmSendBooking}
+          artist={currentArtist}
+          formData={formData}
+          isSubmitting={submitting}
+          submitError={submitError}
+          isSuccess={isSuccess}
+          countdownSeconds={countdownSeconds}
+        />
       </main>
 
       <Footer />

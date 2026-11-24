@@ -145,6 +145,12 @@ class Booking(models.Model):
     )
     event_type = models.CharField(max_length=100)
     event_date = models.DateTimeField()
+    event_day = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Calendar date of the event in Asia/Kolkata timezone for date-level uniqueness.",
+    )
     event_location = models.CharField(max_length=200)
 
     # Detailed Location Fields
@@ -212,10 +218,41 @@ class Booking(models.Model):
         return None
 
     def save(self, *args, **kwargs):
+        if self.event_date:
+            from zoneinfo import ZoneInfo
+            from django.utils import timezone
+            kolkata_tz = ZoneInfo("Asia/Kolkata")
+            local_dt = timezone.localtime(self.event_date, timezone=kolkata_tz)
+            self.event_day = local_dt.date()
+            if kwargs.get("update_fields") is not None:
+                fields = set(kwargs["update_fields"])
+                fields.add("event_day")
+                kwargs["update_fields"] = list(fields)
+
         if self.accepted_at and not self.payment_deadline:
             from datetime import timedelta
             self.payment_deadline = self.accepted_at + timedelta(hours=24)
+            if kwargs.get("update_fields") is not None:
+                fields = set(kwargs["update_fields"])
+                fields.add("payment_deadline")
+                kwargs["update_fields"] = list(fields)
+
         super().save(*args, **kwargs)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["customer", "artist", "event_day"],
+                condition=models.Q(status__in=["pending", "accepted"]),
+                name="unique_active_customer_artist_booking_per_day",
+            ),
+            models.UniqueConstraint(
+                fields=["artist", "event_day"],
+                condition=models.Q(status__in=["accepted", "completed"]),
+                name="unique_accepted_artist_booking_per_day",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.customer} - {self.artist} ({self.status})"

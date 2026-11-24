@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MAP_TILE_URL, MAP_ATTRIBUTION, MAP_MAX_ZOOM, DEFAULT_MAP_CENTER } from '../../config/mapConfig';
 import PaymentCountdown from './PaymentCountdown';
+import EventCountdown from './EventCountdown';
 import { checkBookingExpiry } from '../../js/auth';
 import './CustomerBookingDetail.css';
 
@@ -463,6 +464,15 @@ export default function CustomerBookingDetail({
         </div>
       </div>
 
+      {/* Event Live Countdown when Booking is Paid and Active */}
+      {isPaid && (booking.event_date_iso || booking.event_date) && status !== 'cancelled' && status !== 'rejected' && (
+        <EventCountdown
+          eventDate={booking.event_date_iso || booking.event_date}
+          variant="banner"
+          title="Upcoming Event Countdown"
+        />
+      )}
+
       {/* =======================================================================
           TWO-COLUMN MAIN LAYOUT
           ======================================================================= */}
@@ -820,6 +830,16 @@ export default function CustomerBookingDetail({
                 variant="detail"
                 onExpire={handleExpire}
               />
+            )}
+
+            {/* Event Countdown Pill when Payment is Successful */}
+            {isPaid && (booking.event_date_iso || booking.event_date) && status !== 'cancelled' && (
+              <div style={{ marginBottom: '12px' }}>
+                <EventCountdown
+                  eventDate={booking.event_date_iso || booking.event_date}
+                  variant="pill"
+                />
+              </div>
             )}
 
             {/* If paid, display primary orange download receipt button */}

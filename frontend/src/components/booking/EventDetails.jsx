@@ -21,6 +21,9 @@ export default function EventDetails({
   availabilityError = null,
   fieldError = { field: '', message: '' },
   onFocusField,
+  duplicateCustomerBooking = null,
+  artistName = 'this artist',
+  navigate = null,
 }) {
   return (
     <div className="booking-card" id="eventDetailsCard">
@@ -79,6 +82,27 @@ export default function EventDetails({
           isLoadingAvailability={isLoadingAvailability}
           availabilityError={availabilityError}
         />
+        {duplicateCustomerBooking && (
+          <div className="booking-duplicate-warning-box" role="alert">
+            <div className="booking-duplicate-warning-title">
+              ⚠️ You already have a booking request with {artistName} on this date.
+            </div>
+            <p className="booking-duplicate-warning-desc">
+              You currently have an active ({duplicateCustomerBooking.status}) booking request (#{duplicateCustomerBooking.id}) on <strong>{formData.event_date}</strong>.
+              Please visit <strong>My Bookings</strong> to manage your existing request.
+            </p>
+            <button
+              type="button"
+              className="booking-duplicate-link-btn"
+              onClick={() => {
+                if (navigate) navigate('/customer-dashboard?tab=bookings');
+                else window.location.assign('/customer-dashboard?tab=bookings');
+              }}
+            >
+              Go to My Bookings →
+            </button>
+          </div>
+        )}
         {fieldError.field === 'eventDateTimeSection' && (
           <div className="booking-field-pointer" role="alert">
             <span>{fieldError.message}</span>

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.test import Client, TestCase, override_settings
-from app.models import Category, ArtistProfile, Booking, Payment, ArtistAvailability, Refund
+from app.models import Category, ArtistProfile, Booking, Payment, ArtistAvailability, Refund, ReschedulingRequest
 
 
 class AuthViewTests(TestCase):
@@ -8211,6 +8211,421 @@ class ExploreArtistsTests(TestCase):
         self.assertEqual(res_desc.status_code, 200)
         names_desc = [a["stage_name"] for a in res_desc.json()["artists"]]
         self.assertEqual(names_desc, ["Beta Band Unique", "Alpha Performer Unique"])
+
+
+class DuplicateBookingPreventionTests(TestCase):
+    """
+    Comprehensive verification of duplicate booking prevention and race condition handling.
+    Covers all 16 business scenarios specified in requirements.
+    """
+
+    def setUp(self):
+        self.client = Client()
+        self.kolkata_tz = ZoneInfo("Asia/Kolkata")
+
+        self.category = Category.objects.create(name="Singers & Vocalists Unique")
+
+        # Artist 1
+        self.artist_user1 = User.objects.create_user(
+            username="dup_artist1", email="dupartist1@example.com", password="password123"
+        )
+        self.artist1 = ArtistProfile.objects.create(
+            user=self.artist_user1,
+            stage_name="Singer A Unique",
+            category=self.category,
+            location="Mumbai, Maharashtra",
+            starting_price=Decimal("15000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+        # Artist 2
+        self.artist_user2 = User.objects.create_user(
+            username="dup_artist2", email="dupartist2@example.com", password="password123"
+        )
+        self.artist2 = ArtistProfile.objects.create(
+            user=self.artist_user2,
+            stage_name="Singer B Unique",
+            category=self.category,
+            location="Delhi",
+            starting_price=Decimal("20000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+        # Customers
+        self.customer1 = User.objects.create_user(
+            username="dup_cust1", email="dupcust1@example.com", password="password123"
+        )
+        self.customer2 = User.objects.create_user(
+            username="dup_cust2", email="dupcust2@example.com", password="password123"
+        )
+
+        # Test Dates in Future
+        self.date1_str = "2027-04-15"
+        self.date2_str = "2027-04-16"
+
+    def _payload(self, artist_id, date_str, time_str="18:00", event_type="Wedding", venue="Grand Palace"):
+        return {
+            "artist_id": artist_id,
+            "event_type": event_type,
+            "event_date": date_str,
+            "event_time": time_str,
+            "venue_name": venue,
+            "event_area": "Marine Drive",
+            "event_location": f"{venue}, Marine Drive",
+            "performance_duration": "2 hours",
+            "expected_audience_size": 250,
+            "customer_phone": "9876543210",
+            "customer_budget": 20000,
+        }
+
+    # 1. Same customer + same artist + same date + same details: Block.
+    def test_01_same_customer_same_artist_same_date_same_details_blocked(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res1.status_code, 201)
+        b_id = res1.json()["booking_id"]
+
+        # Second identical request
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res2.status_code, 409)
+        data2 = res2.json()
+        self.assertFalse(data2.get("success", True))
+        self.assertIn("already have a booking", data2["message"])
+        self.assertEqual(data2["existing_booking_id"], b_id)
+        # Ensure only 1 booking exists
+        self.assertEqual(Booking.objects.filter(customer=self.customer1, artist=self.artist1).count(), 1)
+
+    # 2. Same customer + same artist + same date + different details: Block.
+    def test_02_same_customer_same_artist_same_date_different_details_blocked(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str, time_str="14:00", event_type="Corporate", venue="Tech Park")
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res1.status_code, 201)
+
+        # Different time, different event type, different venue on SAME calendar date
+        p2 = self._payload(self.artist1.id, self.date1_str, time_str="20:00", event_type="Birthday Party", venue="Hotel Orchid")
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p2), content_type="application/json")
+        self.assertEqual(res2.status_code, 409)
+        self.assertIn("already have a booking", res2.json()["message"])
+        self.assertEqual(Booking.objects.filter(customer=self.customer1, artist=self.artist1).count(), 1)
+
+    # 3. Same customer + same artist + different date: Allow.
+    def test_03_same_customer_same_artist_different_date_allowed(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res1.status_code, 201)
+
+        # Different date
+        p2 = self._payload(self.artist1.id, self.date2_str)
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p2), content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+        self.assertEqual(Booking.objects.filter(customer=self.customer1, artist=self.artist1).count(), 2)
+
+    # 4. Same customer + different artist + same date: Allow.
+    def test_04_same_customer_different_artist_same_date_allowed(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res1.status_code, 201)
+
+        # Different artist on same date
+        p2 = self._payload(self.artist2.id, self.date1_str)
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p2), content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+        self.assertEqual(Booking.objects.filter(customer=self.customer1).count(), 2)
+
+    # 5. Different customer + same artist + accepted date: Block.
+    def test_05_different_customer_same_artist_accepted_date_blocked(self):
+        # Customer 1 books and Artist accepts
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Artist accepts
+        self.client.force_login(self.artist_user1)
+        res_accept = self.client.post(
+            f"/api/artist/bookings/{b1_id}/respond/",
+            data=json.dumps({"action": "accept", "final_price": "18000"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_accept.status_code, 200)
+
+        # Customer 2 attempts to request the same date
+        self.client.force_login(self.customer2)
+        p2 = self._payload(self.artist1.id, self.date1_str)
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p2), content_type="application/json")
+        self.assertEqual(res2.status_code, 409)
+
+    # 6. Previous booking rejected: Allow new request.
+    def test_06_previous_booking_rejected_allows_new_request(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Artist rejects
+        self.client.force_login(self.artist_user1)
+        self.client.post(
+            f"/api/artist/bookings/{b1_id}/respond/",
+            data=json.dumps({"action": "reject", "reason": "Not available at this time slot"}),
+            content_type="application/json",
+        )
+
+        # Customer 1 can now book again for that date
+        self.client.force_login(self.customer1)
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+
+    # 7. Previous booking cancelled: Allow new request.
+    def test_07_previous_booking_cancelled_allows_new_request(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Cancel the booking
+        b1 = Booking.objects.get(id=b1_id)
+        b1.status = Booking.Status.CANCELLED
+        b1.save()
+
+        # Customer 1 can now book again for that date
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+
+    # 8. Previous booking expired: Allow new request.
+    def test_08_previous_booking_expired_allows_new_request(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Expire the booking
+        b1 = Booking.objects.get(id=b1_id)
+        b1.status = Booking.Status.EXPIRED
+        b1.save()
+
+        # Customer 1 can book again
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+
+    # 9. Double-click Submit: Only one booking created.
+    def test_09_double_click_submit_creates_only_one_booking(self):
+        self.client.force_login(self.customer1)
+        p1 = self._payload(self.artist1.id, self.date1_str)
+
+        # Rapid consecutive posts
+        res1 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+        res2 = self.client.post("/api/bookings/", data=json.dumps(p1), content_type="application/json")
+
+        self.assertEqual(res1.status_code, 201)
+        self.assertEqual(res2.status_code, 409)
+        self.assertEqual(Booking.objects.filter(customer=self.customer1, artist=self.artist1).count(), 1)
+
+    # 10. Two simultaneous requests: No duplicate active customer booking (DB constraint enforcement).
+    def test_10_database_constraint_prevents_active_customer_duplicate(self):
+        from django.db import IntegrityError
+        from datetime import date
+        event_d = date(2027, 4, 15)
+
+        # Create first active booking
+        Booking.objects.create(
+            customer=self.customer1,
+            artist=self.artist1,
+            event_type="Wedding",
+            event_date=self.kolkata_tz.localize if hasattr(self.kolkata_tz, 'localize') else timezone.now(),
+            event_day=event_d,
+            status=Booking.Status.PENDING,
+        )
+
+        # Direct DB attempt to create duplicate active booking
+        with self.assertRaises(IntegrityError):
+            Booking.objects.create(
+                customer=self.customer1,
+                artist=self.artist1,
+                event_type="Corporate",
+                event_date=timezone.now(),
+                event_day=event_d,
+                status=Booking.Status.PENDING,
+            )
+
+    # 11. Two customers request the same date: Only one can be accepted.
+    def test_11_two_customers_request_same_date_only_one_accepted(self):
+        # Customer 1 requests
+        self.client.force_login(self.customer1)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(self._payload(self.artist1.id, self.date1_str)), content_type="application/json")
+        self.assertEqual(res1.status_code, 201)
+        b1_id = res1.json()["booking_id"]
+
+        # Customer 2 requests same date while pending
+        self.client.force_login(self.customer2)
+        res2 = self.client.post("/api/bookings/", data=json.dumps(self._payload(self.artist1.id, self.date1_str)), content_type="application/json")
+        self.assertEqual(res2.status_code, 201)
+        b2_id = res2.json()["booking_id"]
+
+        # Artist accepts Customer 1
+        self.client.force_login(self.artist_user1)
+        res_acc1 = self.client.post(
+            f"/api/artist/bookings/{b1_id}/respond/",
+            data=json.dumps({"action": "accept", "final_price": "16000"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_acc1.status_code, 200)
+
+        # Artist attempts to accept Customer 2
+        res_acc2 = self.client.post(
+            f"/api/artist/bookings/{b2_id}/respond/",
+            data=json.dumps({"action": "accept", "final_price": "17000"}),
+            content_type="application/json",
+        )
+        # Blocked because date is already accepted (or transitioned to unavailable)
+        self.assertIn(res_acc2.status_code, [400, 409])
+        self.assertEqual(Booking.objects.filter(artist=self.artist1, status=Booking.Status.ACCEPTED).count(), 1)
+
+    # 12. Two simultaneous acceptance requests: Only one can succeed (DB constraint enforcement).
+    def test_12_database_constraint_prevents_multiple_accepted_artist_bookings(self):
+        from django.db import IntegrityError
+        from datetime import date
+        event_d = date(2027, 4, 15)
+
+        Booking.objects.create(
+            customer=self.customer1,
+            artist=self.artist1,
+            event_type="Wedding",
+            event_date=timezone.now(),
+            event_day=event_d,
+            status=Booking.Status.ACCEPTED,
+        )
+
+        with self.assertRaises(IntegrityError):
+            Booking.objects.create(
+                customer=self.customer2,
+                artist=self.artist1,
+                event_type="Corporate",
+                event_date=timezone.now(),
+                event_day=event_d,
+                status=Booking.Status.ACCEPTED,
+            )
+
+    # 13. Customer attempts to pay for an expired booking: Block.
+    def test_13_customer_attempts_to_pay_for_expired_booking_blocked(self):
+        self.client.force_login(self.customer1)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(self._payload(self.artist1.id, self.date1_str)), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Expire the booking
+        b1 = Booking.objects.get(id=b1_id)
+        b1.status = Booking.Status.EXPIRED
+        b1.save()
+
+        # Customer tries to create payment order
+        res_order = self.client.post(f"/api/bookings/{b1_id}/create-order/")
+        self.assertEqual(res_order.status_code, 409)
+        self.assertIn("expired", res_order.json()["error"].lower())
+
+    # 14. Reschedule request for an unavailable date: Block.
+    def test_14_reschedule_request_for_unavailable_date_blocked(self):
+        # Artist 1 accepted on Date 2
+        from datetime import datetime
+        dt2 = datetime.fromisoformat(f"{self.date2_str}T19:00:00").replace(tzinfo=self.kolkata_tz)
+        Booking.objects.create(
+            customer=self.customer2,
+            artist=self.artist1,
+            event_type="Gig",
+            event_date=dt2,
+            event_day=dt2.date(),
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        # Customer 1 has booking on Date 1
+        self.client.force_login(self.customer1)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(self._payload(self.artist1.id, self.date1_str)), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Customer 1 attempts to reschedule to Date 2 (which is occupied)
+        res_resched = self.client.post(
+            f"/api/bookings/{b1_id}/reschedule/",
+            data=json.dumps({"new_event_date": f"{self.date2_str}T19:00:00", "reason": "Date conflict"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_resched.status_code, 409)
+
+    # 15. Artist approves a conflicting reschedule: Block.
+    def test_15_artist_approves_conflicting_reschedule_blocked(self):
+        from datetime import datetime
+        # Customer 1 has booking on Date 1
+        self.client.force_login(self.customer1)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(self._payload(self.artist1.id, self.date1_str)), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        # Reschedule request submitted for Date 2 when Date 2 was initially free
+        res_resched = self.client.post(
+            f"/api/bookings/{b1_id}/reschedule/",
+            data=json.dumps({"new_event_date": f"{self.date2_str}T19:00:00", "reason": "Moving"}),
+            content_type="application/json",
+        )
+        self.assertIn(res_resched.status_code, [200, 201])
+        req_id = ReschedulingRequest.objects.filter(booking_id=b1_id).first().id
+
+        # In between, another booking is accepted on Date 2
+        dt2 = datetime.fromisoformat(f"{self.date2_str}T19:00:00").replace(tzinfo=self.kolkata_tz)
+        Booking.objects.create(
+            customer=self.customer2,
+            artist=self.artist1,
+            event_type="Gig",
+            event_date=dt2,
+            event_day=dt2.date(),
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        # Artist attempts to approve Customer 1's reschedule to Date 2
+        self.client.force_login(self.artist_user1)
+        res_app = self.client.post(
+            f"/api/artist/rescheduling-requests/{req_id}/respond/",
+            data=json.dumps({"action": "approve"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_app.status_code, 409)
+        # Original booking remains unchanged on Date 1
+        b1 = Booking.objects.get(id=b1_id)
+        self.assertEqual(b1.event_day, datetime.fromisoformat(f"{self.date1_str}T18:00:00").date())
+
+    # 16. Artist rejects a reschedule: Original booking remains unchanged.
+    def test_16_artist_rejects_reschedule_original_booking_unchanged(self):
+        from datetime import datetime
+        self.client.force_login(self.customer1)
+        res1 = self.client.post("/api/bookings/", data=json.dumps(self._payload(self.artist1.id, self.date1_str)), content_type="application/json")
+        b1_id = res1.json()["booking_id"]
+
+        res_resched = self.client.post(
+            f"/api/bookings/{b1_id}/reschedule/",
+            data=json.dumps({"new_event_date": f"{self.date2_str}T19:00:00", "reason": "Moving"}),
+            content_type="application/json",
+        )
+        self.assertIn(res_resched.status_code, [200, 201])
+        req_id = ReschedulingRequest.objects.filter(booking_id=b1_id).first().id
+
+        # Artist rejects
+        self.client.force_login(self.artist_user1)
+        res_rej = self.client.post(
+            f"/api/artist/rescheduling-requests/{req_id}/respond/",
+            data=json.dumps({"action": "reject", "reason": "Cannot accommodate"}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_rej.status_code, 200)
+
+        # Original booking still on Date 1
+        b1 = Booking.objects.get(id=b1_id)
+        self.assertEqual(b1.event_day, datetime.fromisoformat(f"{self.date1_str}T18:00:00").date())
+        req = ReschedulingRequest.objects.get(id=req_id)
+        self.assertEqual(req.status, ReschedulingRequest.Status.REJECTED)
+
 
 
 

@@ -48,7 +48,7 @@
 }
 
 .explore-page-subtitle {
-  font-size: 0.95rem;
+  font-size: 1.02rem;
   color: #8E95A2;
   margin: 0;
   font-weight: 400;
@@ -99,7 +99,7 @@
   border: none;
   outline: none;
   color: #FFFFFF;
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   font-family: inherit;
 }
 
@@ -155,7 +155,7 @@
   border: none;
   outline: none;
   color: #FFFFFF;
-  font-size: 0.86rem;
+  font-size: 0.92rem;
   font-weight: 500;
   font-family: inherit;
   padding: 0 28px 0 12px;
@@ -184,7 +184,7 @@
   background: transparent;
   border: none;
   color: #FF5722;
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   font-weight: 500;
   cursor: pointer;
   padding: 0 8px;
@@ -221,9 +221,9 @@
   background: #14161d;
   border: 1px solid #232732;
   color: #9DA3AF;
-  font-size: 0.84rem;
+  font-size: 0.90rem;
   font-weight: 500;
-  padding: 6px 16px;
+  padding: 7px 18px;
   border-radius: 9999px;
   cursor: pointer;
   display: inline-flex;
@@ -247,7 +247,7 @@
 }
 
 .category-pill-count {
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   color: inherit;
   font-weight: inherit;
 }
@@ -381,18 +381,18 @@
 
 .card-category-label {
   color: #FF5722;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 
 .card-artist-name {
   color: #FFFFFF;
-  font-size: 1.02rem;
+  font-size: 1.15rem;
   font-weight: 700;
-  margin: 0 0 2px 0;
+  margin: 0 0 3px 0;
   line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
@@ -401,22 +401,53 @@
 
 .card-perf-type {
   color: #8E95A2;
-  font-size: 0.82rem;
-  margin: 0 0 4px 0;
+  font-size: 0.90rem;
+  margin: 0 0 5px 0;
   font-weight: 400;
 }
 
 .card-location-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: space-between;
+  gap: 8px;
   color: #8E95A2;
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   margin-bottom: 12px;
 }
 
-.card-location-row svg {
+.card-loc-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-loc-item svg {
   color: #7E8695;
+  flex-shrink: 0;
+}
+
+.card-travel-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.76rem;
+  color: #FF7043;
+  background: rgba(255, 87, 34, 0.1);
+  border: 1px solid rgba(255, 87, 34, 0.28);
+  border-radius: 5px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.card-travel-tag svg {
+  color: #FF5722;
   flex-shrink: 0;
 }
 
@@ -434,24 +465,26 @@
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   color: #8E95A2;
   line-height: 1.3;
 }
 
 .price-label-from {
   color: #8E95A2;
+  font-size: 0.85rem;
   margin-right: 3px;
 }
 
 .price-amount-highlight {
   color: #FFFFFF;
+  font-size: 1.05rem;
   font-weight: 700;
 }
 
 .price-exp-label {
   color: #8E95A2;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
 }
 
 .card-book-btn {
@@ -459,8 +492,8 @@
   color: #FFFFFF;
   border: none;
   border-radius: 8px;
-  padding: 6px 14px;
-  font-size: 0.8rem;
+  padding: 7px 16px;
+  font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.18s ease;
@@ -483,7 +516,7 @@
 
 .pagination-count-text {
   color: #8E95A2;
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   margin: 0;
 }
 
@@ -492,8 +525,8 @@
   border: 1px solid #282c37;
   color: #FFFFFF;
   border-radius: 8px;
-  padding: 9px 24px;
-  font-size: 0.88rem;
+  padding: 10px 28px;
+  font-size: 0.94rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;

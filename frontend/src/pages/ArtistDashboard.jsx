@@ -59,6 +59,7 @@ import {
 import { extractVideoMetadataAndThumbnail } from "../js/videoUtils";
 import "../css/CustomerDashboard.css";
 import "../css/ArtistDashboard.css";
+import EventCountdown from "../components/booking/EventCountdown";
 
 function formatBookingStatus(status) {
   if (!status) return "Pending";
@@ -221,6 +222,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
   const [editForm, setEditForm] = useState({
     stage_name: "",
     category: "",
+    other_category: "",
     gender: "male",
     starting_price: "",
     years_of_experience: 0,
@@ -1090,6 +1092,9 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       const formData = new FormData();
       formData.append("stage_name", editForm.stage_name);
       formData.append("category", editForm.category);
+      if (editForm.category === "other" && editForm.other_category) {
+        formData.append("other_category", editForm.other_category.trim());
+      }
       formData.append("gender", editForm.gender);
       formData.append("starting_price", editForm.starting_price);
       formData.append(
@@ -2054,6 +2059,21 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         <div className="artist-perf-datetime">
                           {nextPerfFormattedDate}
                         </div>
+                        {Boolean(
+                          (nextPerformance.payment?.status === "success" ||
+                            nextPerformance.payment?.status === "completed" ||
+                            nextPerformance.payment?.status === "held_in_escrow" ||
+                            nextPerformance.payment?.status === "paid" ||
+                            nextPerformance.status === "accepted") &&
+                          (nextPerformance.event_date_iso || nextPerformance.event_date)
+                        ) && (
+                          <div style={{ marginTop: "6px", maxWidth: "260px" }}>
+                            <EventCountdown
+                              eventDate={nextPerformance.event_date_iso || nextPerformance.event_date}
+                              variant="pill"
+                            />
+                          </div>
+                        )}
                       </div>
 
                       <span className="artist-status-confirmed">Confirmed</span>
@@ -2809,8 +2829,30 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           {c.name}
                         </option>
                       ))}
+                      <option value="other">Other</option>
                     </select>
                   </div>
+
+                  {editForm.category === "other" && (
+                    <div className="cd-form-group">
+                      <label className="cd-label" htmlFor="other_category">
+                        Specify Category *
+                      </label>
+                      <input
+                        id="other_category"
+                        type="text"
+                        className="cd-input"
+                        value={editForm.other_category || ""}
+                        onChange={(e) =>
+                          setEditForm((p) => ({ ...p, other_category: e.target.value }))
+                        }
+                        placeholder="Enter new category (e.g. Magician, Comedian, Illusionist)"
+                        required
+                        maxLength={100}
+                        autoFocus
+                      />
+                    </div>
+                  )}
 
                   <div className="cd-form-group">
                     <label className="cd-label" htmlFor="gender">
@@ -3706,6 +3748,21 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                                 {b.event_location || b.city || "Location TBD"}
                               </span>
                             </div>
+                            {Boolean(
+                              (b.payment?.status === "success" ||
+                                b.payment?.status === "completed" ||
+                                b.payment?.status === "held_in_escrow" ||
+                                b.payment?.status === "paid") &&
+                              b.status === "accepted" &&
+                              (b.event_date_iso || b.event_date)
+                            ) && (
+                              <div style={{ marginTop: "6px", maxWidth: "260px" }}>
+                                <EventCountdown
+                                  eventDate={b.event_date_iso || b.event_date}
+                                  variant="pill"
+                                />
+                              </div>
+                            )}
                           </div>
 
                           {/* Col 3: Event Time */}
@@ -4022,6 +4079,15 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         {summaryBadge.label}
                       </span>
                     </div>
+
+                    {/* Live Event Countdown Banner when payment is received and booking is active */}
+                    {step3Done && !isDeclined && b.status !== "cancelled" && (b.event_date_iso || b.event_date) && (
+                      <EventCountdown
+                        eventDate={b.event_date_iso || b.event_date}
+                        variant="banner"
+                        title="Upcoming Event Countdown"
+                      />
+                    )}
 
                     {/* 2. Middle 2-Column Grid */}
                     <div className="artist-detail-grid">

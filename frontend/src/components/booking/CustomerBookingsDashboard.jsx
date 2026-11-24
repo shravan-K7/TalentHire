@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import gsap from "gsap";
 import PaymentCountdown from "./PaymentCountdown";
+import EventCountdown from "./EventCountdown";
 import { checkBookingExpiry } from "../../js/auth";
 import "../../css/MyBookingsDashboard.css";
 
@@ -1104,6 +1105,10 @@ export default function CustomerBookingsDashboard({
                     {/* 3. Confirmed & Paid: View Details, Reschedule, Cancel Booking */}
                     {state.type === "confirmed" && (
                       <>
+                        <EventCountdown
+                          eventDate={b.event_date_iso || b.event_date}
+                          variant="pill"
+                        />
                         <button
                           type="button"
                           className="th-btn-act secondary"
@@ -1133,6 +1138,10 @@ export default function CustomerBookingsDashboard({
                     {/* 4. In Progress: View Details, Contact Support */}
                     {state.type === "in_progress" && (
                       <>
+                        <EventCountdown
+                          eventDate={b.event_date_iso || b.event_date}
+                          variant="pill"
+                        />
                         <button
                           type="button"
                           className="th-btn-act secondary"

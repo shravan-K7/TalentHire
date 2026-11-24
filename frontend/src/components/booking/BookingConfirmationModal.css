@@ -1,0 +1,445 @@
+/* ==========================================================================
+   TalentHire Booking Confirmation Modal Styles
+   Dark theme, Orange accent (#FF5722), High-polish loading state
+   ========================================================================== */
+
+.bcm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background-color: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  animation: bcmFadeIn 0.2s ease-out;
+}
+
+.bcm-modal {
+  background-color: #151518;
+  border: 1px solid #28282E;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
+  color: #FFFFFF;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  box-sizing: border-box;
+  animation: bcmScaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bcm-content-scroll {
+  overflow-y: auto;
+  padding: 24px 28px;
+  box-sizing: border-box;
+}
+
+/* Header */
+.bcm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid #24242A;
+  padding: 20px 28px 16px;
+}
+
+.bcm-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0;
+  letter-spacing: -0.015em;
+}
+
+.bcm-subtitle {
+  font-size: 0.84rem;
+  color: #9E9EA4;
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
+.bcm-close-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #8E8E93;
+  font-size: 1.25rem;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.bcm-close-btn:hover:not(:disabled) {
+  color: #FFFFFF;
+  background-color: #24242A;
+  border-color: #383842;
+}
+
+.bcm-close-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Artist Preview Strip */
+.bcm-artist-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #1B1B20;
+  border: 1px solid #2A2A32;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+}
+
+.bcm-artist-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #FF5722;
+  flex-shrink: 0;
+}
+
+.bcm-artist-avatar-fallback {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #FF5722;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bcm-artist-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.bcm-artist-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bcm-artist-cat {
+  font-size: 0.80rem;
+  color: #FF5722;
+  font-weight: 600;
+  margin: 2px 0 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bcm-artist-loc {
+  font-size: 0.76rem;
+  color: #8E8E93;
+  margin: 2px 0 0;
+}
+
+.bcm-artist-travel {
+  font-size: 0.78rem;
+  color: #FF7043;
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+/* Details Grid */
+.bcm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.bcm-item {
+  background: #1A1A1E;
+  border: 1px solid #26262C;
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+
+.bcm-item.full-width {
+  grid-column: span 2;
+}
+
+.bcm-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8E8E93;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 3px;
+}
+
+.bcm-value {
+  font-size: 0.90rem;
+  color: #EDEDF0;
+  font-weight: 600;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.bcm-value.highlight-price {
+  color: #FF5722;
+  font-size: 1.12rem;
+  font-weight: 700;
+}
+
+.bcm-value.highlight-travel {
+  color: #FF7043;
+  font-weight: 600;
+}
+
+.bcm-notes-box {
+  background: #17171A;
+  border: 1px dashed #34343E;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 4px;
+  font-size: 0.84rem;
+  color: #C8C8D0;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* Trust / Workflow Notice */
+.bcm-notice {
+  background: rgba(255, 87, 34, 0.08);
+  border: 1px solid rgba(255, 87, 34, 0.22);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 22px;
+  font-size: 0.82rem;
+  color: #DDDDE4;
+  line-height: 1.45;
+}
+
+.bcm-notice strong {
+  color: #FF7043;
+}
+
+/* Error Banner in Modal */
+.bcm-error-banner {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #FCA5A5;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+/* Action Buttons Footer */
+.bcm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 28px;
+  border-top: 1px solid #24242A;
+  background: #141416;
+}
+
+.bcm-btn-secondary {
+  background: #222228;
+  border: 1px solid #34343E;
+  color: #D2D2DA;
+  padding: 11px 20px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bcm-btn-secondary:hover:not(:disabled) {
+  background: #2C2C34;
+  border-color: #484856;
+  color: #FFFFFF;
+}
+
+.bcm-btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bcm-btn-primary {
+  background: #FF5722;
+  border: none;
+  color: #FFFFFF;
+  padding: 11px 24px;
+  border-radius: 10px;
+  font-size: 0.90rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 14px rgba(255, 87, 34, 0.35);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bcm-btn-primary:hover:not(:disabled) {
+  background: #F4511E;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255, 87, 34, 0.45);
+}
+
+.bcm-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ==========================================================================
+   3 Seconds Loading State Styles
+   ========================================================================== */
+
+.bcm-loading-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 44px 24px 38px;
+  text-align: center;
+}
+
+.bcm-spinner {
+  width: 54px;
+  height: 54px;
+  border: 4px solid rgba(255, 87, 34, 0.18);
+  border-top-color: #FF5722;
+  border-radius: 50%;
+  animation: bcmSpin 0.75s linear infinite;
+  margin-bottom: 22px;
+}
+
+.bcm-success-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: #22C55E;
+  color: #FFFFFF;
+  font-size: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 22px;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  animation: bcmScaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bcm-loading-title {
+  font-size: 1.30rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 8px;
+}
+
+.bcm-loading-desc {
+  font-size: 0.90rem;
+  color: #9E9EA4;
+  margin: 0 0 24px;
+  max-width: 420px;
+  line-height: 1.45;
+}
+
+.bcm-progress-bar-wrap {
+  width: 100%;
+  max-width: 340px;
+  height: 6px;
+  background: #26262E;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  position: relative;
+}
+
+.bcm-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #FF5722, #FF8A65);
+  border-radius: 99px;
+  width: 0%;
+  animation: bcmProgressBar 3s linear forwards;
+}
+
+.bcm-countdown-badge {
+  font-size: 0.82rem;
+  color: #FF7043;
+  font-weight: 700;
+  background: rgba(255, 87, 34, 0.12);
+  border: 1px solid rgba(255, 87, 34, 0.25);
+  padding: 5px 14px;
+  border-radius: 20px;
+  letter-spacing: 0.02em;
+}
+
+/* Animations */
+@keyframes bcmFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes bcmScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes bcmSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bcmProgressBar {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .bcm-grid {
+    grid-template-columns: 1fr;
+  }
+  .bcm-item.full-width {
+    grid-column: span 1;
+  }
+  .bcm-header {
+    padding: 16px 20px;
+  }
+  .bcm-content-scroll {
+    padding: 18px 20px;
+  }
+  .bcm-actions {
+    padding: 14px 20px;
+  }
+}

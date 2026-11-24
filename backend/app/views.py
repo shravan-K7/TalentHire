@@ -574,7 +574,30 @@ def artist_profile_view(request):
             )
         return JsonResponse({"exists": False})
 
-    form = ArtistProfileForm(request.POST, request.FILES, instance=instance)
+    post_data = request.POST.copy()
+    category_val = post_data.get("category", "").strip()
+    other_category_val = post_data.get("other_category", "").strip()
+
+    if category_val.lower() == "other" or (not category_val.isdigit() and other_category_val):
+        if not other_category_val:
+            return JsonResponse(
+                {
+                    "errors": {
+                        "other_category": [
+                            {"message": "Please specify your category."}
+                        ]
+                    }
+                },
+                status=400,
+            )
+
+        cat_name = other_category_val.strip()
+        cat_obj = Category.objects.filter(name__iexact=cat_name).first()
+        if not cat_obj:
+            cat_obj = Category.objects.create(name=cat_name.title())
+        post_data["category"] = str(cat_obj.id)
+
+    form = ArtistProfileForm(post_data, request.FILES, instance=instance)
     if form.is_valid():
         try:
             artist = form.save(commit=False)
@@ -1245,7 +1268,14 @@ def artist_public_availability_view(request, artist_id):
     else:
         next_month_dt = datetime(year, month + 1, 1, 0, 0, 0, tzinfo=kolkata_tz)
 
+    # Reconcile expired reservations for this artist so stale reservations are released
+    try:
+        check_and_expire_reservations(artist=artist)
+    except Exception as ex:
+        logger.warning("Error checking reservation expiry in availability view: %s", ex)
+
     unavailable_dates = set()
+    customer_bookings = []
 
     # 1. Manually blocked dates
     manual_blocks = ArtistAvailability.objects.filter(
@@ -1290,11 +1320,32 @@ def artist_public_availability_view(request, artist_id):
                         unavailable_dates.add(b_ist_date.isoformat())
                     # Expired unpaid reservations do not block the date
 
+    # 3. If authenticated customer, identify dates where customer already has active bookings
+    if request.user.is_authenticated:
+        cb_qs = Booking.objects.filter(
+            artist=artist,
+            customer=request.user,
+            status__in=[Booking.Status.PENDING, Booking.Status.ACCEPTED],
+            event_date__gte=start_dt - timedelta(days=1),
+            event_date__lt=next_month_dt + timedelta(days=1),
+        )
+        for cb in cb_qs:
+            cb_ist_date = timezone.localtime(cb.event_date, timezone=kolkata_tz).date()
+            if cb_ist_date.year == year and cb_ist_date.month == month:
+                customer_bookings.append({
+                    "id": cb.id,
+                    "date": cb_ist_date.isoformat(),
+                    "status": cb.status,
+                })
+                # Add to unavailable dates so the date picker blocks duplicate selection
+                unavailable_dates.add(cb_ist_date.isoformat())
+
     return JsonResponse(
         {
             "artist_id": artist.id,
             "month": month_str,
             "unavailable_dates": sorted(list(unavailable_dates)),
+            "customer_bookings": customer_bookings,
         },
         status=200,
     )
@@ -1663,44 +1714,94 @@ def create_booking_view(request):
         # Consistent lock acquisition order: lock ArtistProfile row first
         artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
 
-        # Check whether the date is occupied by a manual block, completed show, or accepted/paid booking
-        occupied, occ_reason, _ = is_artist_date_occupied(artist_locked, local_event_date)
-        if occupied:
+        # 1. Reconcile any expired reservations for this artist so dates are released accurately
+        try:
+            check_and_expire_reservations(artist=artist_locked)
+        except Exception as ex:
+            logger.warning("Error running reservation expiry in create_booking_view: %s", ex)
+
+        # 2. Prevent duplicate bookings: check whether the same customer already has an active booking with the same artist on this calendar date
+        existing_customer_booking = (
+            Booking.objects.filter(
+                customer=request.user,
+                artist=artist_locked,
+                event_day=local_event_date,
+                status__in=[Booking.Status.PENDING, Booking.Status.ACCEPTED],
+            ).first()
+        )
+        if existing_customer_booking:
             return JsonResponse(
                 {
-                    "error": "This artist already has a booking or active reservation on this date. Please select another date."
+                    "success": False,
+                    "message": "You already have a booking with this artist on this date. Please check My Bookings.",
+                    "existing_booking_id": existing_customer_booking.id,
+                    "error": "You already have a booking with this artist on this date. Please check My Bookings.",
                 },
                 status=409,
             )
 
-        booking = Booking.objects.create(
-            customer=request.user,
-            artist=artist_locked,
-            event_type=event_type,
-            event_date=combined_dt,
-            event_location=event_location[:200],
-            event_area=event_area[:255],
-            event_area_place_id=event_area_place_id[:255],
-            event_address=event_address,
-            city=city[:100],
-            state=state[:100],
-            country=country[:100],
-            venue_name=venue_name[:255],
-            latitude=lat_val,
-            longitude=lon_val,
-            area_latitude=area_lat_val,
-            area_longitude=area_lon_val,
-            google_maps_url=google_maps_url[:1000],
-            location_source=location_source[:30] if location_source in ("autocomplete", "maps_link", "map_pin", "manual") else "manual",
-            location_instructions=location_instructions,
-            customer_phone=customer_phone[:20] if customer_phone else "",
-            performance_duration=performance_duration,
-            expected_audience_size=audience_val,
-            message=message_text,
-            customer_budget=budget_val,
-            agreed_price=None,
-            status=Booking.Status.PENDING,
-        )
+        # 3. Check whether the date is occupied by a manual block, completed show, or accepted/paid booking
+        occupied, occ_reason, _ = is_artist_date_occupied(artist_locked, local_event_date)
+        if occupied:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "message": f"This artist already has a booking or active reservation on this date ({occ_reason}). Please select another date.",
+                    "error": f"This artist already has a booking or active reservation on this date ({occ_reason}). Please select another date.",
+                },
+                status=409,
+            )
+
+        try:
+            booking = Booking.objects.create(
+                customer=request.user,
+                artist=artist_locked,
+                event_type=event_type,
+                event_date=combined_dt,
+                event_day=local_event_date,
+                event_location=event_location[:200],
+                event_area=event_area[:255],
+                event_area_place_id=event_area_place_id[:255],
+                event_address=event_address,
+                city=city[:100],
+                state=state[:100],
+                country=country[:100],
+                venue_name=venue_name[:255],
+                latitude=lat_val,
+                longitude=lon_val,
+                area_latitude=area_lat_val,
+                area_longitude=area_lon_val,
+                google_maps_url=google_maps_url[:1000],
+                location_source=location_source[:30] if location_source in ("autocomplete", "maps_link", "map_pin", "manual") else "manual",
+                location_instructions=location_instructions,
+                customer_phone=customer_phone[:20] if customer_phone else "",
+                performance_duration=performance_duration,
+                expected_audience_size=audience_val,
+                message=message_text,
+                customer_budget=budget_val,
+                agreed_price=None,
+                status=Booking.Status.PENDING,
+            )
+        except IntegrityError:
+            # Race condition safeguard caught by database constraint
+            existing_cb = (
+                Booking.objects.filter(
+                    customer=request.user,
+                    artist=artist_locked,
+                    event_day=local_event_date,
+                    status__in=[Booking.Status.PENDING, Booking.Status.ACCEPTED],
+                ).first()
+            )
+            existing_id = existing_cb.id if existing_cb else None
+            return JsonResponse(
+                {
+                    "success": False,
+                    "message": "You already have a booking with this artist on this date. Please check My Bookings.",
+                    "existing_booking_id": existing_id,
+                    "error": "You already have a booking with this artist on this date. Please check My Bookings.",
+                },
+                status=409,
+            )
 
         # Automatically create pending payment record (indicative customer budget, not charged yet)
         Payment.objects.create(
@@ -2890,6 +2991,29 @@ def customer_request_reschedule_view(request, booking_id):
 
     # Check proposed date availability
     new_calendar_date = timezone.localtime(new_event_dt, timezone=kolkata_tz).date()
+
+    # Prevent duplicate customer bookings on the proposed date
+    existing_customer_booking = (
+        Booking.objects.filter(
+            customer=request.user,
+            artist=booking.artist,
+            event_day=new_calendar_date,
+            status__in=[Booking.Status.PENDING, Booking.Status.ACCEPTED],
+        )
+        .exclude(id=booking.id)
+        .first()
+    )
+    if existing_customer_booking:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "You already have a booking with this artist on this date. Please check My Bookings.",
+                "message": "You already have a booking with this artist on this date. Please check My Bookings.",
+                "existing_booking_id": existing_customer_booking.id,
+            },
+            status=409,
+        )
+
     occupied, occ_reason, _ = is_artist_date_occupied(
         booking.artist,
         new_calendar_date,
@@ -2897,7 +3021,7 @@ def customer_request_reschedule_view(request, booking_id):
     )
     if occupied:
         return JsonResponse(
-            {"error": f"Artist is not available on this date ({occ_reason})."},
+            {"error": f"Artist is not available on this date ({occ_reason}).", "message": f"Artist is not available on this date ({occ_reason}).", "success": False},
             status=409,
         )
 
@@ -3082,6 +3206,12 @@ def artist_respond_reschedule_view(request, request_id):
         # 1. ArtistProfile
         artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
 
+        # Expire any overdue unpaid reservations for this artist
+        try:
+            check_and_expire_reservations(artist=artist_locked)
+        except Exception as ex:
+            logger.warning("Error running reservation expiry in reschedule response: %s", ex)
+
         # 2. ReschedulingRequest check
         resched_req = (
             ReschedulingRequest.objects.filter(id=request_id, artist=artist_locked)
@@ -3113,14 +3243,21 @@ def artist_respond_reschedule_view(request, request_id):
             )
             if occupied:
                 return JsonResponse(
-                    {"error": f"Artist is no longer available on this date ({occ_reason})."},
+                    {"error": f"Artist is no longer available on this date ({occ_reason}).", "message": f"Artist is no longer available on this date ({occ_reason}).", "success": False},
                     status=409,
                 )
 
-            # Update booking event_date atomically
+            # Update booking event_date and event_day atomically
             old_dt = booking_locked.event_date
-            booking_locked.event_date = req_locked.new_event_date
-            booking_locked.save(update_fields=["event_date"])
+            try:
+                booking_locked.event_date = req_locked.new_event_date
+                booking_locked.event_day = new_calendar_date
+                booking_locked.save(update_fields=["event_date", "event_day"])
+            except IntegrityError:
+                return JsonResponse(
+                    {"error": "This date is already booked or accepted by another customer.", "message": "This date is already booked or accepted by another customer.", "success": False},
+                    status=409,
+                )
 
             # Update request
             req_locked.status = ReschedulingRequest.Status.APPROVED
@@ -3740,6 +3877,12 @@ def artist_respond_booking_view(request, booking_id):
             # 1. Lock ArtistProfile first
             artist_locked = ArtistProfile.objects.select_for_update().get(id=artist.id)
 
+            # Reconcile any overdue unpaid reservations for this artist so expired dates are freed
+            try:
+                check_and_expire_reservations(artist=artist_locked)
+            except Exception as ex:
+                logger.warning("Error running reservation expiry in artist_respond_booking_view: %s", ex)
+
             # 2. Lock Booking second (do not use select_related on reverse OneToOne payment to avoid outer join FOR UPDATE in PostgreSQL)
             booking_locked = (
                 Booking.objects.select_for_update()
@@ -3749,14 +3892,14 @@ def artist_respond_booking_view(request, booking_id):
             )
             if not booking_locked:
                 return JsonResponse(
-                    {"error": "Booking request not found or unauthorized."},
+                    {"error": "Booking request not found or unauthorized.", "success": False},
                     status=404,
                 )
 
             # Only pending booking requests can be accepted
             if booking_locked.status not in (Booking.Status.PENDING, Booking.Status.UNAVAILABLE):
                 return JsonResponse(
-                    {"error": "This booking request has already been processed."},
+                    {"error": "This booking request has already been processed.", "success": False},
                     status=400,
                 )
 
@@ -3770,7 +3913,9 @@ def artist_respond_booking_view(request, booking_id):
             if occupied:
                 return JsonResponse(
                     {
-                        "error": "This artist already has a booking or active reservation on this date. Please select another date."
+                        "success": False,
+                        "error": f"You already have an accepted booking or active reservation on this date ({occ_reason}). Cannot accept multiple bookings for the same date.",
+                        "message": f"You already have an accepted booking or active reservation on this date ({occ_reason}). Cannot accept multiple bookings for the same date.",
                     },
                     status=409,
                 )
@@ -3778,7 +3923,8 @@ def artist_respond_booking_view(request, booking_id):
             if booking_locked.status == Booking.Status.UNAVAILABLE:
                 return JsonResponse(
                     {
-                        "error": "This booking request is unavailable and cannot be accepted."
+                        "error": "This booking request is unavailable and cannot be accepted.",
+                        "success": False,
                     },
                     status=400,
                 )
@@ -3812,13 +3958,13 @@ def artist_respond_booking_view(request, booking_id):
             )
             if not payment:
                 return JsonResponse(
-                    {"error": "Payment record not found for this booking."},
+                    {"error": "Payment record not found for this booking.", "success": False},
                     status=404,
                 )
 
             if payment.status != Payment.Status.PENDING:
                 return JsonResponse(
-                    {"error": "This payment is not pending."},
+                    {"error": "This payment is not pending.", "success": False},
                     status=400,
                 )
 
@@ -3829,18 +3975,30 @@ def artist_respond_booking_view(request, booking_id):
             booking_locked.status = Booking.Status.ACCEPTED
             booking_locked.accepted_at = now_time
             booking_locked.payment_deadline = deadline_dt
+            booking_locked.event_day = local_event_date
             booking_locked.response_message = (
                 reason or "Booking accepted and final price confirmed."
             )
-            booking_locked.save(
-                update_fields=[
-                    "agreed_price",
-                    "status",
-                    "accepted_at",
-                    "payment_deadline",
-                    "response_message",
-                ]
-            )
+            try:
+                booking_locked.save(
+                    update_fields=[
+                        "agreed_price",
+                        "status",
+                        "accepted_at",
+                        "payment_deadline",
+                        "event_day",
+                        "response_message",
+                    ]
+                )
+            except IntegrityError:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "Another booking has already been accepted for this date. Cannot accept multiple bookings for the same date.",
+                        "message": "Another booking has already been accepted for this date. Cannot accept multiple bookings for the same date.",
+                    },
+                    status=409,
+                )
 
             payment.amount = confirmed_price
             payment.commission_percentage = Decimal("8.00")

@@ -56,6 +56,7 @@ export default function ArtistRegistration({
   const [form, setForm] = useState({
     stage_name: user?.artist_profile?.stage_name || "",
     category: String(user?.artist_profile?.category_id || ""),
+    other_category: "",
     gender: user?.artist_profile?.gender || "male",
     bio: user?.artist_profile?.bio || "",
     location: user?.artist_profile?.location || "",
@@ -112,6 +113,7 @@ export default function ArtistRegistration({
             ...previous,
             stage_name: artist.stage_name || "",
             category: String(artist.category || ""),
+            other_category: "",
             gender: artist.gender || "male",
             bio: artist.bio || "",
             location: artist.location || "",
@@ -254,6 +256,10 @@ export default function ArtistRegistration({
       ...previous,
       [name]: name === "profile_image" ? files[0] : value,
     }));
+
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => ({ ...prev, [name]: null }));
+    }
   }
 
   function handlePerformanceChange(event) {
@@ -269,6 +275,15 @@ export default function ArtistRegistration({
 
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (form.category === "other" && !form.other_category?.trim()) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        other_category: [{ message: "Please specify your category." }],
+      }));
+      setError("Please specify your category.");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -468,13 +483,31 @@ export default function ArtistRegistration({
             >
               <option value="">Select category</option>
               {categories.map((category) => (
-                <option key={category.id} value={category.id}>
+                <option key={category.id} value={String(category.id)}>
                   {category.name}
                 </option>
               ))}
+              <option value="other">Other</option>
             </select>
             {renderError("category")}
           </label>
+
+          {form.category === "other" && (
+            <label className="artist-other-category-field">
+              Specify Category *
+              <input
+                type="text"
+                name="other_category"
+                value={form.other_category || ""}
+                onChange={handleChange}
+                required
+                maxLength={100}
+                placeholder="Enter new category (e.g. Magician, Comedian, Illusionist)"
+                autoFocus
+              />
+              {renderError("other_category")}
+            </label>
+          )}
 
           <label>
             Gender *
