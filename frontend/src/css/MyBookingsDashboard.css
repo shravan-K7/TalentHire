@@ -582,7 +582,8 @@
   border: 1px solid rgba(179, 136, 255, 0.35);
 }
 
-.th-status-badge.cancelled {
+.th-status-badge.cancelled,
+.th-status-badge.expired {
   background: rgba(255, 23, 68, 0.15);
   color: #FF1744;
   border: 1px solid rgba(255, 23, 68, 0.35);
@@ -674,6 +675,75 @@
   background: rgba(255, 82, 82, 0.1);
   color: #FF6E6E;
   border-color: rgba(255, 82, 82, 0.5);
+}
+
+/* Disabled & Expired Action Button */
+.th-btn-act.expired,
+.th-btn-act.disabled {
+  background: #2D3748 !important;
+  color: #718096 !important;
+  cursor: not-allowed !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+  transform: none !important;
+  opacity: 0.75;
+}
+
+/* 24-Hour Payment Countdown Pill in Booking Card */
+.th-booking-countdown-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  width: 100%;
+  margin-bottom: 2px;
+  box-sizing: border-box;
+}
+
+.th-booking-countdown-pill.active {
+  background: rgba(255, 87, 34, 0.12);
+  color: #FF5722;
+  border: 1px solid rgba(255, 87, 34, 0.32);
+}
+
+.th-booking-countdown-pill.expired {
+  background: rgba(239, 68, 68, 0.12);
+  color: #EF4444;
+  border: 1px solid rgba(239, 68, 68, 0.32);
+}
+
+.th-countdown-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #FF5722;
+  animation: th-pulse 1.5s infinite;
+  flex-shrink: 0;
+}
+
+.th-countdown-compact-text {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+@keyframes th-pulse {
+  0% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
 }
 
 /* --------------------------------------------------------------------------

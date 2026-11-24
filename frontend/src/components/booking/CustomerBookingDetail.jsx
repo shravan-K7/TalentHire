@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import gsap from 'gsap';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MAP_TILE_URL, MAP_ATTRIBUTION, MAP_MAX_ZOOM, DEFAULT_MAP_CENTER } from '../../config/mapConfig';
+import PaymentCountdown from './PaymentCountdown';
+import { checkBookingExpiry } from '../../js/auth';
 import './CustomerBookingDetail.css';
 
 // Custom CSS map pin for Leaflet
@@ -71,11 +73,30 @@ export default function CustomerBookingDetail({
   onPayNow,
   navigate,
   onContactSupport,
+  onRefresh,
 }) {
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const rootRef = useRef(null);
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
+
+  const [expiredTriggered, setExpiredTriggered] = useState(false);
+  const deadline = booking?.payment_deadline || booking?.expires_at;
+  const isPastDeadline = Boolean(deadline) && new Date(deadline).getTime() <= Date.now();
+  const isLocallyExpired = booking?.status === 'expired' || isPastDeadline || expiredTriggered;
+
+  const handleExpire = useCallback(() => {
+    setExpiredTriggered(true);
+    if (booking?.id) {
+      checkBookingExpiry(booking.id)
+        .then(() => {
+          if (onRefresh) onRefresh();
+        })
+        .catch((err) => {
+          console.warn('Booking expiry check failed:', err);
+        });
+    }
+  }, [booking?.id, onRefresh]);
 
   // Coords & Map Preview Resolution
   const latNum = booking?.latitude ? parseFloat(booking.latitude) : null;
@@ -288,8 +309,13 @@ export default function CustomerBookingDetail({
   } else if (status === 'accepted') {
     timelineStages[1].state = 'completed';
     if (!isPaid) {
-      timelineStages[2].label = 'Payment pending';
-      timelineStages[2].state = 'current';
+      if (isLocallyExpired) {
+        timelineStages[2].label = 'Payment expired';
+        timelineStages[2].state = 'rejected';
+      } else {
+        timelineStages[2].label = 'Payment pending';
+        timelineStages[2].state = 'current';
+      }
     } else {
       timelineStages[2].state = 'completed';
       timelineStages[3].state = 'current'; // Event upcoming
@@ -299,15 +325,24 @@ export default function CustomerBookingDetail({
     timelineStages[2].state = 'completed';
     timelineStages[3].state = 'completed';
     timelineStages[4].state = 'completed';
-  } else if (status === 'cancelled' || status === 'rejected' || status === 'expired') {
-    timelineStages[1].state = status === 'rejected' ? 'rejected' : 'cancelled';
-    timelineStages[1].label = status === 'rejected' ? 'Artist declined' : 'Booking cancelled';
+  } else if (status === 'cancelled' || status === 'rejected' || status === 'expired' || isLocallyExpired) {
+    if (status === 'expired' || isLocallyExpired) {
+      timelineStages[1].state = 'completed';
+      timelineStages[2].label = 'Payment expired';
+      timelineStages[2].state = 'rejected';
+    } else {
+      timelineStages[1].state = status === 'rejected' ? 'rejected' : 'cancelled';
+      timelineStages[1].label = status === 'rejected' ? 'Artist declined' : 'Booking cancelled';
+    }
   }
 
   // Active Status Pill Display
   let statusBadgeLabel = 'Pending Approval';
   let statusBadgeClass = 'pending';
-  if (status === 'accepted' && isPaid) {
+  if (isLocallyExpired || status === 'expired') {
+    statusBadgeLabel = 'Payment Expired';
+    statusBadgeClass = 'expired';
+  } else if (status === 'accepted' && isPaid) {
     statusBadgeLabel = 'Confirmed';
     statusBadgeClass = 'confirmed';
   } else if (status === 'accepted' && !isPaid) {
@@ -742,9 +777,19 @@ export default function CustomerBookingDetail({
               <div className="th-payment-row">
                 <span className="th-payment-row-label">Status</span>
                 <span
-                  className={`th-payment-status-badge ${isPaid ? 'paid' : 'pending'}`}
+                  className={`th-payment-status-badge ${
+                    isPaid
+                      ? 'paid'
+                      : status === 'expired' || isLocallyExpired
+                      ? 'expired'
+                      : 'pending'
+                  }`}
                 >
-                  {isPaid ? 'Paid' : 'Pending'}
+                  {isPaid
+                    ? 'Paid'
+                    : status === 'expired' || isLocallyExpired
+                    ? 'Expired'
+                    : 'Pending'}
                 </span>
               </div>
 
@@ -767,6 +812,16 @@ export default function CustomerBookingDetail({
               </div>
             </div>
 
+            {/* Countdown or Expired notice when accepted and awaiting payment, or when expired */}
+            {((status === 'accepted' && !isPaid) || status === 'expired' || isLocallyExpired) && !isPaid && (
+              <PaymentCountdown
+                deadlineIso={booking.payment_deadline || booking.expires_at}
+                isExpired={status === 'expired' || isLocallyExpired}
+                variant="detail"
+                onExpire={handleExpire}
+              />
+            )}
+
             {/* If paid, display primary orange download receipt button */}
             {isPaid ? (
               <button
@@ -776,13 +831,22 @@ export default function CustomerBookingDetail({
               >
                 Download receipt
               </button>
-            ) : status === 'accepted' ? (
+            ) : status === 'accepted' && !isLocallyExpired ? (
               <button
                 type="button"
                 className="th-btn-download-receipt"
                 onClick={() => onPayNow && onPayNow(booking)}
               >
                 Pay Now
+              </button>
+            ) : (status === 'accepted' && isLocallyExpired) || status === 'expired' ? (
+              <button
+                type="button"
+                className="th-btn-download-receipt expired"
+                disabled
+                aria-disabled="true"
+              >
+                Payment Expired
               </button>
             ) : null}
           </div>

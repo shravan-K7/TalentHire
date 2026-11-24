@@ -146,6 +146,7 @@ export default function AdminUsersView({ defaultRole = "all" }) {
                 <th>ID</th>
                 <th>Name & Username</th>
                 <th>Email</th>
+                <th>Phone</th>
                 <th>Role</th>
                 <th>Location / Category</th>
                 <th>Bookings</th>
@@ -156,7 +157,7 @@ export default function AdminUsersView({ defaultRole = "all" }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: "center", padding: "36px" }}>
+                  <td colSpan="9" style={{ textAlign: "center", padding: "36px" }}>
                     <div className="admin-spinner" style={{ margin: "0 auto 10px" }} />
                     <span>Loading users...</span>
                   </td>
@@ -172,6 +173,19 @@ export default function AdminUsersView({ defaultRole = "all" }) {
                       </div>
                     </td>
                     <td>{u.email || "No email"}</td>
+                    <td>
+                      {u.phone ? (
+                        <a
+                          href={`tel:${u.phone}`}
+                          style={{ color: "var(--admin-text-primary)", textDecoration: "none" }}
+                          title={`Call ${u.phone}`}
+                        >
+                          {u.phone}
+                        </a>
+                      ) : (
+                        <span style={{ color: "var(--admin-text-muted)" }}>—</span>
+                      )}
+                    </td>
                     <td>
                       <span
                         className="admin-status-pill"
@@ -224,7 +238,7 @@ export default function AdminUsersView({ defaultRole = "all" }) {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="8" style={{ textAlign: "center", padding: "36px" }}>
+                  <td colSpan="9" style={{ textAlign: "center", padding: "36px" }}>
                     No users matching criteria.
                   </td>
                 </tr>

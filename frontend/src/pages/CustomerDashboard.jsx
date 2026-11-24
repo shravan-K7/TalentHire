@@ -25,6 +25,7 @@ import {
   getCurrentUser,
   createPaymentOrder,
   verifyPayment,
+  checkBookingExpiry,
 } from "../js/auth";
 import "../css/CustomerDashboard.css";
 
@@ -460,6 +461,13 @@ function CustomerDashboard({
     try {
       const res = await fetchCustomerDashboard();
       setData(res);
+      if (res && res.bookings) {
+        setSelectedBooking((prevSelected) => {
+          if (!prevSelected) return prevSelected;
+          const updated = res.bookings.find((b) => b.id === prevSelected.id);
+          return updated || prevSelected;
+        });
+      }
       const prof = res.profile || {};
       setProfileForm({
         first_name: prof.first_name || "",
@@ -827,6 +835,22 @@ function CustomerDashboard({
   async function handlePayNow(booking) {
     if (paymentLoadingId) return;
 
+    // Check if locally expired or deadline passed
+    const deadline = booking.payment_deadline || booking.expires_at;
+    if (
+      booking.status === "expired" ||
+      (deadline && new Date(deadline).getTime() <= Date.now())
+    ) {
+      showToast("Payment deadline expired. This booking is no longer available for payment.");
+      try {
+        await checkBookingExpiry(booking.id);
+        await refreshDashboard();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
     setPaymentLoadingId(booking.id);
 
     try {
@@ -907,6 +931,13 @@ function CustomerDashboard({
     } catch (err) {
       showToast(err.message || "Unable to start payment.");
       setPaymentLoadingId(null);
+      if (err.message && err.message.toLowerCase().includes("expired")) {
+        try {
+          await refreshDashboard();
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 
@@ -1757,6 +1788,7 @@ function CustomerDashboard({
               loading={loading}
               error={error}
               onRetry={refreshDashboard}
+              onRefresh={refreshDashboard}
               onViewDetails={(b) => {
                 setSelectedBooking(b);
                 switchTab("booking-detail");
@@ -1785,6 +1817,7 @@ function CustomerDashboard({
               onPayNow={(b) => handlePayNow(b)}
               navigate={navigate}
               onContactSupport={() => switchTab("support")}
+              onRefresh={refreshDashboard}
             />
           )}
 

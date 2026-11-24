@@ -1,5 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import gsap from "gsap";
+import PaymentCountdown from "./PaymentCountdown";
+import { checkBookingExpiry } from "../../js/auth";
 import "../../css/MyBookingsDashboard.css";
 
 // Dynamic dark palette for artist initials fallback (deterministic hash by artist name/ID)
@@ -251,13 +253,13 @@ function computeBookingState(booking) {
   ) {
     let label = "Cancelled";
     if (status === "rejected") label = "Artist Declined";
-    else if (status === "expired") label = "Reservation Expired";
+    else if (status === "expired") label = "Payment Expired";
     else if (status === "unavailable") label = "Date Unavailable";
 
     return {
       type: "cancelled",
       badgeText: status === "rejected" ? "Rejected" : status === "expired" ? "Expired" : "Cancelled",
-      badgeClass: "cancelled",
+      badgeClass: status === "expired" ? "expired" : "cancelled",
       amountOrSubtext: label,
       progressPercent: 33.33,
       steps: [
@@ -414,6 +416,65 @@ function computeBookingState(booking) {
   };
 }
 
+function AwaitingPaymentAction({
+  booking,
+  paymentLoadingId,
+  onPayNow,
+  onViewDetails,
+  onRefresh,
+}) {
+  const [expiredTriggered, setExpiredTriggered] = useState(false);
+  const deadline = booking.payment_deadline || booking.expires_at;
+  const isPastDeadline = Boolean(deadline) && new Date(deadline).getTime() <= Date.now();
+  const isExpired = booking.status === "expired" || isPastDeadline || expiredTriggered;
+
+  const handleExpire = () => {
+    setExpiredTriggered(true);
+    if (booking?.id) {
+      checkBookingExpiry(booking.id).finally(() => {
+        if (onRefresh) onRefresh();
+      });
+    }
+  };
+
+  return (
+    <>
+      <PaymentCountdown
+        deadlineIso={booking.payment_deadline || booking.expires_at}
+        isExpired={isExpired}
+        variant="compact"
+        onExpire={handleExpire}
+      />
+      {isExpired ? (
+        <button
+          type="button"
+          className="th-btn-act expired disabled"
+          disabled
+          aria-disabled="true"
+        >
+          Payment Expired
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="th-btn-act primary"
+          onClick={() => onPayNow && onPayNow(booking)}
+          disabled={paymentLoadingId === booking.id}
+        >
+          {paymentLoadingId === booking.id ? "Processing..." : "Pay Now"}
+        </button>
+      )}
+      <button
+        type="button"
+        className="th-btn-act secondary"
+        onClick={() => onViewDetails && onViewDetails(booking)}
+      >
+        View Details
+      </button>
+    </>
+  );
+}
+
 export default function CustomerBookingsDashboard({
   bookings = [],
   loading = false,
@@ -428,6 +489,7 @@ export default function CustomerBookingsDashboard({
   onContactSupport,
   navigate,
   paymentLoadingId,
+  onRefresh,
 }) {
   const [activeFilter, setActiveFilter] = useState("all");
   const [sortBy, setSortBy] = useState("latest");
@@ -1028,27 +1090,15 @@ export default function CustomerBookingsDashboard({
                       </>
                     )}
 
-                    {/* 2. Awaiting Payment: Pay Now, View Details */}
+                    {/* 2. Awaiting Payment: Pay Now, View Details with Countdown */}
                     {state.type === "awaiting_payment" && (
-                      <>
-                        <button
-                          type="button"
-                          className="th-btn-act primary"
-                          onClick={() => onPayNow && onPayNow(b)}
-                          disabled={paymentLoadingId === b.id}
-                        >
-                          {paymentLoadingId === b.id
-                            ? "Processing..."
-                            : "Pay Now"}
-                        </button>
-                        <button
-                          type="button"
-                          className="th-btn-act secondary"
-                          onClick={() => onViewDetails && onViewDetails(b)}
-                        >
-                          View Details
-                        </button>
-                      </>
+                      <AwaitingPaymentAction
+                        booking={b}
+                        paymentLoadingId={paymentLoadingId}
+                        onPayNow={onPayNow}
+                        onViewDetails={onViewDetails}
+                        onRefresh={onRefresh || onRetry}
+                      />
                     )}
 
                     {/* 3. Confirmed & Paid: View Details, Reschedule, Cancel Booking */}

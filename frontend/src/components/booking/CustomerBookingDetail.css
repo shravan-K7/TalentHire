@@ -152,7 +152,8 @@
 }
 
 .th-badge-status.cancelled,
-.th-badge-status.rejected {
+.th-badge-status.rejected,
+.th-badge-status.expired {
   background: rgba(239, 68, 68, 0.12);
   color: #EF4444;
   border: 1px solid rgba(239, 68, 68, 0.28);
@@ -823,6 +824,10 @@
   color: #F59E0B;
 }
 
+.th-payment-status-badge.expired {
+  color: #EF4444;
+}
+
 .th-payment-text-val {
   color: #FFFFFF;
   font-weight: 600;
@@ -832,6 +837,74 @@
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
   font-size: 0.86rem;
   letter-spacing: 0.04em;
+}
+
+/* ==========================================================================
+   24-HOUR PAYMENT DEADLINE COUNTDOWN CARD
+   ========================================================================== */
+.th-payment-countdown-card {
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-top: 14px;
+  margin-bottom: 6px;
+  transition: all 0.2s ease;
+}
+
+.th-payment-countdown-card.active {
+  background: rgba(255, 87, 34, 0.08);
+  border: 1px solid rgba(255, 87, 34, 0.35);
+}
+
+.th-payment-countdown-card.expired {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.th-payment-countdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.th-payment-countdown-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.th-payment-countdown-timer {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #FF5722;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.th-payment-countdown-label-expired {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #EF4444;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.th-payment-countdown-note {
+  font-size: 0.78rem;
+  color: #9CA3AF;
+  margin: 0;
+  line-height: 1.35;
+}
+
+.th-payment-countdown-note-expired {
+  font-size: 0.78rem;
+  color: #F87171;
+  margin: 0;
+  line-height: 1.35;
 }
 
 .th-btn-download-receipt {
@@ -845,20 +918,30 @@
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(255, 81, 26, 0.35);
-  transition: background-color 0.18s ease, box-shadow 0.18s ease;
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   will-change: transform;
 }
 
-.th-btn-download-receipt:hover {
+.th-btn-download-receipt:hover:not(:disabled) {
   background: #F4450E;
   box-shadow: 0 6px 20px rgba(255, 81, 26, 0.5);
 }
 
-.th-btn-download-receipt:active {
+.th-btn-download-receipt:active:not(:disabled) {
   background: #E03E0B;
+}
+
+.th-btn-download-receipt.expired,
+.th-btn-download-receipt:disabled {
+  background: #2D3748 !important;
+  color: #718096 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  opacity: 0.75;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* ==========================================================================

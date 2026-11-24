@@ -56,6 +56,7 @@ import {
   Video as VideoIcon,
   UploadCloud,
 } from "lucide-react";
+import { extractVideoMetadataAndThumbnail } from "../js/videoUtils";
 import "../css/CustomerDashboard.css";
 import "../css/ArtistDashboard.css";
 
@@ -193,6 +194,10 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     media_url: "",
     youtube_url: "",
     duration: "",
+    dimensions: "",
+    thumbnail_file: null,
+    thumbnail_preview: null,
+    extracting: false,
     is_featured: false,
     is_public: true,
     saving: false,
@@ -771,7 +776,11 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       media_file: null,
       media_url: "",
       youtube_url: "",
-      duration: defaultType === "video" ? "03:00" : "",
+      duration: "",
+      dimensions: "",
+      thumbnail_file: null,
+      thumbnail_preview: null,
+      extracting: false,
       is_featured: false,
       is_public: true,
       saving: false,
@@ -791,11 +800,95 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       media_url: item.media_url || "",
       youtube_url: item.youtube_url || item.media_url || "",
       duration: item.duration || "",
+      dimensions: item.dimensions || "",
+      thumbnail_file: null,
+      thumbnail_preview: item.thumbnail_url || null,
+      extracting: false,
       is_featured: Boolean(item.is_featured),
       is_public: item.is_public !== false,
       saving: false,
       error: "",
     });
+  }
+
+  async function handleVideoFileSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const cleanFileName = file.name
+      ? file.name.replace(/\.[^/.]+$/, "").replace(/[-_]+/g, " ").trim()
+      : "";
+
+    setPortfolioModal((p) => ({
+      ...p,
+      media_file: file,
+      title: p.title ? p.title : cleanFileName,
+      extracting: true,
+      error: "",
+    }));
+
+    try {
+      const meta = await extractVideoMetadataAndThumbnail(file);
+      setPortfolioModal((p) => ({
+        ...p,
+        duration: meta.duration || p.duration,
+        dimensions: meta.dimensions || p.dimensions,
+        thumbnail_file: meta.thumbnailFile || p.thumbnail_file,
+        thumbnail_preview: meta.previewUrl || p.thumbnail_preview,
+        candidateTimes: meta.candidateTimes || [],
+        selectedCandidateIndex: 0,
+        extracting: false,
+      }));
+    } catch (err) {
+      console.warn("Auto video metadata extraction failed:", err);
+      setPortfolioModal((p) => ({
+        ...p,
+        extracting: false,
+      }));
+    }
+  }
+
+  async function handleCycleVideoFrame() {
+    if (!portfolioModal.media_file) return;
+    const candidates = portfolioModal.candidateTimes && portfolioModal.candidateTimes.length > 0
+      ? portfolioModal.candidateTimes
+      : [1.5, 3.0, 5.0, 8.0];
+    const nextIdx = ((portfolioModal.selectedCandidateIndex || 0) + 1) % candidates.length;
+    const nextTime = candidates[nextIdx];
+
+    setPortfolioModal((p) => ({
+      ...p,
+      extracting: true,
+      selectedCandidateIndex: nextIdx,
+    }));
+
+    try {
+      const meta = await extractVideoMetadataAndThumbnail(portfolioModal.media_file, nextTime);
+      setPortfolioModal((p) => ({
+        ...p,
+        thumbnail_file: meta.thumbnailFile || p.thumbnail_file,
+        thumbnail_preview: meta.previewUrl || p.thumbnail_preview,
+        extracting: false,
+      }));
+    } catch (err) {
+      console.warn("Cycle frame error:", err);
+      setPortfolioModal((p) => ({ ...p, extracting: false }));
+    }
+  }
+
+  function handleCustomThumbnailUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const preview = URL.createObjectURL(file);
+      setPortfolioModal((p) => ({
+        ...p,
+        thumbnail_file: file,
+        thumbnail_preview: preview,
+      }));
+    } catch (err) {
+      console.warn("Custom thumbnail preview failed:", err);
+    }
   }
 
   async function handleSavePortfolioItem(e) {
@@ -834,13 +927,21 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
     try {
       let payload;
-      if (portfolioModal.media_file) {
+      if (portfolioModal.media_file || portfolioModal.thumbnail_file) {
         payload = new FormData();
         payload.append("title", portfolioModal.title.trim());
         payload.append("description", portfolioModal.description.trim());
         payload.append("item_type", portfolioModal.item_type);
-        payload.append("media_file", portfolioModal.media_file);
+        if (portfolioModal.media_file) {
+          payload.append("media_file", portfolioModal.media_file);
+        }
+        if (portfolioModal.thumbnail_file) {
+          payload.append("thumbnail", portfolioModal.thumbnail_file);
+        }
         payload.append("duration", portfolioModal.duration.trim());
+        if (portfolioModal.dimensions) {
+          payload.append("dimensions", portfolioModal.dimensions);
+        }
         payload.append("is_featured", portfolioModal.is_featured ? "true" : "false");
         payload.append("is_public", portfolioModal.is_public ? "true" : "false");
         if (portfolioModal.youtube_url) {
@@ -854,6 +955,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
           media_url: portfolioModal.media_url.trim() || portfolioModal.youtube_url.trim(),
           youtube_url: portfolioModal.youtube_url.trim(),
           duration: portfolioModal.duration.trim(),
+          dimensions: portfolioModal.dimensions || "",
           is_featured: portfolioModal.is_featured,
           is_public: portfolioModal.is_public,
         };
@@ -3029,9 +3131,16 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                   <div className="artist-port-featured-preview-box">
                     {featuredItem ? (
                       <img
-                        src={featuredItem.media_url || featuredItem.thumbnail_url}
+                        src={
+                          featuredItem.thumbnail_url ||
+                          (featuredItem.item_type === "photo" ? featuredItem.media_url : "") ||
+                          "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=600&q=80"
+                        }
                         alt={featuredItem.title}
                         className="artist-port-featured-img"
+                        onError={(e) => {
+                          e.target.src = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=600&q=80";
+                        }}
                       />
                     ) : artist.profile_image ? (
                       <img
@@ -3198,9 +3307,16 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         <div key={item.id} className="artist-port-video-row">
                           <div className="artist-port-video-thumb-box">
                             <img
-                              src={item.thumbnail_url || item.media_url || "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80"}
+                              src={
+                                item.thumbnail_url ||
+                                (item.item_type === "photo" ? item.media_url : "") ||
+                                "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80"
+                              }
                               alt={item.title}
                               className="artist-port-video-thumb"
+                              onError={(e) => {
+                                e.target.src = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80";
+                              }}
                             />
                             <div className="artist-port-video-play-overlay">
                               <div className="artist-port-play-icon">▶</div>
@@ -6035,41 +6151,183 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                       <label className="cd-label">Upload Video File</label>
                       <input
                         type="file"
-                        accept="video/mp4,video/webm,video/quicktime"
+                        accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
                         ref={portfolioFileInputRef}
                         style={{ display: "none" }}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            setPortfolioModal((p) => ({
-                              ...p,
-                              media_file: file,
-                              error: "",
-                            }));
-                          }
-                        }}
+                        onChange={handleVideoFileSelect}
                       />
                       <div
                         style={{
-                          border: "1px dashed rgba(255,255,255,0.2)",
+                          border: portfolioModal.media_file
+                            ? "1px solid #FF5722"
+                            : "1px dashed rgba(255,255,255,0.2)",
                           borderRadius: "8px",
                           padding: "16px",
                           textAlign: "center",
-                          background: "#18181A",
-                          cursor: "pointer",
+                          background: portfolioModal.media_file ? "rgba(255, 87, 34, 0.06)" : "#18181A",
+                          cursor: portfolioModal.extracting ? "wait" : "pointer",
+                          transition: "all 0.2s ease",
                         }}
-                        onClick={() => portfolioFileInputRef.current?.click()}
+                        onClick={() => {
+                          if (!portfolioModal.extracting) {
+                            portfolioFileInputRef.current?.click();
+                          }
+                        }}
                       >
-                        <VideoIcon size={24} style={{ color: "#FF5722", marginBottom: "6px" }} />
-                        <div style={{ color: "#FFFFFF", fontSize: "0.92rem", fontWeight: 500 }}>
-                          {portfolioModal.media_file
-                            ? portfolioModal.media_file.name
-                            : "Click to choose video file"}
-                        </div>
-                        <span style={{ fontSize: "0.78rem", color: "#8E8E93" }}>
-                          MP4, WEBM, MOV (Max 100 MB)
-                        </span>
+                        {portfolioModal.extracting ? (
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                            <div className="cd-spinner" style={{ width: "24px", height: "24px", borderWidth: "2px" }} />
+                            <div style={{ color: "#FF5722", fontSize: "0.88rem", fontWeight: 600 }}>
+                              Analyzing video, fetching duration & capturing thumbnail...
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <VideoIcon size={24} style={{ color: "#FF5722", marginBottom: "6px" }} />
+                            <div style={{ color: "#FFFFFF", fontSize: "0.92rem", fontWeight: 500 }}>
+                              {portfolioModal.media_file
+                                ? portfolioModal.media_file.name
+                                : "Click to choose video file"}
+                            </div>
+                            <span style={{ fontSize: "0.78rem", color: "#8E8E93" }}>
+                              MP4, WEBM, MOV (Max 100 MB) • Duration & Thumbnail auto-captured
+                            </span>
+                          </>
+                        )}
                       </div>
+
+                      {/* Auto-Captured Video Thumbnail Preview */}
+                      {portfolioModal.thumbnail_preview && (
+                        <div
+                          style={{
+                            marginTop: "12px",
+                            padding: "12px 14px",
+                            background: "#141416",
+                            border: "1px solid rgba(255, 255, 255, 0.12)",
+                            borderRadius: "8px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "14px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                            <div
+                              style={{
+                                position: "relative",
+                                width: "120px",
+                                height: "68px",
+                                borderRadius: "6px",
+                                overflow: "hidden",
+                                flexShrink: 0,
+                                background: "#1C1C22",
+                                border: "1px solid rgba(255, 255, 255, 0.15)",
+                              }}
+                            >
+                              <img
+                                src={portfolioModal.thumbnail_preview}
+                                alt="Generated Video Thumbnail"
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  objectFit: "cover",
+                                }}
+                              />
+                              {portfolioModal.duration && (
+                                <span
+                                  style={{
+                                    position: "absolute",
+                                    bottom: "4px",
+                                    right: "4px",
+                                    background: "rgba(0, 0, 0, 0.82)",
+                                    color: "#FF5722",
+                                    fontSize: "0.70rem",
+                                    fontWeight: 700,
+                                    padding: "1px 5px",
+                                    borderRadius: "3px",
+                                    fontFamily: "monospace",
+                                  }}
+                                >
+                                  {portfolioModal.duration}
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              <div
+                                style={{
+                                  color: "#22C55E",
+                                  fontSize: "0.85rem",
+                                  fontWeight: 600,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                }}
+                              >
+                                <span>✓</span> Thumbnail Ready
+                              </div>
+                              <div
+                                style={{
+                                  color: "#A0A0A5",
+                                  fontSize: "0.78rem",
+                                  marginTop: "3px",
+                                  lineHeight: "1.35",
+                                }}
+                              >
+                                {portfolioModal.thumbnail_file && portfolioModal.thumbnail_file.type?.startsWith("image/")
+                                  ? "Active video cover"
+                                  : "Frame captured from video"}
+                                {portfolioModal.dimensions && ` (${portfolioModal.dimensions})`}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                            {portfolioModal.media_file && (
+                              <button
+                                type="button"
+                                onClick={handleCycleVideoFrame}
+                                disabled={portfolioModal.extracting}
+                                className="cd-btn-secondary"
+                                style={{
+                                  padding: "6px 10px",
+                                  fontSize: "0.76rem",
+                                  borderRadius: "6px",
+                                  cursor: portfolioModal.extracting ? "wait" : "pointer",
+                                  background: "#222226",
+                                  border: "1px solid #38383E",
+                                  color: "#E2E2E2",
+                                }}
+                                title="Try another non-black frame from video"
+                              >
+                                {portfolioModal.extracting ? "Sampling..." : "Next Frame"}
+                              </button>
+                            )}
+                            <label
+                              className="cd-btn-secondary"
+                              style={{
+                                padding: "6px 10px",
+                                fontSize: "0.76rem",
+                                borderRadius: "6px",
+                                cursor: "pointer",
+                                marginBottom: 0,
+                                background: "#222226",
+                                border: "1px solid #38383E",
+                                color: "#E2E2E2",
+                              }}
+                              title="Upload custom image cover"
+                            >
+                              Custom Cover
+                              <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: "none" }}
+                                onChange={handleCustomThumbnailUpload}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="cd-form-group">
@@ -6080,7 +6338,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         id="port_video_duration"
                         type="text"
                         className="cd-input"
-                        placeholder="e.g. 03:24"
+                        placeholder="Auto-detected from video (e.g. 03:24)"
                         value={portfolioModal.duration}
                         onChange={(e) =>
                           setPortfolioModal((p) => ({
@@ -6089,6 +6347,9 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                           }))
                         }
                       />
+                      <small style={{ color: "#727272", display: "block", marginTop: "4px" }}>
+                        Auto-fetched from video file. You can adjust if needed.
+                      </small>
                     </div>
 
                     <div className="cd-form-group">
@@ -6244,9 +6505,16 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     >
                       <div style={{ width: "100%", aspectRatio: "16 / 10", overflow: "hidden", background: "#252525" }}>
                         <img
-                          src={item.media_url || item.thumbnail_url}
+                          src={
+                            item.thumbnail_url ||
+                            (item.item_type === "photo" ? item.media_url : "") ||
+                            "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80"
+                          }
                           alt={item.title}
                           style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          onError={(e) => {
+                            e.target.src = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80";
+                          }}
                         />
                       </div>
                       <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>

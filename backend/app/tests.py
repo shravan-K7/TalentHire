@@ -7424,6 +7424,14 @@ class AdminDashboardAPITests(TestCase):
         self.customer.refresh_from_db()
         self.assertFalse(self.customer.is_active)
 
+        # Check phone is returned and searching by phone works
+        self.artist.phone = "9876543210"
+        self.artist.save(update_fields=["phone"])
+        phone_res = self.client.get("/api/admin/users/?search=9876543210")
+        self.assertEqual(phone_res.status_code, 200)
+        phone_users = phone_res.json()["users"]
+        self.assertTrue(any(u["username"] == "unverified_artist" and u["phone"] == "9876543210" for u in phone_users))
+
     def test_admin_artist_verification_queue_and_action(self):
         self.client.force_login(self.admin_user)
         res = self.client.get("/api/admin/artists/verifications/")
@@ -8059,6 +8067,152 @@ class CustomerWhatsAppContactAndNotificationTests(TestCase):
         notifs = Notification.objects.filter(user=self.customer, title="Upcoming Event Reminder")
         self.assertTrue(notifs.exists())
         self.assertIn(f"Booking #{booking.id:03d}", notifs.first().message)
+
+
+class ArtistPortfolioVideoUploadTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username="video_artist",
+            email="artist_video@example.com",
+            password="securepassword123",
+        )
+        self.category = Category.objects.create(name="Live Bands", description="Musical Bands")
+        self.artist = ArtistProfile.objects.create(
+            user=self.user,
+            stage_name="SoundPulse",
+            category=self.category,
+            starting_price=Decimal("20000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+    def test_upload_video_with_duration_and_thumbnail(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from app.models import Portfolio
+        self.client.force_login(self.user)
+
+        video_content = b"fake video bytes for testing"
+        thumb_content = b"fake jpeg thumbnail bytes"
+
+        video_file = SimpleUploadedFile("live_performance.mp4", video_content, content_type="video/mp4")
+        thumb_file = SimpleUploadedFile("live_performance_thumbnail.jpg", thumb_content, content_type="image/jpeg")
+
+        data = {
+            "title": "Live Acoustic Set",
+            "description": "Full stage performance from festival",
+            "item_type": "video",
+            "duration": "03:45",
+            "dimensions": "1920 × 1080",
+            "media_file": video_file,
+            "thumbnail": thumb_file,
+            "is_public": "true",
+        }
+
+        res = self.client.post("/api/artist/portfolio/", data=data)
+        self.assertEqual(res.status_code, 201)
+        res_json = res.json()
+        item = res_json["item"]
+
+        self.assertEqual(item["title"], "Live Acoustic Set")
+        self.assertEqual(item["item_type"], "video")
+        self.assertEqual(item["duration"], "03:45")
+        self.assertEqual(item["dimensions"], "1920 × 1080")
+        self.assertTrue(item["thumbnail_url"])
+        self.assertTrue(item["media_url"])
+
+        # Verify DB record
+        db_item = Portfolio.objects.get(id=item["id"])
+        self.assertEqual(db_item.duration, "03:45")
+        self.assertEqual(db_item.dimensions, "1920 × 1080")
+        self.assertTrue(bool(db_item.thumbnail))
+
+
+class ExploreArtistsTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.cat_singers, _ = Category.objects.get_or_create(name="Singers & Vocalists")
+        self.cat_bands, _ = Category.objects.get_or_create(name="Live Bands & Ensembles")
+
+        self.u1 = User.objects.create_user(username="test_artist_one", email="one@test.com", password="pass")
+        self.a1 = ArtistProfile.objects.create(
+            user=self.u1,
+            category=self.cat_singers,
+            stage_name="Alpha Performer Unique",
+            location="Kochi, Kerala",
+            starting_price=Decimal("20000.00"),
+            years_of_experience=4,
+            gender="male",
+            performance_types=["Solo performance"],
+            is_active=True,
+            is_verified=True,
+        )
+
+        self.u2 = User.objects.create_user(username="test_artist_two", email="two@test.com", password="pass")
+        self.a2 = ArtistProfile.objects.create(
+            user=self.u2,
+            category=self.cat_bands,
+            stage_name="Beta Band Unique",
+            location="Bengaluru, Karnataka",
+            starting_price=Decimal("50000.00"),
+            years_of_experience=8,
+            gender="other",
+            performance_types=["Group performance"],
+            is_active=True,
+            is_verified=True,
+        )
+
+    def test_artists_categories_summary(self):
+        res = self.client.get("/api/artist/categories/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertGreaterEqual(data["total_artists"], 2)
+        names = {c["name"]: c["artist_count"] for c in data["categories"]}
+        self.assertGreaterEqual(names["Singers & Vocalists"], 1)
+        self.assertGreaterEqual(names["Live Bands & Ensembles"], 1)
+
+    def test_artists_list_pagination(self):
+        res = self.client.get("/api/artists/?page=1&page_size=1")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(len(data["artists"]), 1)
+        self.assertGreaterEqual(data["total_count"], 2)
+        self.assertTrue(data["has_more"])
+        self.assertIn("Kochi, Kerala", data["locations"])
+
+    def test_artists_list_filtering(self):
+        # Search
+        res = self.client.get("/api/artists/?search=Alpha+Performer+Unique")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["total_count"], 1)
+        self.assertEqual(data["artists"][0]["stage_name"], "Alpha Performer Unique")
+
+        # Location filter
+        res_loc = self.client.get("/api/artists/?location=Bengaluru")
+        self.assertEqual(res_loc.status_code, 200)
+        data_loc = res_loc.json()
+        self.assertTrue(any(a["stage_name"] == "Beta Band Unique" for a in data_loc["artists"]))
+
+        # Category filter
+        res_cat = self.client.get("/api/artists/?category=Singers+%26+Vocalists&search=Alpha+Performer+Unique")
+        self.assertEqual(res_cat.status_code, 200)
+        self.assertEqual(res_cat.json()["total_count"], 1)
+
+    def test_artists_list_sorting(self):
+        # Price low to high
+        res_asc = self.client.get("/api/artists/?sort=price_asc&search=Unique")
+        self.assertEqual(res_asc.status_code, 200)
+        names = [a["stage_name"] for a in res_asc.json()["artists"]]
+        self.assertEqual(names, ["Alpha Performer Unique", "Beta Band Unique"])
+
+        # Price high to low
+        res_desc = self.client.get("/api/artists/?sort=price_desc&search=Unique")
+        self.assertEqual(res_desc.status_code, 200)
+        names_desc = [a["stage_name"] for a in res_desc.json()["artists"]]
+        self.assertEqual(names_desc, ["Beta Band Unique", "Alpha Performer Unique"])
+
+
 
 
 

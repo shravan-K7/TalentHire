@@ -316,6 +316,8 @@ def admin_users_list_view(request):
             | Q(first_name__icontains=search)
             | Q(last_name__icontains=search)
             | Q(artist_profile__stage_name__icontains=search)
+            | Q(artist_profile__phone__icontains=search)
+            | Q(customer_profile__phone__icontains=search)
         )
 
     if role_filter == "artist":

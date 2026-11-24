@@ -618,7 +618,7 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                           <img
                             src={
                               item.thumbnail_url ||
-                              item.media_url ||
+                              (item.item_type === 'photo' ? item.media_url : '') ||
                               DEFAULT_REEL_ITEMS[0].thumbnail_url
                             }
                             alt={item.title}

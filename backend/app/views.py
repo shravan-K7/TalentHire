@@ -515,13 +515,13 @@ def artist_categories(request):
         Category.objects.annotate(
             artist_count=models.Count(
                 "artists",
-                filter=models.Q(artists__is_active=True),
+                filter=models.Q(artists__is_active=True, artists__user__is_active=True),
             )
         )
         .order_by("name")
         .values("id", "name", "artist_count")
     )
-    total_artists = ArtistProfile.objects.filter(is_active=True).count()
+    total_artists = ArtistProfile.objects.filter(is_active=True, user__is_active=True).count()
     return JsonResponse(
         {
             "categories": list(categories),
@@ -624,13 +624,102 @@ def artist_profile_view(request):
     return JsonResponse({"errors": form.errors.get_json_data()}, status=400)
 
 
-def serialize_artist_summary(artist):
+def extract_youtube_id(url):
+    """Extract YouTube video ID from various YouTube URL formats."""
+    if not url:
+        return ""
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11})(?:[&?]|$)',
+        r'(?:embed\/|shorts\/)([0-9A-Za-z_-]{11})',
+        r'youtu\.be\/([0-9A-Za-z_-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, str(url))
+        if match:
+            return match.group(1)
+    return ""
+
+
+def serialize_artist_summary(artist, request=None):
     travel_map = {
         "city": "Within my city",
         "state": "Across my state",
         "india": "Across India",
         "international": "International",
     }
+
+    # Featured image resolution: priority to featured portfolio photo, then profile image, then first photo
+    featured_image = ""
+    featured_item = artist.portfolio_items.filter(is_public=True, is_featured=True).first()
+    if featured_item and featured_item.item_type == Portfolio.ItemType.PHOTO:
+        if featured_item.media_file:
+            try:
+                featured_image = request.build_absolute_uri(featured_item.media_file.url) if request else featured_item.media_file.url
+            except Exception:
+                featured_image = featured_item.media_file.url
+        elif featured_item.media_url:
+            featured_image = featured_item.media_url
+
+    if not featured_image and artist.profile_image:
+        try:
+            featured_image = request.build_absolute_uri(artist.profile_image.url) if request else artist.profile_image.url
+        except Exception:
+            featured_image = artist.profile_image.url
+
+    if not featured_image:
+        first_photo = artist.portfolio_items.filter(is_public=True, item_type=Portfolio.ItemType.PHOTO).first()
+        if first_photo:
+            if first_photo.media_file:
+                try:
+                    featured_image = request.build_absolute_uri(first_photo.media_file.url) if request else first_photo.media_file.url
+                except Exception:
+                    featured_image = first_photo.media_file.url
+            elif first_photo.media_url:
+                featured_image = first_photo.media_url
+
+    # Video preview resolution
+    video_item = (
+        artist.portfolio_items.filter(
+            is_public=True,
+            item_type__in=[Portfolio.ItemType.VIDEO, Portfolio.ItemType.YOUTUBE],
+        ).first()
+        or artist.portfolio_items.filter(
+            is_public=True,
+            youtube_url__isnull=False,
+        ).exclude(youtube_url="").first()
+    )
+
+    video_preview = None
+    if video_item:
+        v_url = ""
+        if video_item.media_file:
+            try:
+                v_url = request.build_absolute_uri(video_item.media_file.url) if request else video_item.media_file.url
+            except Exception:
+                v_url = video_item.media_file.url
+        elif video_item.youtube_url:
+            v_url = video_item.youtube_url
+        elif video_item.media_url:
+            v_url = video_item.media_url
+
+        video_preview = {
+            "id": video_item.id,
+            "title": video_item.title or f"{artist.stage_name} Live Performance",
+            "item_type": video_item.item_type,
+            "url": v_url,
+            "youtube_id": extract_youtube_id(v_url),
+        }
+
+    # Rating resolution
+    avg_rating = getattr(artist, "avg_rating", None)
+    if avg_rating is None:
+        agg = artist.reviews.aggregate(models.Avg("rating"))
+        avg_rating = agg["rating__avg"]
+    if avg_rating is not None:
+        avg_rating = round(float(avg_rating), 1)
+    else:
+        avg_rating = 4.8
+
     return {
         "id": artist.id,
         "stage_name": artist.stage_name,
@@ -651,6 +740,10 @@ def serialize_artist_summary(artist):
         "portfolio_url": artist.portfolio_url,
         "additional_information": artist.additional_information,
         "profile_image": artist.profile_image.url if artist.profile_image else None,
+        "featured_image": featured_image,
+        "has_video": bool(video_preview),
+        "video_preview": video_preview,
+        "avg_rating": avg_rating,
         "is_verified": artist.is_verified,
         "rejection_notes": getattr(artist, "rejection_notes", ""),
     }
@@ -668,6 +761,7 @@ def artists_list_view(request):
             | models.Q(location__icontains=search)
             | models.Q(category__name__icontains=search)
             | models.Q(additional_information__icontains=search)
+            | models.Q(performance_types__icontains=search)
         )
 
     category = request.GET.get("category", "").strip()
@@ -679,6 +773,10 @@ def artists_list_view(request):
                 models.Q(category__name__iexact=category)
                 | models.Q(category__name__icontains=category)
             )
+
+    location = request.GET.get("location", "").strip()
+    if location and location.lower() not in ("all", "anywhere"):
+        qs = qs.filter(location__icontains=location)
 
     gender = request.GET.get("gender", "").strip().lower()
     if gender and gender != "all":
@@ -701,6 +799,7 @@ def artists_list_view(request):
             | models.Q(stage_name__icontains=artist_type)
             | models.Q(bio__icontains=artist_type)
             | models.Q(additional_information__icontains=artist_type)
+            | models.Q(performance_types__icontains=artist_type)
         )
 
     travel = request.GET.get("travel", "").strip()
@@ -725,36 +824,69 @@ def artists_list_view(request):
     if verified in ("true", "1"):
         qs = qs.filter(is_verified=True)
 
-    sort = request.GET.get("sort", "").strip()
-    if sort == "price_asc":
-        qs = qs.order_by("starting_price")
-    elif sort == "price_desc":
-        qs = qs.order_by("-starting_price")
-    elif sort == "experience":
+    sort = request.GET.get("sort", "").strip().lower()
+    if sort in ("price_asc", "price_low_high", "price_low_to_high"):
+        qs = qs.order_by("starting_price", "-created_at")
+    elif sort in ("price_desc", "price_high_low", "price_high_to_low"):
+        qs = qs.order_by("-starting_price", "-created_at")
+    elif sort in ("highest_rated", "rating", "rated"):
+        qs = qs.annotate(avg_rating=models.Avg("reviews__rating")).order_by(
+            models.F("avg_rating").desc(nulls_last=True),
+            "-years_of_experience",
+            "-created_at",
+        )
+    elif sort in ("experience", "most_experienced"):
         qs = qs.order_by("-years_of_experience", "-starting_price")
     elif sort == "newest":
         qs = qs.order_by("-created_at")
     else:
-        qs = qs.order_by("-is_verified", "-created_at")
+        # Default 'featured': order by -created_at, -id (matches reference screenshot)
+        qs = qs.order_by("-created_at", "-id")
 
-    artists = [serialize_artist_summary(a) for a in qs]
-    return JsonResponse({"artists": artists, "count": len(artists)})
+    total_count = qs.count()
 
+    page_param = request.GET.get("page")
+    page_size_param = request.GET.get("page_size")
 
-def extract_youtube_id(url):
-    """Extract YouTube video ID from various YouTube URL formats."""
-    if not url:
-        return ""
-    patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11})(?:[&?]|$)',
-        r'(?:embed\/|shorts\/)([0-9A-Za-z_-]{11})',
-        r'youtu\.be\/([0-9A-Za-z_-]{11})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, str(url))
-        if match:
-            return match.group(1)
-    return ""
+    if page_param or page_size_param:
+        try:
+            page = max(1, int(page_param or 1))
+        except ValueError:
+            page = 1
+        try:
+            page_size = max(1, min(100, int(page_size_param or 8)))
+        except ValueError:
+            page_size = 8
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        paged_qs = qs[start:end]
+        artists = [serialize_artist_summary(a, request) for a in paged_qs]
+        has_more = end < total_count
+    else:
+        page = 1
+        page_size = total_count
+        artists = [serialize_artist_summary(a, request) for a in qs]
+        has_more = False
+
+    # Distinct locations of active artists
+    raw_locations = (
+        ArtistProfile.objects.filter(is_active=True, user__is_active=True)
+        .exclude(location="")
+        .values_list("location", flat=True)
+        .distinct()
+    )
+    locations_list = sorted(list(set(loc.strip() for loc in raw_locations if loc and loc.strip())))
+
+    return JsonResponse({
+        "artists": artists,
+        "count": len(artists),
+        "total_count": total_count,
+        "page": page,
+        "page_size": page_size,
+        "has_more": has_more,
+        "locations": locations_list,
+    })
 
 
 def serialize_portfolio_item(item, request=None):
@@ -1729,6 +1861,12 @@ def customer_dashboard_view(request):
     user = request.user
     customer_profile, _ = CustomerProfile.objects.get_or_create(user=user)
 
+    # Reconcile and expire any unverified reservations past the 24-hour deadline
+    try:
+        check_and_expire_reservations()
+    except Exception as ex:
+        logger.warning("Error running reservation expiry in customer_dashboard: %s", ex)
+
     # Bookings & Stats
     bookings_qs = (
         Booking.objects.filter(customer=user)
@@ -1944,6 +2082,7 @@ def customer_dashboard_view(request):
             "created_at_iso": b.created_at.isoformat() if b.created_at else "",
             "accepted_at": b.accepted_at.isoformat() if b.accepted_at else None,
             "expires_at": b.expires_at.isoformat() if b.expires_at else None,
+            "payment_deadline": (b.payment_deadline or b.expires_at).isoformat() if (b.payment_deadline or b.expires_at) else None,
             "payment": payment_data,
             "activities": activities,
         }
@@ -3689,6 +3828,7 @@ def artist_respond_booking_view(request, booking_id):
             booking_locked.agreed_price = confirmed_price
             booking_locked.status = Booking.Status.ACCEPTED
             booking_locked.accepted_at = now_time
+            booking_locked.payment_deadline = deadline_dt
             booking_locked.response_message = (
                 reason or "Booking accepted and final price confirmed."
             )
@@ -3697,6 +3837,7 @@ def artist_respond_booking_view(request, booking_id):
                     "agreed_price",
                     "status",
                     "accepted_at",
+                    "payment_deadline",
                     "response_message",
                 ]
             )
@@ -3771,6 +3912,7 @@ def artist_respond_booking_view(request, booking_id):
                     "booking_id": booking_locked.id,
                     "accepted_at": booking_locked.accepted_at.isoformat(),
                     "expires_at": deadline_dt.isoformat(),
+                    "payment_deadline": deadline_dt.isoformat(),
                     "agreed_price": str(confirmed_price),
                     "commission_amount": str(commission),
                     "artist_amount": str(artist_share),
@@ -3990,8 +4132,12 @@ def artist_portfolio_view(request):
             except Exception:
                 dimensions = "1920 × 1080"
         elif item_type == Portfolio.ItemType.VIDEO:
-            dimensions = "1920 × 1080"
-            if not duration:
+            client_dim = data.get("dimensions", "").strip()
+            dimensions = client_dim if client_dim else "1920 × 1080"
+            client_duration = data.get("duration", "").strip()
+            if client_duration:
+                duration = client_duration
+            elif not duration:
                 duration = "03:24"
     else:
         if not media_url:
@@ -4074,6 +4220,12 @@ def artist_portfolio_update_view(request, item_id):
 
     if "duration" in data:
         item.duration = data["duration"].strip()
+
+    if "dimensions" in data:
+        item.dimensions = data["dimensions"].strip()
+
+    if request.FILES.get("thumbnail"):
+        item.thumbnail = request.FILES["thumbnail"]
 
     if "is_public" in data:
         item.is_public = str(data["is_public"]).lower() in ("true", "1")
@@ -4992,6 +5144,46 @@ def check_and_expire_reservations(artist=None, booking=None):
             logger.exception("Error processing expiry for booking %s: %s", b_id, e)
 
     return results
+
+
+@csrf_protect
+@require_POST
+def booking_check_expiry_view(request, booking_id):
+    """
+    On-demand endpoint to reconcile and expire an unpaid booking if its 24h deadline has passed.
+    Called when frontend countdown hits zero or upon booking detail load.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in."}, status=401)
+
+    try:
+        booking = Booking.objects.select_related("customer", "artist").get(id=booking_id)
+    except Booking.DoesNotExist:
+        return JsonResponse({"error": "Booking not found."}, status=404)
+
+    is_customer = booking.customer_id == request.user.id
+    is_artist = hasattr(request.user, "artist_profile") and booking.artist_id == request.user.artist_profile.id
+    is_staff = request.user.is_staff or request.user.is_superuser
+    if not (is_customer or is_artist or is_staff):
+        return JsonResponse({"error": "Unauthorized access to booking."}, status=403)
+
+    results = check_and_expire_reservations(booking=booking)
+    booking.refresh_from_db()
+
+    now_ts = timezone.now()
+    is_expired = booking.status == Booking.Status.EXPIRED
+    if not is_expired and booking.status == Booking.Status.ACCEPTED and booking.expires_at and now_ts > booking.expires_at:
+        is_expired = True
+
+    return JsonResponse({
+        "success": True,
+        "booking_id": booking.id,
+        "status": booking.status,
+        "is_expired": is_expired,
+        "payment_deadline": booking.expires_at.isoformat() if booking.expires_at else None,
+        "expires_at": booking.expires_at.isoformat() if booking.expires_at else None,
+        "results": results,
+    })
 
 
 @csrf_protect

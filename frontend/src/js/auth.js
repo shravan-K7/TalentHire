@@ -934,3 +934,19 @@ export async function verifyPayment(payload) {
 
     return data;
 }
+
+export async function checkBookingExpiry(bookingId) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/bookings/${bookingId}/check-expiry/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({}),
+    });
+    const data = await readResponse(response);
+    return data;
+}
+

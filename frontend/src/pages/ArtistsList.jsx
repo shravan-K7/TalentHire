@@ -1,17 +1,64 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { fetchArtists, fetchArtistCategoriesSummary } from '../js/auth';
 import '../css/Artists.css';
 
+// Canonical category display labels mapped from database names
+const CATEGORY_DISPLAY_MAP = {
+  'anchors & emcees': 'Anchors & Emcees',
+  'dance groups': 'Dance groups',
+  'live bands & ensembles': 'Live bands',
+  'live djs & producers': 'DJs & producers',
+  'orchestra & instrumental': 'Orchestra',
+  'singers & vocalists': 'Singers & vocalists',
+};
+
+// Canonical category order matching the UI reference
+const CATEGORY_ORDER = [
+  'anchors & emcees',
+  'dance groups',
+  'live bands & ensembles',
+  'live djs & producers',
+  'orchestra & instrumental',
+  'singers & vocalists',
+];
+
+// Fallback performance types if artist record does not have specific performance_types
+function getFallbackPerformanceType(artist) {
+  if (artist.performance_types && Array.isArray(artist.performance_types) && artist.performance_types.length > 0) {
+    return artist.performance_types[0];
+  }
+  const cat = (artist.category_name || '').toLowerCase();
+  const name = (artist.stage_name || '').toLowerCase();
+
+  if (cat.includes('band')) return 'Live band';
+  if (cat.includes('dance')) return 'Dance troupe';
+  if (cat.includes('dj')) return 'DJ set';
+  if (cat.includes('anchor') || cat.includes('emcee')) return 'Solo anchor';
+  if (cat.includes('orchestra') || cat.includes('instrumental')) return 'Orchestra';
+  if (cat.includes('singer') || cat.includes('vocalist')) return 'Solo performance';
+  if (name.includes('ensemble') || name.includes('troupe')) return 'Group performance';
+  return 'Solo performance';
+}
+
 function ArtistsList({ user, onLogout, navigate }) {
   const [artists, setArtists] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [overallTotal, setOverallTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [imageErrors, setImageErrors] = useState({});
 
-  // Top Search and Filter Controls
+  // Active Video Preview Modal state
+  const [previewArtist, setPreviewArtist] = useState(null);
+
+  // Filters State
   const [search, setSearch] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('search') || '';
@@ -20,96 +67,121 @@ function ArtistsList({ user, onLogout, navigate }) {
     const params = new URLSearchParams(window.location.search);
     return params.get('category') || 'all';
   });
+  const [location, setLocation] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('location') || 'anywhere';
+  });
   const [gender, setGender] = useState('all');
   const [artistType, setArtistType] = useState('all');
   const [sort, setSort] = useState('featured');
 
-  // Video / Audio Play Preview Modal
-  const [activePlayArtist, setActivePlayArtist] = useState(null);
-
-  // Load categories and initial artist total
+  // Load categories and initial artist total dynamically from DB
   useEffect(() => {
-    async function loadCategories() {
+    let active = true;
+    async function loadInitialMeta() {
       try {
         const data = await fetchArtistCategoriesSummary();
+        if (!active) return;
         const cats = data.categories || [];
         setCategories(cats);
-        setTotalCount(data.total_artists);
+        setOverallTotal(data.total_artists || 0);
 
-          // Resolve URL category parameter to database category name
-          const params = new URLSearchParams(window.location.search);
-          const rawCat = params.get('category');
-          if (rawCat && rawCat.toLowerCase() !== 'all') {
-            const rawLower = rawCat.toLowerCase().trim();
-            const matched = cats.find((c) => {
-              const nameLower = c.name.toLowerCase();
-              return (
-                nameLower === rawLower ||
-                nameLower.includes(rawLower) ||
-                rawLower.includes(nameLower) ||
-                (rawLower.includes('sing') && nameLower.includes('sing')) ||
-                (rawLower.includes('dj') && nameLower.includes('dj')) ||
-                (rawLower.includes('dance') && nameLower.includes('dance')) ||
-                (rawLower.includes('band') && nameLower.includes('band')) ||
-                (rawLower.includes('orchestra') && nameLower.includes('orchestra')) ||
-                (rawLower.includes('anchor') && nameLower.includes('anchor')) ||
-                (rawLower.includes('music') && nameLower.includes('instrumental'))
-              );
-            });
-            if (matched) {
-              setSelectedCategory(matched.name);
-            }
+        // Resolve URL category parameter if provided
+        const params = new URLSearchParams(window.location.search);
+        const rawCat = params.get('category');
+        if (rawCat && rawCat.toLowerCase() !== 'all') {
+          const rawLower = rawCat.toLowerCase().trim();
+          const matched = cats.find((c) => {
+            const nameLower = c.name.toLowerCase();
+            return (
+              nameLower === rawLower ||
+              nameLower.includes(rawLower) ||
+              rawLower.includes(nameLower)
+            );
+          });
+          if (matched) {
+            setSelectedCategory(matched.name);
           }
+        }
       } catch (err) {
         console.warn('Could not load categories:', err);
       }
     }
-    loadCategories();
+    loadInitialMeta();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // Fetch artists on filter change
-  const loadArtists = useCallback(async () => {
+  // Fetch artists on filter change (resets to page 1)
+  const fetchFirstPage = useCallback(async () => {
     setLoading(true);
     setError('');
+    setPage(1);
 
     try {
       const data = await fetchArtists({
         search: search.trim(),
         category: selectedCategory === 'all' ? '' : selectedCategory,
+        location: location === 'anywhere' || location === 'all' ? '' : location,
         gender: gender === 'all' ? '' : gender,
         artist_type: artistType === 'all' ? '' : artistType,
         sort: sort === 'featured' ? '' : sort,
+        page: 1,
+        page_size: 8,
       });
 
       setArtists(data.artists || []);
-      if (selectedCategory === 'all' && !search && gender === 'all' && artistType === 'all') {
-        setTotalCount(data.count ?? data.artists.length);
+      setTotalCount(data.total_count ?? data.count ?? (data.artists || []).length);
+      setHasMore(Boolean(data.has_more));
+      if (data.locations && Array.isArray(data.locations) && data.locations.length > 0) {
+        setLocations(data.locations);
       }
     } catch (err) {
-      setError(err.message || 'Failed to load performing artists.');
+      setError(err.message || 'Failed to load artists.');
     } finally {
       setLoading(false);
     }
-  }, [search, selectedCategory, gender, artistType, sort]);
+  }, [search, selectedCategory, location, gender, artistType, sort]);
 
+  // Debounced load on filter/search change
   useEffect(() => {
     const timer = setTimeout(() => {
-      loadArtists();
+      fetchFirstPage();
     }, 200);
     return () => clearTimeout(timer);
-  }, [loadArtists]);
+  }, [fetchFirstPage]);
 
-  // Escape key handler for play modal
-  useEffect(() => {
-    function handleKeyDown(e) {
-      if (e.key === 'Escape' && activePlayArtist) {
-        setActivePlayArtist(null);
-      }
+  // Load More handler (pagination)
+  async function handleLoadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const nextPage = page + 1;
+
+    try {
+      const data = await fetchArtists({
+        search: search.trim(),
+        category: selectedCategory === 'all' ? '' : selectedCategory,
+        location: location === 'anywhere' || location === 'all' ? '' : location,
+        gender: gender === 'all' ? '' : gender,
+        artist_type: artistType === 'all' ? '' : artistType,
+        sort: sort === 'featured' ? '' : sort,
+        page: nextPage,
+        page_size: 8,
+      });
+
+      const newArtists = data.artists || [];
+      setArtists((prev) => [...prev, ...newArtists]);
+      setPage(nextPage);
+      setHasMore(Boolean(data.has_more));
+    } catch (err) {
+      console.warn('Failed to load more artists:', err);
+    } finally {
+      setLoadingMore(false);
     }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activePlayArtist]);
+  }
 
+  // Sync category selection with URL
   function handleCategorySelect(catName) {
     setSelectedCategory(catName);
     if (window.history.replaceState) {
@@ -124,9 +196,11 @@ function ArtistsList({ user, onLogout, navigate }) {
     }
   }
 
+  // Reset all filters to default
   function handleResetFilters() {
     setSearch('');
     setSelectedCategory('all');
+    setLocation('anywhere');
     setGender('all');
     setArtistType('all');
     setSort('featured');
@@ -135,9 +209,12 @@ function ArtistsList({ user, onLogout, navigate }) {
     }
   }
 
+  // Navigation handlers
   function handleCardClick(artistId) {
     if (navigate) {
       navigate(`/artists/${artistId}`);
+    } else {
+      window.location.assign(`/artists/${artistId}`);
     }
   }
 
@@ -159,191 +236,261 @@ function ArtistsList({ user, onLogout, navigate }) {
     }
   }
 
-  function handlePlay(artist) {
-    setActivePlayArtist(artist);
+  // Open Video Preview Modal
+  function handleOpenVideoPreview(e, artist) {
+    e.stopPropagation();
+    setPreviewArtist(artist);
+  }
+
+  function handleCloseVideoPreview() {
+    setPreviewArtist(null);
+  }
+
+  // Handle image load error to gracefully trigger fallback
+  function handleImageError(artistId) {
+    setImageErrors((prev) => ({ ...prev, [artistId]: true }));
+  }
+
+  // Sorted categories according to reference order
+  const orderedCategories = useMemo(() => {
+    return [...categories].sort((a, b) => {
+      const aKey = a.name.toLowerCase();
+      const bKey = b.name.toLowerCase();
+      const aIdx = CATEGORY_ORDER.indexOf(aKey);
+      const bIdx = CATEGORY_ORDER.indexOf(bKey);
+      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+      if (aIdx !== -1) return -1;
+      if (bIdx !== -1) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [categories]);
+
+  // Clean formatted price
+  function formatPrice(val) {
+    const num = Number(val);
+    if (isNaN(num)) return '0';
+    return num.toLocaleString('en-IN');
   }
 
   return (
     <div className="artists-container">
       <Navbar user={user} onLogout={onLogout} currentPath="/artists" navigate={navigate} />
 
-      <main className="artists-main-v2">
-        {/* Top Search & Filter Bar (Matching Image 2) */}
-        <section className="top-search-filter-row" aria-label="Search and Filter Controls">
-          {/* 1. White search input */}
-          <div className="top-search-wrap">
-            <input
-              type="text"
-              className="top-search-input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search artist, hit song, category, location."
-              aria-label="Search artist, hit song, category, location"
-            />
-            {search && (
+      <main className="artists-main-explore">
+        <div className="artists-content-wrapper">
+          {/* 1. Page Header */}
+          <header className="explore-header-section">
+            <h1 className="explore-page-title">Explore artists</h1>
+            <p className="explore-page-subtitle">
+              {overallTotal || totalCount || 14} artists ready to book for your next event.
+            </p>
+          </header>
+
+          {/* 2. Search and Filter Bar */}
+          <section className="explore-filter-bar" aria-label="Search and Filter Controls">
+            {/* Search Input with Icon */}
+            <div className="explore-search-box">
+              <span className="explore-search-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </span>
+              <input
+                type="text"
+                className="explore-search-input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search artist, song or category"
+                aria-label="Search artist, song or category"
+              />
+              {search && (
+                <button
+                  type="button"
+                  className="explore-search-clear"
+                  onClick={() => setSearch('')}
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Location Filter Dropdown */}
+            <div className="explore-select-wrapper location-select-wrapper">
+              <select
+                className="explore-select location-select"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                aria-label="Filter by Location"
+              >
+                <option value="anywhere">Location: Anywhere</option>
+                {locations.map((loc) => (
+                  <option key={loc} value={loc}>
+                    {loc}
+                  </option>
+                ))}
+              </select>
+              <span className="explore-select-chevron" aria-hidden="true">▾</span>
+            </div>
+
+            {/* Gender Filter Dropdown */}
+            <div className="explore-select-wrapper">
+              <select
+                className="explore-select"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                aria-label="Filter by Gender"
+              >
+                <option value="all">Any gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="group">Group / Troupe</option>
+              </select>
+              <span className="explore-select-chevron" aria-hidden="true">▾</span>
+            </div>
+
+            {/* Artist Type Filter Dropdown */}
+            <div className="explore-select-wrapper">
+              <select
+                className="explore-select"
+                value={artistType}
+                onChange={(e) => setArtistType(e.target.value)}
+                aria-label="Filter by Artist Type"
+              >
+                <option value="all">All artist types</option>
+                <option value="Solo">Solo performance</option>
+                <option value="Band">Live band</option>
+                <option value="Dance">Dance troupe</option>
+                <option value="DJ">DJ set</option>
+                <option value="Emcee">Anchor / Emcee</option>
+                <option value="Orchestra">Orchestra</option>
+              </select>
+              <span className="explore-select-chevron" aria-hidden="true">▾</span>
+            </div>
+
+            {/* Sorting Dropdown */}
+            <div className="explore-select-wrapper">
+              <select
+                className="explore-select"
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+                aria-label="Sort Artists"
+              >
+                <option value="featured">Featured first</option>
+                <option value="price_asc">Price Low to High</option>
+                <option value="price_desc">Price High to Low</option>
+                <option value="highest_rated">Highest Rated</option>
+                <option value="experience">Most Experienced</option>
+              </select>
+              <span className="explore-select-chevron" aria-hidden="true">▾</span>
+            </div>
+
+            {/* Reset Action Button */}
+            <button
+              type="button"
+              className="explore-reset-btn"
+              onClick={handleResetFilters}
+              title="Reset all filters"
+            >
+              Reset
+            </button>
+          </section>
+
+          {/* 3. Category Filter Tabs Row */}
+          <nav className="explore-category-tabs-row" aria-label="Artist Categories">
+            {/* All Artists Tab */}
+            <button
+              type="button"
+              className={`category-pill-btn ${selectedCategory === 'all' ? 'active' : ''}`}
+              onClick={() => handleCategorySelect('all')}
+              aria-selected={selectedCategory === 'all'}
+            >
+              <span>All artists</span>
+              <span className="category-pill-count">{overallTotal || totalCount || 14}</span>
+            </button>
+
+            {/* Database Category Tabs */}
+            {orderedCategories.map((cat) => {
+              const catKey = cat.name.toLowerCase();
+              const displayLabel = CATEGORY_DISPLAY_MAP[catKey] || cat.name;
+              const isSelected =
+                selectedCategory === cat.name ||
+                selectedCategory.toLowerCase() === catKey;
+
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  className={`category-pill-btn ${isSelected ? 'active' : ''}`}
+                  onClick={() => handleCategorySelect(cat.name)}
+                  aria-selected={isSelected}
+                >
+                  <span>{displayLabel}</span>
+                  <span className="category-pill-count">{cat.artist_count ?? 0}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Error Message */}
+          {error && (
+            <div className="auth-alert-error" role="alert" style={{ marginBottom: 20 }}>
+              {error}
+            </div>
+          )}
+
+          {/* 4. Artist Cards Grid */}
+          {loading ? (
+            <div className="explore-grid-skeleton" aria-label="Loading artists">
+              {Array.from({ length: 8 }).map((_, idx) => (
+                <div key={idx} className="artist-card-skeleton">
+                  <div className="skeleton-media" />
+                  <div className="skeleton-line short" />
+                  <div className="skeleton-line title" />
+                  <div className="skeleton-line medium" />
+                  <div className="skeleton-line small" />
+                  <div className="skeleton-bottom-row">
+                    <div className="skeleton-line price" />
+                    <div className="skeleton-btn" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : artists.length === 0 ? (
+            <div className="explore-empty-state">
+              <div className="empty-state-icon" aria-hidden="true">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="8" y1="12" x2="16" y2="12" />
+                </svg>
+              </div>
+              <h2 className="explore-empty-title">No artists found</h2>
+              <p className="explore-empty-desc">
+                We couldn&apos;t find any artists matching your current search or filter criteria.
+              </p>
               <button
                 type="button"
-                className="top-search-clear-btn"
-                onClick={() => setSearch('')}
-                aria-label="Clear search text"
+                className="explore-clear-filters-btn"
+                onClick={handleResetFilters}
               >
-                Clear
+                Clear all filters
               </button>
-            )}
-          </div>
-
-          {/* 2. All Categories Dropdown */}
-          <div className="top-select-wrap">
-            <select
-              className="top-select"
-              value={selectedCategory}
-              onChange={(e) => handleCategorySelect(e.target.value)}
-              aria-label="Filter by Category"
-            >
-              <option value="all">All Categories</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.name}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* 3. All Genders Dropdown */}
-          <div className="top-select-wrap">
-            <select
-              className="top-select"
-              value={gender}
-              onChange={(e) => setGender(e.target.value)}
-              aria-label="Filter by Gender"
-            >
-              <option value="all">All Genders</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="group">Group / Troupe</option>
-            </select>
-          </div>
-
-          {/* 4. All Artist Types Dropdown */}
-          <div className="top-select-wrap">
-            <select
-              className="top-select"
-              value={artistType}
-              onChange={(e) => setArtistType(e.target.value)}
-              aria-label="Filter by Artist Type"
-            >
-              <option value="all">All Artist Types</option>
-              <option value="Solo">Solo Performer</option>
-              <option value="Band">Band / Troupe</option>
-              <option value="DJ">Live DJ</option>
-              <option value="Emcee">Anchor / Emcee</option>
-              <option value="Orchestra">Orchestra / Strings</option>
-              <option value="Dance">Dance Troupe</option>
-            </select>
-          </div>
-
-          {/* 5. Sort Dropdown */}
-          <div className="top-select-wrap">
-            <select
-              className="top-select"
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              aria-label="Sort Order"
-            >
-              <option value="featured">Featured First</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-              <option value="experience">Most Experienced</option>
-              <option value="newest">Newest</option>
-            </select>
-          </div>
-
-          {/* 6. RESET Action Button */}
-          <button
-            type="button"
-            className="top-reset-btn"
-            onClick={handleResetFilters}
-            title="Reset all filters"
-          >
-            Reset
-          </button>
-        </section>
-
-        {/* Two-Column Marketplace Layout */}
-        <div className="artists-layout-wrapper">
-          {/* Left Sidebar: CATEGORIES */}
-          <aside className="categories-sidebar" aria-label="Category Navigation">
-            <div className="categories-card">
-              <h2 className="categories-card-title">CATEGORIES</h2>
-              <div className="categories-list" role="tablist">
-                {/* All Artists */}
-                <button
-                  type="button"
-                  className={`category-item-btn ${selectedCategory === 'all' ? 'active' : ''}`}
-                  onClick={() => handleCategorySelect('all')}
-                  role="tab"
-                  aria-selected={selectedCategory === 'all'}
-                >
-                  <span className="category-item-name">All Artists</span>
-                  <span className="category-item-count">{totalCount}</span>
-                </button>
-
-                {/* Specific Categories */}
-                {categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    className={`category-item-btn ${selectedCategory === cat.name ? 'active' : ''}`}
-                    onClick={() => handleCategorySelect(cat.name)}
-                    role="tab"
-                    aria-selected={selectedCategory === cat.name}
-                  >
-                    <span className="category-item-name">{cat.name}</span>
-                    <span className="category-item-count">{cat.artist_count ?? 0}</span>
-                  </button>
-                ))}
-              </div>
             </div>
+          ) : (
+            <div className="explore-artists-grid">
+              {artists.map((artist) => {
+                const initialLetter = (artist.stage_name || 'A').charAt(0).toUpperCase();
+                const imageSrc = artist.featured_image || artist.profile_image;
+                const showImage = Boolean(imageSrc && !imageErrors[artist.id]);
+                const perfType = getFallbackPerformanceType(artist);
+                const displayCategory = (artist.category_name || 'Performer').toUpperCase();
 
-            {/* Total Artists Display Box */}
-            <div className="total-artists-card">
-              <span className="total-artists-label">TOTAL ARTISTS</span>
-              <span className="total-artists-value">{totalCount}</span>
-            </div>
-          </aside>
-
-          {/* Right Column Grid: Artist Cards */}
-          <section className="artists-catalog-area">
-            {error && (
-              <div className="auth-alert-error" role="alert">
-                {error}
-              </div>
-            )}
-
-            {loading ? (
-              <div className="artists-loading-state">
-                <div className="artists-spinner" />
-                <p>Loading artists roster...</p>
-              </div>
-            ) : artists.length === 0 ? (
-              <div className="artists-empty-state">
-                <h3 className="artists-empty-title">No Artists Found</h3>
-                <p>We couldn't find any performing artists matching your search or filter settings.</p>
-                <button
-                  type="button"
-                  className="top-reset-btn"
-                  onClick={handleResetFilters}
-                  style={{ marginTop: 14 }}
-                >
-                  Clear Filters
-                </button>
-              </div>
-            ) : (
-              <div className="artists-grid-v2">
-                {artists.map((artist) => (
+                return (
                   <article
                     key={artist.id}
-                    className="artist-card-v2"
+                    className="artist-card-v3"
                     onClick={() => handleCardClick(artist.id)}
                     tabIndex={0}
                     role="button"
@@ -351,168 +498,209 @@ function ArtistsList({ user, onLogout, navigate }) {
                       if (e.key === 'Enter') handleCardClick(artist.id);
                     }}
                   >
-                    {/* Top Action Bar: Play on Left, Book Now on Right */}
-                    <div className="artist-card-action-bar">
-                      <button
-                        type="button"
-                        className="card-btn-play"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePlay(artist);
-                        }}
-                        title={`Preview showreel for ${artist.stage_name}`}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                          <polygon points="5 3 19 12 5 21 5 3" />
-                        </svg>
-                        <span>Play</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="card-btn-book"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleBookArtist(artist.id);
-                        }}
-                        title={`Book ${artist.stage_name}`}
-                      >
-                        Book Now
-                      </button>
-                    </div>
-
-                    {/* Portrait Image or Stage Placeholder */}
-                    <div className="artist-card-image-box">
-                      {artist.profile_image ? (
+                    {/* Media Preview Box */}
+                    <div className="card-media-box">
+                      {showImage ? (
                         <img
-                          src={artist.profile_image}
+                          src={imageSrc}
                           alt={artist.stage_name}
-                          className="artist-card-photo"
+                          className="card-media-photo"
                           loading="lazy"
+                          onError={() => handleImageError(artist.id)}
                         />
                       ) : (
-                        <div className="artist-card-fallback-photo">
-                          <div className="fallback-initial">
-                            {artist.stage_name.charAt(0).toUpperCase()}
+                        <div className="card-initial-fallback">
+                          <div className="card-initial-circle">
+                            {initialLetter}
                           </div>
-                          <span className="fallback-tag">Stage Ready</span>
                         </div>
                       )}
+
+                      {/* Video Preview Play Button */}
+                      <button
+                        type="button"
+                        className="card-play-action-btn"
+                        onClick={(e) => handleOpenVideoPreview(e, artist)}
+                        title={`Preview performance of ${artist.stage_name}`}
+                        aria-label={`Preview performance of ${artist.stage_name}`}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      </button>
                     </div>
 
-                    {/* Details Section Below Image */}
-                    <div className="artist-card-info-box">
-                      <div className="artist-card-meta-row">
-                        <span className="artist-meta-category">
-                          {artist.category_name ? artist.category_name.toUpperCase() : 'PERFORMER'}
-                        </span>
-                        <span className="artist-meta-location">
-                          {artist.location ? artist.location.toUpperCase() : 'INDIA'}
-                        </span>
+                    {/* Artist Content Details */}
+                    <div className="card-content-body">
+                      {/* Category Label */}
+                      <div className="card-category-label">
+                        {displayCategory}
                       </div>
 
-                      <h3 className="artist-meta-title" title={artist.stage_name}>
+                      {/* Stage Name */}
+                      <h2 className="card-artist-name" title={artist.stage_name}>
                         {artist.stage_name}
-                      </h3>
+                      </h2>
 
-                      <p className="artist-meta-subtitle">
-                        {artist.performance_types && artist.performance_types.length > 0
-                          ? artist.performance_types[0]
-                          : artist.category_name || 'Performer'}
+                      {/* Performance Type */}
+                      <p className="card-perf-type">
+                        {perfType}
                       </p>
 
-                      <p className="artist-meta-notes" title={artist.additional_information || artist.bio}>
-                        {artist.additional_information
-                          ? artist.additional_information
-                          : `Starting at ₹${Number(artist.starting_price).toLocaleString('en-IN')} • ${artist.years_of_experience} yrs exp`}
-                      </p>
+                      {/* Location with Pin */}
+                      <div className="card-location-row">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                          <circle cx="12" cy="10" r="3" />
+                        </svg>
+                        <span>{artist.location || 'India'}</span>
+                      </div>
+
+                      {/* Pricing and Book Now Row */}
+                      <div className="card-bottom-action-row">
+                        <div className="card-pricing-exp-wrap">
+                          <span className="price-label-from">From </span>
+                          <span className="price-amount-highlight">
+                            ₹{formatPrice(artist.starting_price)}
+                          </span>
+                          <span className="price-exp-label">
+                            {` · ${artist.years_of_experience || 0} yrs exp`}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="card-book-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleBookArtist(artist.id);
+                          }}
+                          title={`Book ${artist.stage_name}`}
+                        >
+                          Book now
+                        </button>
+                      </div>
                     </div>
                   </article>
-                ))}
-              </div>
-            )}
-          </section>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 5. Pagination / Load More Footer */}
+          {!loading && artists.length > 0 && (
+            <footer className="explore-pagination-footer">
+              <p className="pagination-count-text">
+                Showing {artists.length} of {totalCount} artists
+              </p>
+              {hasMore && (
+                <button
+                  type="button"
+                  className="btn-load-more"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? 'Loading...' : 'Load more'}
+                </button>
+              )}
+            </footer>
+          )}
         </div>
       </main>
 
-      <Footer />
-
-      {/* Play Showreel Modal */}
-      {activePlayArtist && (
+      {/* 6. Video Preview Modal */}
+      {previewArtist && (
         <div
-          className="play-modal-backdrop"
-          onClick={() => setActivePlayArtist(null)}
-          role="presentation"
+          className="video-preview-modal-overlay"
+          onClick={handleCloseVideoPreview}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="video-preview-title"
         >
           <div
-            className="play-modal-card"
+            className="video-preview-modal-card"
             onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="playModalTitle"
           >
-            <div className="play-modal-header">
+            <div className="video-preview-header">
               <div>
-                <span className="artist-meta-category">
-                  {activePlayArtist.category_name ? activePlayArtist.category_name.toUpperCase() : 'PERFORMER'}
+                <span className="preview-category-tag">
+                  {(previewArtist.category_name || 'PERFORMER').toUpperCase()}
                 </span>
-                <h2 id="playModalTitle" className="play-modal-title">
-                  {activePlayArtist.stage_name}
-                </h2>
+                <h3 id="video-preview-title" className="video-preview-title">
+                  {previewArtist.stage_name}
+                </h3>
               </div>
               <button
                 type="button"
-                className="play-modal-close"
-                onClick={() => setActivePlayArtist(null)}
-                aria-label="Close Preview"
+                className="video-preview-close-btn"
+                onClick={handleCloseVideoPreview}
+                aria-label="Close preview"
               >
-                ×
+                ✕
               </button>
             </div>
 
-            <div className="play-modal-body">
-              {activePlayArtist.portfolio_url ? (
-                <div className="play-modal-video-box">
-                  <p className="play-modal-desc">
-                    Showreel and live performance showcase for <strong>{activePlayArtist.stage_name}</strong>:
-                  </p>
-                  <a
-                    href={activePlayArtist.portfolio_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="card-btn-book play-external-link"
-                  >
-                    Open Live Video Showcase
-                  </a>
+            <div className="video-preview-body">
+              {previewArtist.video_preview?.youtube_id ? (
+                <div className="video-iframe-responsive">
+                  <iframe
+                    src={`https://www.youtube.com/embed/${previewArtist.video_preview.youtube_id}?autoplay=1`}
+                    title={`${previewArtist.stage_name} Live Performance`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              ) : previewArtist.video_preview?.url && !previewArtist.video_preview.url.includes('soundcloud.com') ? (
+                <div className="video-player-box">
+                  <video
+                    src={previewArtist.video_preview.url}
+                    controls
+                    autoPlay
+                    className="video-player-element"
+                  />
                 </div>
               ) : (
-                <div className="play-modal-empty">
-                  <p className="play-modal-desc">
-                    <strong>{activePlayArtist.stage_name}</strong> performs across events with signature live sets:
+                <div className="video-preview-fallback">
+                  <div className="fallback-badge-circle">
+                    {previewArtist.stage_name.charAt(0).toUpperCase()}
+                  </div>
+                  <h4>Performance Video Portfolio</h4>
+                  <p>
+                    Full live stage recordings and studio videos for{' '}
+                    <strong>{previewArtist.stage_name}</strong> are available in their verified portfolio.
                   </p>
-                  <blockquote className="play-modal-quote">
-                    "{activePlayArtist.additional_information || activePlayArtist.bio}"
-                  </blockquote>
                 </div>
               )}
+            </div>
 
-              <div className="play-modal-footer">
-                <button
-                  type="button"
-                  className="card-btn-book"
-                  style={{ width: '100%', padding: '12px 20px', fontSize: '0.95rem' }}
-                  onClick={() => {
-                    const id = activePlayArtist.id;
-                    setActivePlayArtist(null);
-                    handleBookArtist(id);
-                  }}
-                >
-                  Book {activePlayArtist.stage_name} Now
-                </button>
-              </div>
+            <div className="video-preview-footer">
+              <button
+                type="button"
+                className="preview-btn-details"
+                onClick={() => {
+                  handleCloseVideoPreview();
+                  handleCardClick(previewArtist.id);
+                }}
+              >
+                View Full Profile
+              </button>
+              <button
+                type="button"
+                className="preview-btn-book"
+                onClick={() => {
+                  const id = previewArtist.id;
+                  handleCloseVideoPreview();
+                  handleBookArtist(id);
+                }}
+              >
+                Book Now
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      <Footer />
     </div>
   );
 }
