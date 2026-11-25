@@ -1,0 +1,660 @@
+/* ==========================================================================
+   TalentHire About Us Page Styles - Full-Width Screen-Fit Layout
+   Clean dark aesthetic, Orange accents (#FF5722), Premium typography
+   Generous, clear, and prominent font scaling across all screen sizes
+   ========================================================================== */
+
+.about-page-root {
+  min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: #0E0E10;
+  color: #FFFFFF;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* Full Width Screen-Fit Container matching Navbar padding clamp(20px, 3.5vw, 60px) */
+.about-main-container {
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 44px clamp(20px, 3.5vw, 60px) 90px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(52px, 6vw, 84px);
+}
+
+/* Category & Section Overline Badges */
+.about-badge {
+  display: inline-block;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: #FF5722;
+  margin-bottom: 12px;
+}
+
+.about-section-title {
+  font-size: clamp(2.05rem, 2.7vw, 2.65rem);
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 0 0 16px 0;
+  letter-spacing: -0.025em;
+  line-height: 1.24;
+}
+
+/* Common Buttons */
+.about-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #FF5722;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 9px;
+  padding: 14px 32px;
+  font-size: 1.04rem;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.18s ease;
+  box-shadow: 0 4px 16px rgba(255, 87, 34, 0.32);
+}
+
+.about-btn-primary:hover {
+  background-color: #F4511E;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255, 87, 34, 0.48);
+}
+
+.about-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #1E1E24;
+  color: #EDEDF0;
+  border: 1px solid #363642;
+  border-radius: 9px;
+  padding: 14px 30px;
+  font-size: 1.04rem;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.18s ease;
+}
+
+.about-btn-secondary:hover {
+  background-color: #282832;
+  border-color: #4C4C5C;
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   Section 1: Hero Section (Full width two-column layout)
+   ========================================================================== */
+.about-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: clamp(36px, 4.5vw, 76px);
+  align-items: center;
+  width: 100%;
+}
+
+.about-hero-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.about-hero-title {
+  font-size: clamp(2.7rem, 4.8vw, 4.2rem);
+  font-weight: 850;
+  color: #FFFFFF;
+  line-height: 1.12;
+  letter-spacing: -0.032em;
+  margin: 0 0 22px 0;
+}
+
+.about-hero-desc {
+  font-size: clamp(1.08rem, 1.35vw, 1.22rem);
+  color: #A2A2AC;
+  line-height: 1.68;
+  margin: 0 0 34px 0;
+  max-width: 680px;
+}
+
+.about-hero-banner {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  min-height: 320px;
+  max-height: 460px;
+  background-color: #151518;
+  border: 1px solid #282830;
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.about-hero-banner-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0.38;
+  transition: opacity 0.3s ease;
+}
+
+.about-hero-banner:hover .about-hero-banner-img {
+  opacity: 0.46;
+}
+
+.about-hero-banner-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: radial-gradient(circle, rgba(255, 87, 34, 0.14) 0%, rgba(18, 18, 22, 0.78) 75%);
+  text-align: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.about-hero-banner-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(255, 87, 34, 0.2);
+  border: 1px solid rgba(255, 87, 34, 0.4);
+  color: #FF5722;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px rgba(255, 87, 34, 0.35);
+}
+
+.about-hero-banner-tag {
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #A0A0AA;
+}
+
+/* ==========================================================================
+   Section 2: Who We Are
+   ========================================================================== */
+.about-who-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: clamp(36px, 4.5vw, 72px);
+  align-items: flex-start;
+  width: 100%;
+}
+
+.about-who-text {
+  font-size: clamp(1.08rem, 1.3vw, 1.22rem);
+  color: #A6A6B2;
+  line-height: 1.72;
+  margin: 0 0 26px 0;
+}
+
+.about-pills-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.about-category-pill {
+  background-color: #16161A;
+  border: 1px solid #2E2E38;
+  color: #E6E6EC;
+  padding: 9px 20px;
+  border-radius: 24px;
+  font-size: 0.94rem;
+  font-weight: 550;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.about-category-pill:hover {
+  border-color: #FF5722;
+  color: #FF5722;
+  background-color: rgba(255, 87, 34, 0.1);
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   Section 3: Mission & Vision Cards
+   ========================================================================== */
+.about-mv-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(20px, 2.5vw, 32px);
+  width: 100%;
+}
+
+.about-mission-card {
+  background: #FF5722;
+  border-radius: 16px;
+  padding: 38px 36px;
+  box-sizing: border-box;
+  color: #121214;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 205px;
+  box-shadow: 0 10px 30px rgba(255, 87, 34, 0.3);
+}
+
+.about-mission-card .about-mv-icon-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: #121214;
+  color: #FF5722;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 26px;
+}
+
+.about-mission-card h3 {
+  font-size: 1.75rem;
+  font-weight: 850;
+  color: #121214;
+  margin: 0 0 10px 0;
+  letter-spacing: -0.015em;
+}
+
+.about-mission-card p {
+  font-size: 1.15rem;
+  font-weight: 550;
+  color: #24140F;
+  line-height: 1.52;
+  margin: 0;
+}
+
+.about-vision-card {
+  background-color: #151518;
+  border: 1px solid #282830;
+  border-radius: 16px;
+  padding: 38px 36px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 205px;
+}
+
+.about-vision-card .about-mv-icon-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: rgba(255, 87, 34, 0.16);
+  border: 1px solid rgba(255, 87, 34, 0.35);
+  color: #FF5722;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 26px;
+}
+
+.about-vision-card h3 {
+  font-size: 1.75rem;
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 0 0 10px 0;
+  letter-spacing: -0.015em;
+}
+
+.about-vision-card p {
+  font-size: 1.15rem;
+  color: #A2A2AC;
+  line-height: 1.52;
+  margin: 0;
+}
+
+/* ==========================================================================
+   Section 4: What We Offer (5 Feature Cards full width)
+   ========================================================================== */
+.about-offer-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: clamp(14px, 1.5vw, 22px);
+  margin-top: 20px;
+  width: 100%;
+}
+
+.about-offer-card {
+  background-color: #151518;
+  border: 1px solid #26262E;
+  border-radius: 14px;
+  padding: 26px 22px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
+}
+
+.about-offer-card:hover {
+  border-color: #3C3C4A;
+  transform: translateY(-2px);
+  background-color: #19191E;
+}
+
+.about-card-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background-color: #1E1E26;
+  border: 1px solid #30303C;
+  color: #FF5722;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.about-offer-card h4 {
+  font-size: 1.14rem;
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 0 0 10px 0;
+  line-height: 1.35;
+}
+
+.about-offer-card p {
+  font-size: 0.96rem;
+  color: #9696A0;
+  line-height: 1.52;
+  margin: 0;
+}
+
+/* ==========================================================================
+   Section 5: Built for both sides of the stage
+   ========================================================================== */
+.about-sides-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(18px, 2.5vw, 32px);
+  margin-top: 20px;
+  width: 100%;
+}
+
+.about-side-card {
+  background-color: #151518;
+  border: 1px solid #26262E;
+  border-radius: 16px;
+  padding: 36px 34px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.about-side-card:hover {
+  border-color: #3C3C4A;
+}
+
+.about-side-card h3 {
+  font-size: 1.6rem;
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 0 0 8px 0;
+}
+
+.about-side-subtitle {
+  font-size: 1.08rem;
+  color: #A2A2AC;
+  margin: 0 0 24px 0;
+  line-height: 1.48;
+}
+
+.about-side-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.about-side-list li {
+  font-size: 1.02rem;
+  color: #D2D2DA;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.about-side-bullet {
+  color: #FF5722;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+/* ==========================================================================
+   Section 6: Why Choose TalentHire (Simple, clear and secure)
+   ========================================================================== */
+.about-why-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(14px, 1.5vw, 22px);
+  margin-top: 20px;
+  width: 100%;
+}
+
+.about-why-card {
+  background-color: #151518;
+  border: 1px solid #26262E;
+  border-radius: 14px;
+  padding: 26px 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
+}
+
+.about-why-card:hover {
+  border-color: #3C3C4A;
+  transform: translateY(-2px);
+}
+
+.about-why-card h4 {
+  font-size: 1.14rem;
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 0 0 10px 0;
+  line-height: 1.35;
+}
+
+.about-why-card p {
+  font-size: 0.96rem;
+  color: #9696A0;
+  line-height: 1.52;
+  margin: 0;
+}
+
+/* ==========================================================================
+   Section 7: CTA Box (Ready to get started?)
+   ========================================================================== */
+.about-cta-box {
+  width: 100%;
+  background-color: #151518;
+  border: 1px solid #282832;
+  border-radius: 18px;
+  padding: 64px 36px;
+  text-align: center;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.about-cta-title {
+  font-size: clamp(2.1rem, 2.9vw, 2.6rem);
+  font-weight: 850;
+  color: #FFFFFF;
+  margin: 0 0 14px 0;
+  letter-spacing: -0.02em;
+}
+
+.about-cta-desc {
+  font-size: 1.14rem;
+  color: #A2A2AC;
+  max-width: 660px;
+  margin: 0 0 34px 0;
+  line-height: 1.6;
+}
+
+.about-cta-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   Section 8: Get in touch (Support Email only per prompt)
+   ========================================================================== */
+.about-contact-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.about-contact-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background-color: #151518;
+  border: 1px solid #26262E;
+  border-radius: 14px;
+  padding: 22px 30px;
+  margin-top: 16px;
+  width: 100%;
+  max-width: 520px;
+  box-sizing: border-box;
+  text-decoration: none;
+  transition: all 0.18s ease;
+}
+
+.about-contact-card:hover {
+  border-color: #FF5722;
+  background-color: #18181D;
+  transform: translateY(-1px);
+}
+
+.about-contact-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background-color: #1E1E26;
+  border: 1px solid #30303C;
+  color: #FF5722;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.about-contact-label {
+  font-size: 0.84rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #92929C;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.about-contact-value {
+  font-size: 1.2rem;
+  font-weight: 750;
+  color: #FFFFFF;
+  margin: 0;
+  transition: color 0.15s ease;
+}
+
+.about-contact-card:hover .about-contact-value {
+  color: #FF5722;
+}
+
+/* ==========================================================================
+   Responsive Breakpoints
+   ========================================================================== */
+@media (max-width: 1100px) {
+  .about-offer-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .about-why-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .about-main-container {
+    padding: 28px clamp(16px, 3vw, 24px) 60px;
+    gap: 48px;
+  }
+
+  .about-hero-grid,
+  .about-who-grid,
+  .about-mv-grid,
+  .about-sides-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .about-offer-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .about-why-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-hero-banner {
+    max-height: 360px;
+  }
+}
+
+@media (max-width: 520px) {
+  .about-offer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-cta-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .about-cta-actions .about-btn-primary,
+  .about-cta-actions .about-btn-secondary {
+    width: 100%;
+  }
+
+  .about-contact-card {
+    max-width: 100%;
+  }
+}

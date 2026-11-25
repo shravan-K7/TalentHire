@@ -16,12 +16,73 @@ import AdminSettingsView from "../components/admin/AdminSettingsView";
 import { fetchAdminOverview } from "../services/adminService";
 import "../css/AdminDashboard.css";
 
+const VALID_ADMIN_SECTIONS = new Set([
+  "overview",
+  "users",
+  "all-users",
+  "artists",
+  "artist-verifications",
+  "customers",
+  "bookings",
+  "upcoming-events",
+  "cancellations",
+  "transactions",
+  "commission",
+  "refunds",
+  "categories",
+  "complaints",
+  "reviews",
+  "notifications",
+  "chatbot",
+  "reports",
+  "settings",
+  "roles",
+  "activity-logs",
+]);
+
+function getSectionFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = params.get("section") || params.get("tab");
+  if (fromQuery && VALID_ADMIN_SECTIONS.has(fromQuery)) {
+    return fromQuery;
+  }
+  const pathParts = window.location.pathname.replace(/\/+$/, "").split("/");
+  const lastPart = pathParts[pathParts.length - 1];
+  if (lastPart && lastPart !== "admin-dashboard" && lastPart !== "admin" && VALID_ADMIN_SECTIONS.has(lastPart)) {
+    return lastPart;
+  }
+  return "overview";
+}
+
 export default function AdminDashboard({ user, onLogout, navigate }) {
-  const [currentSection, setCurrentSection] = useState("overview");
+  const [currentSection, setCurrentSection] = useState(() => getSectionFromUrl());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [overviewData, setOverviewData] = useState(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
+
+  function selectSection(sec) {
+    const nextSection = VALID_ADMIN_SECTIONS.has(sec) ? sec : "overview";
+    setCurrentSection(nextSection);
+    const currentUrl = new URL(window.location.href);
+    currentUrl.pathname = "/admin-dashboard";
+    if (nextSection === "overview") {
+      currentUrl.searchParams.delete("section");
+      currentUrl.searchParams.delete("tab");
+    } else {
+      currentUrl.searchParams.set("section", nextSection);
+      currentUrl.searchParams.delete("tab");
+    }
+    window.history.replaceState(null, "", currentUrl.pathname + currentUrl.search);
+  }
+
+  useEffect(() => {
+    function handlePopState() {
+      setCurrentSection(getSectionFromUrl());
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   async function refreshDashboardData() {
     try {
@@ -104,7 +165,7 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
       {/* Fixed / Collapsible Left Sidebar */}
       <AdminSidebar
         currentSection={currentSection}
-        onSelectSection={(sec) => setCurrentSection(sec)}
+        onSelectSection={selectSection}
         pendingVerificationsCount={pendingVerificationsCount}
         openComplaintsCount={openComplaintsCount}
         onLogout={onLogout}
@@ -120,7 +181,7 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
           onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
           onLogout={onLogout}
           navigate={navigate}
-          onSelectSection={(sec) => setCurrentSection(sec)}
+          onSelectSection={selectSection}
           searchQuery={searchQuery}
           onSearchChange={(q) => setSearchQuery(q)}
         />
@@ -130,7 +191,7 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
             <AdminOverviewView
               data={overviewData}
               loading={overviewLoading}
-              onNavigateSection={(sec) => setCurrentSection(sec)}
+              onNavigateSection={selectSection}
             />
           )}
 

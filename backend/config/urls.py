@@ -53,6 +53,10 @@ urlpatterns = [
     path("api/bookings/<int:booking_id>/refund/retry/", views.retry_booking_refund_view, name="api_retry_booking_refund"),
     path("api/payments/verify/", views.verify_razorpay_payment_view, name="verify_razorpay_payment"),
     path("api/payments/webhook/", views.razorpay_webhook_view, name="razorpay_webhook"),
+    # AI Chatbot API Endpoints (Phase 1)
+    path("api/chat/message/", views.chat_message_view, name="api_chat_message"),
+    path("api/chat/history/", views.chat_history_view, name="api_chat_history"),
+    path("api/chat/reset/", views.chat_reset_view, name="api_chat_reset"),
 ]
 
 if settings.DEBUG:

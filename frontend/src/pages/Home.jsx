@@ -336,7 +336,7 @@ function Home({ user, onLogout, navigate }) {
                   Explore Artists
                 </button>
 
-                <button
+                {/* <button
                   type="button"
                   className="btn-join-artist-link"
                   onClick={() => {
@@ -351,7 +351,7 @@ function Home({ user, onLogout, navigate }) {
                   }}
                 >
                   Join as an Artist
-                </button>
+                </button> */}
               </div>
             </div>
 
@@ -567,7 +567,7 @@ function Home({ user, onLogout, navigate }) {
             ARE YOU A PERFORMING ARTIST? (CTA BANNER)
             Shown only for logged-in customers (not registered performing artists)
             ================================================================= */}
-        {isCustomerOnly && (
+        {/* {isCustomerOnly && (
           <section className="layout-section artist-cta-banner-section">
             <div className="artist-purple-banner">
               <div className="artist-purple-banner-content">
@@ -594,7 +594,7 @@ function Home({ user, onLogout, navigate }) {
               </div>
             </div>
           </section>
-        )}
+        )} */}
       </main>
 
       {/* 11. Footer (Page 3) */}

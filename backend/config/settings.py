@@ -167,3 +167,7 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
 # Photon Geocoding API (Free OpenStreetMap geocoder by Komoot, no API key required)
 PHOTON_API_URL = os.getenv("PHOTON_API_URL", "https://photon.komoot.io").rstrip("/")
+
+# Gemini AI Chatbot Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")

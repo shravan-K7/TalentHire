@@ -9,6 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 
 from django.conf import settings
+from django.core.cache import cache
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
@@ -42,6 +43,17 @@ from .models import (
     ProcessedWebhookEvent,
     BookingCancellation,
     ReschedulingRequest,
+    ChatSession,
+    ChatMessage,
+    ChatbotErrorLog,
+)
+from .services.chatbot_service import (
+    ChatbotConfigurationError,
+    ChatbotServiceError,
+    MAX_HISTORY_MESSAGES,
+    MAX_MESSAGE_LENGTH,
+    detect_user_role,
+    generate_chatbot_turn,
 )
 
 logger = logging.getLogger(__name__)
@@ -6264,3 +6276,258 @@ def razorpay_webhook_view(request):
 
     # For other unhandled events, return 200 so Razorpay does not retry
     return JsonResponse({"status": "ignored", "event": event_type})
+
+
+# ============================================================================
+# AI CHATBOT ENDPOINTS (PHASE 1)
+# ============================================================================
+
+CHAT_RATE_LIMIT_MAX_REQUESTS = 20
+CHAT_RATE_LIMIT_WINDOW_SECONDS = 60
+
+
+def _serialize_chat_message(msg: ChatMessage) -> dict:
+    return {
+        "id": msg.id,
+        "sender": msg.sender,
+        "content": msg.content,
+        "metadata": msg.metadata or {},
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+    }
+
+
+def _check_chat_rate_limit(user_id: int) -> bool:
+    """
+    Simple fixed-window rate limiter per authenticated user.
+    Returns True if request is allowed, False if rate limit exceeded.
+    """
+    cache_key = f"talenthire_chat_rl_{user_id}"
+    cache.add(cache_key, 0, timeout=CHAT_RATE_LIMIT_WINDOW_SECONDS)
+    try:
+        count = cache.incr(cache_key)
+    except ValueError:
+        cache.set(cache_key, 1, timeout=CHAT_RATE_LIMIT_WINDOW_SECONDS)
+        count = 1
+    return count <= CHAT_RATE_LIMIT_MAX_REQUESTS
+
+
+@csrf_protect
+@require_POST
+def chat_message_view(request):
+    """
+    POST /api/chat/message/
+    Accepts a user message, invokes Gemini with TalentHire domain restrictions
+    and server-derived user role, persists the turn, and returns the AI response.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "Authentication required. Please sign in to use the AI assistant."},
+            status=401,
+        )
+
+    if not _check_chat_rate_limit(request.user.id):
+        return JsonResponse(
+            {"error": "Too many messages sent. Please wait a minute and try again."},
+            status=429,
+        )
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    raw_message = data.get("message", "")
+    if not isinstance(raw_message, str):
+        return JsonResponse({"error": "Message must be a text string."}, status=400)
+
+    message = raw_message.strip()
+    if not message:
+        return JsonResponse({"error": "Message cannot be empty."}, status=400)
+
+    if len(message) > MAX_MESSAGE_LENGTH:
+        return JsonResponse(
+            {"error": f"Message is too long. Maximum {MAX_MESSAGE_LENGTH} characters allowed."},
+            status=400,
+        )
+
+    # Always derive role from the authenticated Django session user
+    role = detect_user_role(request.user)
+    session_id = data.get("session_id")
+
+    if session_id is not None:
+        try:
+            session_id_int = int(session_id)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Invalid session_id."}, status=400)
+
+        session = ChatSession.objects.filter(
+            id=session_id_int,
+            user=request.user,
+            is_active=True,
+        ).first()
+        if not session:
+            return JsonResponse({"error": "Chat session not found."}, status=404)
+    else:
+        with transaction.atomic():
+            session = (
+                ChatSession.objects.select_for_update()
+                .filter(
+                    user=request.user,
+                    is_active=True,
+                    role_context=role,
+                )
+                .order_by("-updated_at")
+                .first()
+            )
+            if not session:
+                session = ChatSession.objects.create(
+                    user=request.user,
+                    role_context=role,
+                )
+
+    history_messages = list(
+        session.messages.order_by("-created_at", "-id")[:MAX_HISTORY_MESSAGES]
+    )[::-1]
+
+    try:
+        turn_result = generate_chatbot_turn(
+            user_message=message,
+            history_messages=history_messages,
+            role=role,
+            user=request.user,
+        )
+    except ChatbotConfigurationError as exc:
+        ChatbotErrorLog.objects.create(role_context=role, error_type="configuration_error")
+        return JsonResponse({"error": str(exc)}, status=503)
+    except ChatbotServiceError as exc:
+        ChatbotErrorLog.objects.create(role_context=role, error_type="service_error")
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    reply_text = turn_result["reply"]
+    latency_ms = turn_result["latency_ms"]
+    topic = turn_result["topic"]
+    metadata = turn_result["metadata"]
+
+    with transaction.atomic():
+        user_msg = ChatMessage.objects.create(
+            session=session,
+            sender=ChatMessage.Sender.USER,
+            content=message,
+            topic=topic,
+        )
+        assistant_msg = ChatMessage.objects.create(
+            session=session,
+            sender=ChatMessage.Sender.ASSISTANT,
+            content=reply_text,
+            topic=topic,
+            latency_ms=latency_ms,
+            metadata=metadata,
+        )
+        if session.title == "New Conversation":
+            session.title = message[:80]
+        session.role_context = role
+        session.save(update_fields=["title", "role_context", "updated_at"])
+
+    return JsonResponse(
+        {
+            "session_id": session.id,
+            "role": role,
+            "title": session.title,
+            "reply": reply_text,
+            "user_message": _serialize_chat_message(user_msg),
+            "assistant_message": _serialize_chat_message(assistant_msg),
+        }
+    )
+
+
+@require_GET
+def chat_history_view(request):
+    """
+    GET /api/chat/history/
+    Returns the authenticated user's active chat session and message history.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "Authentication required. Please sign in."},
+            status=401,
+        )
+
+    role = detect_user_role(request.user)
+    session_id = request.GET.get("session_id")
+
+    if session_id is not None:
+        try:
+            session_id_int = int(session_id)
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "Invalid session_id."}, status=400)
+
+        session = ChatSession.objects.filter(
+            id=session_id_int,
+            user=request.user,
+        ).first()
+        if not session:
+            return JsonResponse({"error": "Chat session not found."}, status=404)
+    else:
+        session = ChatSession.objects.filter(
+            user=request.user,
+            is_active=True,
+            role_context=role,
+        ).first()
+
+    if not session:
+        return JsonResponse(
+            {
+                "session_id": None,
+                "role": role,
+                "title": "New Conversation",
+                "messages": [],
+            }
+        )
+
+    messages = [
+        _serialize_chat_message(m)
+        for m in session.messages.order_by("created_at", "id")
+    ]
+
+    return JsonResponse(
+        {
+            "session_id": session.id,
+            "role": role,
+            "title": session.title,
+            "messages": messages,
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def chat_reset_view(request):
+    """
+    POST /api/chat/reset/
+    Deactivates the authenticated user's active session(s) and starts a fresh one.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "Authentication required. Please sign in."},
+            status=401,
+        )
+
+    role = detect_user_role(request.user)
+
+    with transaction.atomic():
+        ChatSession.objects.filter(user=request.user, is_active=True).update(is_active=False)
+        new_session = ChatSession.objects.create(
+            user=request.user,
+            role_context=role,
+            is_active=True,
+        )
+
+    return JsonResponse(
+        {
+            "message": "Conversation reset successfully.",
+            "session_id": new_session.id,
+            "role": role,
+            "title": new_session.title,
+            "messages": [],
+        }
+    )

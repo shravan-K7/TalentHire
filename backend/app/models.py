@@ -639,3 +639,70 @@ class ReschedulingRequest(models.Model):
         return f"Reschedule #{self.id} for Booking #{self.booking_id} ({self.status})"
 
 
+class ChatSession(models.Model):
+    class RoleContext(models.TextChoices):
+        CUSTOMER = "customer", "Customer"
+        ARTIST = "artist", "Artist"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="chat_sessions",
+    )
+    role_context = models.CharField(
+        max_length=20,
+        choices=RoleContext.choices,
+        default=RoleContext.CUSTOMER,
+    )
+    title = models.CharField(max_length=150, blank=True, default="New Conversation")
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"ChatSession #{self.id} ({self.user.username} - {self.role_context})"
+
+
+class ChatMessage(models.Model):
+    class Sender(models.TextChoices):
+        USER = "user", "User"
+        ASSISTANT = "assistant", "Assistant"
+
+    session = models.ForeignKey(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    sender = models.CharField(
+        max_length=20,
+        choices=Sender.choices,
+    )
+    content = models.TextField()
+    topic = models.CharField(max_length=60, blank=True, default="", db_index=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"ChatMessage #{self.id} ({self.sender} in Session #{self.session_id})"
+
+
+class ChatbotErrorLog(models.Model):
+    role_context = models.CharField(max_length=20, default="customer")
+    error_type = models.CharField(max_length=60)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"ChatbotErrorLog #{self.id} ({self.error_type} - {self.role_context})"
+
+

@@ -8627,6 +8627,1232 @@ class DuplicateBookingPreventionTests(TestCase):
         self.assertEqual(req.status, ReschedulingRequest.Status.REJECTED)
 
 
+class ChatbotPhase1Tests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        self.customer_user = User.objects.create_user(
+            username="chat_customer",
+            email="chat_customer@example.com",
+            password="securepassword123",
+        )
+        self.other_customer = User.objects.create_user(
+            username="chat_other_customer",
+            email="chat_other@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="chat_artist",
+            email="chat_artist@example.com",
+            password="securepassword123",
+        )
+        self.category, _ = Category.objects.get_or_create(name="Singers & Vocalists")
+        self.artist_profile = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.category,
+            stage_name="Chat Singer",
+            location="Kochi",
+            starting_price=Decimal("10000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+    def test_authentication_required_for_all_chat_endpoints(self):
+        res_msg = self.client.post(
+            "/api/chat/message/",
+            data=json.dumps({"message": "How do I book an artist?"}),
+            content_type="application/json",
+        )
+        res_hist = self.client.get("/api/chat/history/")
+        res_reset = self.client.post("/api/chat/reset/")
+
+        self.assertEqual(res_msg.status_code, 401)
+        self.assertEqual(res_hist.status_code, 401)
+        self.assertEqual(res_reset.status_code, 401)
+
+    def test_csrf_enforced_on_chat_mutations(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.customer_user)
+
+        res_msg = csrf_client.post(
+            "/api/chat/message/",
+            data=json.dumps({"message": "Hello"}),
+            content_type="application/json",
+        )
+        res_reset = csrf_client.post("/api/chat/reset/")
+
+        self.assertEqual(res_msg.status_code, 403)
+        self.assertEqual(res_reset.status_code, 403)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_customer_message_ignores_spoofed_role_and_persists_history(self, mock_genai_client):
+        from app.models import ChatSession, ChatMessage
+
+        mock_response = MagicMock()
+        mock_response.text = "You can browse artists and submit a booking request from their profile."
+        mock_genai_client.return_value.models.generate_content.return_value = mock_response
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "How do I book?", "role": "artist"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["role"], "customer")
+        self.assertIn("browse artists", payload["reply"])
+
+        session = ChatSession.objects.get(id=payload["session_id"])
+        self.assertEqual(session.user, self.customer_user)
+        self.assertEqual(session.role_context, ChatSession.RoleContext.CUSTOMER)
+        self.assertEqual(ChatMessage.objects.filter(session=session).count(), 2)
+
+        hist_res = self.client.get("/api/chat/history/")
+        self.assertEqual(hist_res.status_code, 200)
+        hist_data = hist_res.json()
+        self.assertEqual(hist_data["session_id"], session.id)
+        self.assertEqual(len(hist_data["messages"]), 2)
+        self.assertEqual(hist_data["messages"][0]["sender"], "user")
+        self.assertEqual(hist_data["messages"][1]["sender"], "assistant")
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_artist_role_detected_from_session(self, mock_genai_client):
+        mock_response = MagicMock()
+        mock_response.text = "TalentHire charges an 8% commission and artists receive 92%."
+        mock_genai_client.return_value.models.generate_content.return_value = mock_response
+
+        self.client.force_login(self.artist_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "How do payouts work?", "role": "customer"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["role"], "artist")
+
+    def test_conversation_isolation_between_users(self):
+        from app.models import ChatSession, ChatMessage
+
+        session_a = ChatSession.objects.create(
+            user=self.customer_user,
+            role_context=ChatSession.RoleContext.CUSTOMER,
+            title="Private Session",
+        )
+        ChatMessage.objects.create(
+            session=session_a,
+            sender=ChatMessage.Sender.USER,
+            content="Secret booking question",
+        )
+
+        self.client.force_login(self.other_customer)
+        res_hist = self.client.get(f"/api/chat/history/?session_id={session_a.id}")
+        self.assertEqual(res_hist.status_code, 404)
+
+        res_msg = self.client.post(
+            "/api/chat/message/",
+            data=json.dumps({"message": "Read other session", "session_id": session_a.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(res_msg.status_code, 404)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_reset_conversation_creates_new_active_session(self, mock_genai_client):
+        from app.models import ChatSession
+
+        mock_response = MagicMock()
+        mock_response.text = "Hello from TalentHire!"
+        mock_genai_client.return_value.models.generate_content.return_value = mock_response
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res1 = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "Hi"}),
+                content_type="application/json",
+            )
+        old_session_id = res1.json()["session_id"]
+
+        res_reset = self.client.post("/api/chat/reset/")
+        self.assertEqual(res_reset.status_code, 200)
+        new_session_id = res_reset.json()["session_id"]
+
+        self.assertNotEqual(old_session_id, new_session_id)
+        self.assertFalse(ChatSession.objects.get(id=old_session_id).is_active)
+        self.assertTrue(ChatSession.objects.get(id=new_session_id).is_active)
+
+    def test_domain_restriction_and_phase1_guardrails_in_system_instruction(self):
+        from app.services.chatbot_service import build_system_instruction
+
+        customer_prompt = build_system_instruction("customer")
+        artist_prompt = build_system_instruction("artist")
+
+        self.assertIn("STRICT DOMAIN RESTRICTION", customer_prompt)
+        self.assertIn("ONLY answer questions related to TalentHire", customer_prompt)
+        self.assertIn("politely decline", customer_prompt)
+        self.assertIn("NEVER invent or guess", customer_prompt)
+        self.assertIn("Customer", customer_prompt)
+        self.assertIn("Performing Artist", artist_prompt)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_rate_limiting_enforced(self, mock_genai_client):
+        from app.views import CHAT_RATE_LIMIT_MAX_REQUESTS
+
+        mock_response = MagicMock()
+        mock_response.text = "TalentHire reply."
+        mock_genai_client.return_value.models.generate_content.return_value = mock_response
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            for _ in range(CHAT_RATE_LIMIT_MAX_REQUESTS):
+                res = self.client.post(
+                    "/api/chat/message/",
+                    data=json.dumps({"message": "Hello"}),
+                    content_type="application/json",
+                )
+                self.assertEqual(res.status_code, 200)
+
+            res_limited = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "One too many"}),
+                content_type="application/json",
+            )
+            self.assertEqual(res_limited.status_code, 429)
+
+
+class ChatbotPhase2Tests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.core.cache import cache
+        from app.models import ArtistAvailability
+
+        cache.clear()
+        self.client = Client()
+
+        self.customer_user = User.objects.create_user(
+            username="p2_customer",
+            email="p2_customer@example.com",
+            password="securepassword123",
+        )
+        self.artist_user_1 = User.objects.create_user(
+            username="p2_artist_1",
+            email="p2_artist_1@example.com",
+            password="securepassword123",
+        )
+        self.artist_user_2 = User.objects.create_user(
+            username="p2_artist_2",
+            email="p2_artist_2@example.com",
+            password="securepassword123",
+        )
+        self.inactive_user = User.objects.create_user(
+            username="p2_inactive",
+            email="p2_inactive@example.com",
+            password="securepassword123",
+            is_active=False,
+        )
+
+        self.cat_singers, _ = Category.objects.get_or_create(
+            name="Singers & Vocalists",
+            defaults={"description": "Solo and duet vocal performers"},
+        )
+        self.cat_djs, _ = Category.objects.get_or_create(
+            name="DJs & Electronic",
+            defaults={"description": "Club and wedding DJs"},
+        )
+
+        self.artist_1 = ArtistProfile.objects.create(
+            user=self.artist_user_1,
+            category=self.cat_singers,
+            stage_name="Aarav Live",
+            bio="Acoustic and Bollywood vocalist.",
+            location="Kochi, Kerala",
+            phone="+919999900001",
+            starting_price=Decimal("15000.00"),
+            years_of_experience=6,
+            is_verified=True,
+            is_active=True,
+        )
+        self.artist_2 = ArtistProfile.objects.create(
+            user=self.artist_user_2,
+            category=self.cat_djs,
+            stage_name="DJ Pulse",
+            bio="High energy wedding DJ.",
+            location="Bangalore, Karnataka",
+            phone="+919999900002",
+            starting_price=Decimal("25000.00"),
+            years_of_experience=4,
+            is_verified=False,
+            is_active=True,
+        )
+        self.inactive_artist = ArtistProfile.objects.create(
+            user=self.inactive_user,
+            category=self.cat_singers,
+            stage_name="Hidden Artist",
+            location="Kochi",
+            starting_price=Decimal("10000.00"),
+            is_verified=True,
+            is_active=False,
+        )
+
+        self.future_blocked_date = (timezone.now() + timedelta(days=10)).date()
+        self.future_booked_date = (timezone.now() + timedelta(days=15)).date()
+        self.future_open_date = (timezone.now() + timedelta(days=20)).date()
+
+        ArtistAvailability.objects.create(
+            artist=self.artist_1,
+            date=self.future_blocked_date,
+            is_available=False,
+            reason="Private family event",
+        )
+        Booking.objects.create(
+            customer=self.customer_user,
+            artist=self.artist_1,
+            event_type="Wedding",
+            event_date=timezone.now() + timedelta(days=15),
+            event_location="Kochi",
+            customer_phone="+919888877777",
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+    def test_search_artists_filters_and_hides_private_fields(self):
+        from app.services.chatbot_tools import search_artists
+
+        res = search_artists(category="Singers", location="Kochi", max_price=20000, verified_only=True)
+        self.assertEqual(res["total_matches"], 1)
+        artist = res["artists"][0]
+        self.assertEqual(artist["stage_name"], "Aarav Live")
+        self.assertEqual(artist["starting_price_inr"], "15000.00")
+        self.assertNotIn("phone", artist)
+        self.assertNotIn("email", artist)
+        self.assertNotIn("user_id", artist)
+
+    def test_get_artist_details_returns_public_profile_without_pii(self):
+        from app.services.chatbot_tools import get_artist_details
+
+        res = get_artist_details(stage_name="Aarav Live")
+        self.assertTrue(res["found"])
+        profile = res["artist"]
+        self.assertEqual(profile["stage_name"], "Aarav Live")
+        self.assertEqual(profile["category"], "Singers & Vocalists")
+        self.assertEqual(profile["years_of_experience"], 6)
+        self.assertTrue(profile["is_verified"])
+        self.assertNotIn("phone", profile)
+        self.assertNotIn("email", profile)
+
+        hidden_res = get_artist_details(stage_name="Hidden Artist")
+        self.assertFalse(hidden_res["found"])
+
+    def test_check_artist_availability_respects_blocks_and_accepted_reservations(self):
+        from app.services.chatbot_tools import check_artist_availability
+
+        initial_booking_count = Booking.objects.count()
+
+        blocked = check_artist_availability(
+            artist_id=self.artist_1.id,
+            date_str=self.future_blocked_date.isoformat(),
+        )
+        self.assertTrue(blocked["found"])
+        self.assertFalse(blocked["is_available"])
+        self.assertEqual(blocked["status"], "unavailable")
+
+        booked = check_artist_availability(
+            artist_id=self.artist_1.id,
+            date_str=self.future_booked_date.isoformat(),
+        )
+        self.assertTrue(booked["found"])
+        self.assertFalse(booked["is_available"])
+        self.assertNotIn("p2_customer", json.dumps(booked))
+        self.assertNotIn("9888877777", json.dumps(booked))
+
+        available = check_artist_availability(
+            artist_id=self.artist_1.id,
+            date_str=self.future_open_date.isoformat(),
+        )
+        self.assertTrue(available["found"])
+        self.assertTrue(available["is_available"])
+        self.assertEqual(available["status"], "available")
+
+        # Must not modify booking records
+        self.assertEqual(Booking.objects.count(), initial_booking_count)
+
+    def test_get_categories_and_platform_policies(self):
+        from app.services.chatbot_tools import get_categories, get_platform_policies
+
+        cats = get_categories()
+        self.assertGreaterEqual(cats["total_categories"], 2)
+        names = [c["name"] for c in cats["categories"]]
+        self.assertIn("Singers & Vocalists", names)
+        self.assertIn("DJs & Electronic", names)
+
+        policies = get_platform_policies(topic="commission")
+        self.assertEqual(
+            policies["policies"]["payment_and_commission"]["platform_commission_percentage"],
+            "8.00",
+        )
+        self.assertEqual(
+            policies["policies"]["payment_and_commission"]["artist_payout_percentage"],
+            "92.00",
+        )
+
+    def test_invalid_arguments_and_unknown_tool_handled_gracefully(self):
+        from app.services.chatbot_tools import execute_tool
+
+        bad_date = execute_tool("check_artist_availability", {"artist_id": self.artist_1.id, "date_str": "25-12-2026"})
+        self.assertIn("error", bad_date)
+
+        bad_price = execute_tool("search_artists", {"max_price": -500})
+        self.assertIn("error", bad_price)
+
+        unknown = execute_tool("cancel_booking", {"booking_id": 1})
+        self.assertIn("Unknown or unsupported tool", unknown["error"])
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_gemini_function_calling_end_to_end_via_chat_endpoint(self, mock_genai_client):
+        mock_fc = MagicMock()
+        mock_fc.name = "search_artists"
+        mock_fc.args = {"category": "Singers", "location": "Kochi"}
+
+        first_resp = MagicMock()
+        first_resp.function_calls = [mock_fc]
+        first_candidate = MagicMock()
+        first_candidate.content = MagicMock()
+        first_resp.candidates = [first_candidate]
+
+        second_resp = MagicMock()
+        second_resp.function_calls = []
+        second_resp.text = "I found Aarav Live (Singers & Vocalists) in Kochi starting at ₹15,000."
+
+        mock_generate = mock_genai_client.return_value.models.generate_content
+        mock_generate.side_effect = [first_resp, second_resp]
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "Find singers in Kochi", "role": "artist"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["role"], "customer")
+        self.assertIn("Aarav Live", data["reply"])
+        self.assertEqual(mock_generate.call_count, 2)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_bounded_tool_loop_prevents_infinite_calls(self, mock_genai_client):
+        from app.services.chatbot_service import MAX_TOOL_ROUNDS
+
+        mock_fc = MagicMock()
+        mock_fc.name = "get_categories"
+        mock_fc.args = {}
+
+        loop_resp = MagicMock()
+        loop_resp.function_calls = [mock_fc]
+        loop_candidate = MagicMock()
+        loop_candidate.content = MagicMock()
+        loop_resp.candidates = [loop_candidate]
+
+        summary_resp = MagicMock()
+        summary_resp.function_calls = []
+        summary_resp.text = "Here are the available categories on TalentHire."
+
+        mock_generate = mock_genai_client.return_value.models.generate_content
+        mock_generate.side_effect = [loop_resp] * MAX_TOOL_ROUNDS + [summary_resp]
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "List categories"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(mock_generate.call_count, MAX_TOOL_ROUNDS + 1)
+        self.assertIn("categories", res.json()["reply"])
+
+
+class ChatbotPhase3Tests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.core.cache import cache
+        from app.models import FavoriteArtist, Notification, Payment, Refund
+
+        cache.clear()
+        self.client = Client()
+
+        self.customer_a = User.objects.create_user(
+            username="p3_cust_a",
+            email="p3_a@example.com",
+            password="securepassword123",
+        )
+        self.customer_b = User.objects.create_user(
+            username="p3_cust_b",
+            email="p3_b@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="p3_artist",
+            email="p3_artist@example.com",
+            password="securepassword123",
+        )
+        self.cat, _ = Category.objects.get_or_create(name="Live Bands")
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.cat,
+            stage_name="Phase3 Band",
+            location="Kochi",
+            starting_price=Decimal("20000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+        # Customer A bookings: 1 upcoming accepted (paid), 1 completed
+        self.booking_a_upcoming = Booking.objects.create(
+            customer=self.customer_a,
+            artist=self.artist,
+            event_type="Wedding",
+            event_date=timezone.now() + timedelta(days=12),
+            event_location="Kochi",
+            agreed_price=Decimal("20000.00"),
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        self.payment_a = Payment.objects.create(
+            booking=self.booking_a_upcoming,
+            amount=Decimal("20000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1600.00"),
+            artist_amount=Decimal("18400.00"),
+            razorpay_order_id="order_secret_a_123",
+            transaction_id="pay_secret_a_456",
+            status=Payment.Status.SUCCESS,
+        )
+        self.refund_a = Refund.objects.create(
+            payment=self.payment_a,
+            booking=self.booking_a_upcoming,
+            razorpay_refund_id="rfnd_secret_a_789",
+            amount=Decimal("2000.00"),
+            status=Refund.Status.PROCESSED,
+            reason="Partial adjustment",
+            idempotency_key="idem_p3_a_1",
+        )
+
+        self.booking_a_completed = Booking.objects.create(
+            customer=self.customer_a,
+            artist=self.artist,
+            event_type="Gala",
+            event_date=timezone.now() - timedelta(days=10),
+            event_location="Trivandrum",
+            agreed_price=Decimal("15000.00"),
+            status=Booking.Status.COMPLETED,
+        )
+
+        # Customer B booking (must never be visible to Customer A)
+        self.booking_b = Booking.objects.create(
+            customer=self.customer_b,
+            artist=self.artist,
+            event_type="Private Party",
+            event_date=timezone.now() + timedelta(days=5),
+            event_location="Calicut",
+            agreed_price=Decimal("30000.00"),
+            status=Booking.Status.PENDING,
+        )
+        Payment.objects.create(
+            booking=self.booking_b,
+            amount=Decimal("30000.00"),
+            razorpay_order_id="order_secret_b_999",
+            transaction_id="pay_secret_b_999",
+            status=Payment.Status.PENDING,
+        )
+
+        FavoriteArtist.objects.create(customer=self.customer_a, artist=self.artist)
+        Notification.objects.create(
+            user=self.customer_a,
+            title="Booking Accepted",
+            message="Phase3 Band accepted your booking.",
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            is_read=False,
+        )
+        Notification.objects.create(
+            user=self.customer_b,
+            title="Secret B Notification",
+            message="Customer B private alert.",
+            is_read=False,
+        )
+
+    def test_get_my_bookings_filters_and_isolates_customer_data(self):
+        from app.services.chatbot_tools import get_my_bookings
+
+        upcoming = get_my_bookings(user=self.customer_a, status_filter="upcoming")
+        self.assertEqual(upcoming["total_count"], 1)
+        self.assertEqual(upcoming["bookings"][0]["booking_id"], self.booking_a_upcoming.id)
+
+        completed = get_my_bookings(user=self.customer_a, status_filter="completed")
+        self.assertEqual(completed["total_count"], 1)
+        self.assertEqual(completed["bookings"][0]["booking_id"], self.booking_a_completed.id)
+
+        all_b = get_my_bookings(user=self.customer_b, status_filter="all")
+        self.assertEqual(all_b["total_count"], 1)
+        self.assertEqual(all_b["bookings"][0]["booking_id"], self.booking_b.id)
+
+    def test_get_booking_details_enforces_ownership(self):
+        from app.services.chatbot_tools import get_booking_details
+
+        own = get_booking_details(user=self.customer_a, booking_id=self.booking_a_upcoming.id)
+        self.assertTrue(own["found"])
+        self.assertEqual(own["booking"]["booking_id"], self.booking_a_upcoming.id)
+
+        other = get_booking_details(user=self.customer_a, booking_id=self.booking_b.id)
+        self.assertFalse(other["found"])
+
+    def test_get_my_payment_status_hides_gateway_identifiers_and_isolates(self):
+        from app.services.chatbot_tools import get_my_payment_status
+
+        res = get_my_payment_status(user=self.customer_a)
+        self.assertEqual(res["total_count"], 1)
+        serialized = json.dumps(res)
+        self.assertNotIn("order_secret_a_123", serialized)
+        self.assertNotIn("pay_secret_a_456", serialized)
+        self.assertNotIn("rfnd_secret_a_789", serialized)
+        self.assertNotIn("30000.00", serialized)
+        self.assertEqual(res["payments"][0]["amount_inr"], "20000.00")
+        self.assertEqual(len(res["payments"][0]["refunds"]), 1)
+
+    def test_get_cancellation_refund_details_reuses_policy_without_mutating(self):
+        from app.services.chatbot_tools import get_cancellation_refund_details
+
+        # 12 days out -> 100% refund
+        preview = get_cancellation_refund_details(
+            user=self.customer_a,
+            booking_id=self.booking_a_upcoming.id,
+        )
+        self.assertTrue(preview["found"])
+        self.assertTrue(preview["eligible_to_cancel"])
+        self.assertEqual(preview["refund_percentage"], "100.00")
+        self.assertEqual(preview["estimated_refund_amount_inr"], "20000.00")
+
+        # Booking must remain ACCEPTED (not cancelled)
+        self.booking_a_upcoming.refresh_from_db()
+        self.assertEqual(self.booking_a_upcoming.status, Booking.Status.ACCEPTED)
+
+        # Completed booking cannot be cancelled
+        comp = get_cancellation_refund_details(
+            user=self.customer_a,
+            booking_id=self.booking_a_completed.id,
+        )
+        self.assertTrue(comp["found"])
+        self.assertFalse(comp["eligible_to_cancel"])
+
+        # Cannot preview another customer's booking
+        other = get_cancellation_refund_details(
+            user=self.customer_a,
+            booking_id=self.booking_b.id,
+        )
+        self.assertFalse(other["found"])
+
+    def test_get_my_favorites_and_notifications_isolated(self):
+        from app.services.chatbot_tools import get_my_favorites, get_my_notifications
+
+        fav_a = get_my_favorites(user=self.customer_a)
+        self.assertEqual(fav_a["total_count"], 1)
+        self.assertEqual(fav_a["favorites"][0]["stage_name"], "Phase3 Band")
+
+        fav_b = get_my_favorites(user=self.customer_b)
+        self.assertEqual(fav_b["total_count"], 0)
+
+        notif_a = get_my_notifications(user=self.customer_a, unread_only=True)
+        self.assertEqual(notif_a["unread_count"], 1)
+        self.assertEqual(notif_a["notifications"][0]["title"], "Booking Accepted")
+        self.assertNotIn("Secret B Notification", json.dumps(notif_a))
+
+    def test_role_restrictions_and_spoofed_user_id_blocked(self):
+        from app.services.chatbot_service import build_gemini_tools
+        from app.services.chatbot_tools import execute_tool
+
+        artist_tools = build_gemini_tools(role="artist")
+        artist_tool_names = [fd.name for fd in artist_tools[0].function_declarations]
+        self.assertNotIn("get_my_bookings", artist_tool_names)
+        self.assertIn("search_artists", artist_tool_names)
+
+        customer_tools = build_gemini_tools(role="customer")
+        customer_tool_names = [fd.name for fd in customer_tools[0].function_declarations]
+        self.assertIn("get_my_bookings", customer_tool_names)
+        self.assertIn("get_cancellation_refund_details", customer_tool_names)
+
+        # Artist cannot execute customer-only tools
+        denied = execute_tool("get_my_bookings", {}, user=self.artist_user, role="artist")
+        self.assertIn("error", denied)
+
+        # Spoofed customer_id / user_id from model is ignored; scoped to customer_b
+        spoofed = execute_tool(
+            "get_my_bookings",
+            {"user_id": self.customer_a.id, "customer_id": self.customer_a.id},
+            user=self.customer_b,
+            role="customer",
+        )
+        self.assertEqual(spoofed["total_count"], 1)
+        self.assertEqual(spoofed["bookings"][0]["booking_id"], self.booking_b.id)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_gemini_customer_tool_execution_end_to_end(self, mock_genai_client):
+        mock_fc = MagicMock()
+        mock_fc.name = "get_my_bookings"
+        mock_fc.args = {"status_filter": "upcoming"}
+
+        first_resp = MagicMock()
+        first_resp.function_calls = [mock_fc]
+        first_cand = MagicMock()
+        first_cand.content = MagicMock()
+        first_resp.candidates = [first_cand]
+
+        second_resp = MagicMock()
+        second_resp.function_calls = []
+        second_resp.text = "You have 1 upcoming booking with Phase3 Band for your Wedding."
+
+        mock_generate = mock_genai_client.return_value.models.generate_content
+        mock_generate.side_effect = [first_resp, second_resp]
+
+        self.client.force_login(self.customer_a)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "Show my upcoming bookings"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["role"], "customer")
+        self.assertIn("Phase3 Band", res.json()["reply"])
+
+
+class ChatbotPhase4Tests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.core.cache import cache
+        from app.models import ArtistAvailability, Payment, ReschedulingRequest
+
+        cache.clear()
+        self.client = Client()
+
+        self.customer_user = User.objects.create_user(
+            username="p4_customer",
+            email="p4_cust_secret@example.com",
+            password="securepassword123",
+        )
+        self.artist_user_a = User.objects.create_user(
+            username="p4_artist_a",
+            email="p4_artist_a@example.com",
+            password="securepassword123",
+        )
+        self.artist_user_b = User.objects.create_user(
+            username="p4_artist_b",
+            email="p4_artist_b@example.com",
+            password="securepassword123",
+        )
+        self.cat, _ = Category.objects.get_or_create(name="DJs & Electronic")
+
+        self.artist_a = ArtistProfile.objects.create(
+            user=self.artist_user_a,
+            category=self.cat,
+            stage_name="DJ Nova",
+            location="Kochi",
+            starting_price=Decimal("20000.00"),
+            years_of_experience=5,
+            is_verified=True,
+            is_active=True,
+        )
+        self.artist_b = ArtistProfile.objects.create(
+            user=self.artist_user_b,
+            category=self.cat,
+            stage_name="DJ Shadow",
+            location="Mumbai",
+            starting_price=Decimal("30000.00"),
+            years_of_experience=7,
+            is_verified=False,
+            is_active=True,
+        )
+
+        # Artist A bookings:
+        # 1. Completed & paid (20,000 -> 18,400 artist share, 1,600 commission)
+        self.booking_a_completed = Booking.objects.create(
+            customer=self.customer_user,
+            artist=self.artist_a,
+            event_type="Corporate Gala",
+            event_date=timezone.now() - timedelta(days=5),
+            event_location="Kochi",
+            customer_phone="+919998887770",
+            agreed_price=Decimal("20000.00"),
+            status=Booking.Status.COMPLETED,
+        )
+        Payment.objects.create(
+            booking=self.booking_a_completed,
+            amount=Decimal("20000.00"),
+            commission_percentage=Decimal("8.00"),
+            commission_amount=Decimal("1600.00"),
+            artist_amount=Decimal("18400.00"),
+            razorpay_order_id="order_p4_secret_1",
+            transaction_id="pay_p4_secret_1",
+            status=Payment.Status.SUCCESS,
+        )
+
+        # 2. Accepted & unpaid active 24h reservation (10,000 -> 9,200 pending artist share)
+        self.booking_a_accepted = Booking.objects.create(
+            customer=self.customer_user,
+            artist=self.artist_a,
+            event_type="Wedding",
+            event_date=timezone.now() + timedelta(days=8),
+            event_location="Ernakulam",
+            customer_phone="+919998887770",
+            agreed_price=Decimal("10000.00"),
+            status=Booking.Status.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+
+        # 3. Pending request
+        self.booking_a_pending = Booking.objects.create(
+            customer=self.customer_user,
+            artist=self.artist_a,
+            event_type="Birthday",
+            event_date=timezone.now() + timedelta(days=14),
+            event_location="Kochi",
+            customer_budget=Decimal("12000.00"),
+            status=Booking.Status.PENDING,
+        )
+
+        # Artist B booking (must never be visible to Artist A)
+        self.booking_b = Booking.objects.create(
+            customer=self.customer_user,
+            artist=self.artist_b,
+            event_type="Secret Gig B",
+            event_date=timezone.now() + timedelta(days=9),
+            event_location="Mumbai",
+            agreed_price=Decimal("50000.00"),
+            status=Booking.Status.PENDING,
+        )
+
+        # Manual block & rescheduling request for Artist A
+        self.blocked_date = (timezone.now() + timedelta(days=20)).date()
+        ArtistAvailability.objects.create(
+            artist=self.artist_a,
+            date=self.blocked_date,
+            is_available=False,
+            reason="Studio recording",
+        )
+        self.resched_a = ReschedulingRequest.objects.create(
+            booking=self.booking_a_accepted,
+            customer=self.customer_user,
+            artist=self.artist_a,
+            original_event_date=self.booking_a_accepted.event_date,
+            new_event_date=self.booking_a_accepted.event_date + timedelta(days=2),
+            reason="Venue shifted",
+            status=ReschedulingRequest.Status.PENDING,
+        )
+        ReschedulingRequest.objects.create(
+            booking=self.booking_b,
+            customer=self.customer_user,
+            artist=self.artist_b,
+            original_event_date=self.booking_b.event_date,
+            new_event_date=self.booking_b.event_date + timedelta(days=1),
+            reason="Artist B secret reschedule",
+            status=ReschedulingRequest.Status.PENDING,
+        )
+
+    def test_get_my_artist_profile_returns_authenticated_artist(self):
+        from app.services.chatbot_tools import get_my_artist_profile
+
+        res = get_my_artist_profile(user=self.artist_user_a)
+        self.assertTrue(res["found"])
+        p = res["profile"]
+        self.assertEqual(p["stage_name"], "DJ Nova")
+        self.assertTrue(p["is_verified"])
+        self.assertEqual(p["starting_price_inr"], "20000.00")
+
+    def test_get_my_incoming_bookings_and_ownership_without_pii(self):
+        from app.services.chatbot_tools import get_my_incoming_bookings, get_my_artist_booking_details
+
+        pending = get_my_incoming_bookings(user=self.artist_user_a, status_filter="pending")
+        self.assertEqual(pending["total_count"], 1)
+        self.assertEqual(pending["bookings"][0]["booking_id"], self.booking_a_pending.id)
+
+        upcoming = get_my_incoming_bookings(user=self.artist_user_a, status_filter="upcoming")
+        self.assertEqual(upcoming["total_count"], 1)
+        self.assertEqual(upcoming["bookings"][0]["booking_id"], self.booking_a_accepted.id)
+
+        all_res = get_my_incoming_bookings(user=self.artist_user_a, status_filter="all")
+        serialized = json.dumps(all_res)
+        self.assertNotIn("9998887770", serialized)
+        self.assertNotIn("p4_cust_secret@example.com", serialized)
+        self.assertNotIn("Secret Gig B", serialized)
+
+        detail_own = get_my_artist_booking_details(user=self.artist_user_a, booking_id=self.booking_a_completed.id)
+        self.assertTrue(detail_own["found"])
+        self.assertEqual(detail_own["booking"]["artist_share_inr"], "18400.00")
+        self.assertNotIn("9998887770", json.dumps(detail_own))
+
+        # Cross-artist isolation
+        detail_other = get_my_artist_booking_details(user=self.artist_user_a, booking_id=self.booking_b.id)
+        self.assertFalse(detail_other["found"])
+
+    def test_get_my_earnings_distinguishes_completed_and_pending_without_gateway_ids(self):
+        from app.services.chatbot_tools import get_my_earnings
+
+        earnings = get_my_earnings(user=self.artist_user_a)
+        self.assertEqual(earnings["completed_earnings_inr"], "18400.00")
+        self.assertEqual(earnings["pending_earnings_inr"], "9200.00")
+        self.assertEqual(earnings["total_projected_earnings_inr"], "27600.00")
+        self.assertEqual(earnings["total_commission_inr"], "1600.00")
+
+        serialized = json.dumps(earnings)
+        self.assertNotIn("order_p4_secret_1", serialized)
+        self.assertNotIn("pay_p4_secret_1", serialized)
+
+    def test_get_my_availability_and_rescheduling_requests_isolated(self):
+        from app.services.chatbot_tools import get_my_availability, get_my_rescheduling_requests
+
+        avail = get_my_availability(user=self.artist_user_a)
+        self.assertEqual(len(avail["manually_blocked_dates"]), 1)
+        self.assertEqual(avail["manually_blocked_dates"][0]["date"], self.blocked_date.isoformat())
+        self.assertEqual(len(avail["booked_dates"]), 1)
+        self.assertEqual(avail["booked_dates"][0]["status"], "completed")
+        self.assertEqual(len(avail["active_reservations"]), 1)
+        self.assertEqual(avail["active_reservations"][0]["status"], "awaiting_payment_24h")
+        self.assertNotIn("p4_cust_secret@example.com", json.dumps(avail))
+
+        resched = get_my_rescheduling_requests(user=self.artist_user_a, status_filter="pending")
+        self.assertEqual(resched["total_count"], 1)
+        self.assertEqual(resched["rescheduling_requests"][0]["request_id"], self.resched_a.id)
+        self.assertNotIn("Artist B secret reschedule", json.dumps(resched))
+        self.assertNotIn("p4_cust_secret@example.com", json.dumps(resched))
+
+    def test_customer_cannot_access_artist_tools_and_spoofed_ids_ignored(self):
+        from app.services.chatbot_service import build_gemini_tools
+        from app.services.chatbot_tools import execute_tool
+
+        customer_tools = build_gemini_tools(role="customer")
+        cust_names = [fd.name for fd in customer_tools[0].function_declarations]
+        self.assertNotIn("get_my_earnings", cust_names)
+        self.assertNotIn("get_my_incoming_bookings", cust_names)
+
+        artist_tools = build_gemini_tools(role="artist")
+        artist_names = [fd.name for fd in artist_tools[0].function_declarations]
+        self.assertIn("get_my_earnings", artist_names)
+        self.assertIn("get_my_availability", artist_names)
+
+        denied = execute_tool("get_my_earnings", {}, user=self.customer_user, role="customer")
+        self.assertIn("error", denied)
+
+        # Spoofed artist_id is ignored; Artist B cannot read Artist A's profile or earnings
+        spoofed = execute_tool(
+            "get_my_artist_profile",
+            {"artist_id": self.artist_a.id, "user_id": self.artist_user_a.id},
+            user=self.artist_user_b,
+            role="artist",
+        )
+        self.assertEqual(spoofed["profile"]["stage_name"], "DJ Shadow")
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_gemini_artist_tool_execution_and_error_handling(self, mock_genai_client):
+        mock_fc = MagicMock()
+        mock_fc.name = "get_my_earnings"
+        mock_fc.args = {}
+
+        first_resp = MagicMock()
+        first_resp.function_calls = [mock_fc]
+        first_cand = MagicMock()
+        first_cand.content = MagicMock()
+        first_resp.candidates = [first_cand]
+
+        second_resp = MagicMock()
+        second_resp.function_calls = []
+        second_resp.text = "You have earned ₹18,400 from completed bookings and ₹9,200 pending."
+
+        mock_generate = mock_genai_client.return_value.models.generate_content
+        mock_generate.side_effect = [first_resp, second_resp]
+
+        self.client.force_login(self.artist_user_a)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "How much have I earned?", "role": "customer"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["role"], "artist")
+        self.assertIn("18,400", res.json()["reply"])
+
+
+class ChatbotPhase5Tests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+
+        self.admin_user = User.objects.create_user(
+            username="p5_admin",
+            email="p5_admin@example.com",
+            password="securepassword123",
+            is_staff=True,
+        )
+        self.customer_user = User.objects.create_user(
+            username="p5_customer",
+            email="p5_customer@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="p5_artist",
+            email="p5_artist@example.com",
+            password="securepassword123",
+        )
+        self.cat, _ = Category.objects.get_or_create(name="Singers & Vocalists")
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.cat,
+            stage_name="Riya Vocals",
+            location="Kochi",
+            starting_price=Decimal("18000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+    def test_admin_chatbot_analytics_requires_admin_role(self):
+        self.assertEqual(self.client.get("/api/admin/chatbot/").status_code, 401)
+
+        self.client.force_login(self.customer_user)
+        self.assertEqual(self.client.get("/api/admin/chatbot/").status_code, 403)
+
+        self.client.force_login(self.artist_user)
+        self.assertEqual(self.client.get("/api/admin/chatbot/").status_code, 403)
+
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/chatbot/")
+        self.assertEqual(res.status_code, 200)
+
+    def test_admin_chatbot_analytics_empty_database_state(self):
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/chatbot/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["total_conversations"], 0)
+        self.assertEqual(data["total_messages"], 0)
+        self.assertEqual(data["customer_conversations"], 0)
+        self.assertEqual(data["artist_conversations"], 0)
+        self.assertEqual(data["failed_requests"], 0)
+        self.assertIsNone(data["avg_response_time_ms"])
+        self.assertEqual(data["recent_activity"], [])
+
+    def test_admin_chatbot_analytics_aggregates_real_db_records_and_paginates(self):
+        from app.models import ChatSession, ChatMessage, ChatbotErrorLog
+
+        s1 = ChatSession.objects.create(
+            user=self.customer_user,
+            role_context=ChatSession.RoleContext.CUSTOMER,
+            title="Find singers",
+        )
+        s2 = ChatSession.objects.create(
+            user=self.artist_user,
+            role_context=ChatSession.RoleContext.ARTIST,
+            title="Check earnings",
+        )
+        ChatMessage.objects.create(
+            session=s1,
+            sender=ChatMessage.Sender.USER,
+            content="Private customer message should not appear",
+            topic="Artist Search",
+        )
+        ChatMessage.objects.create(
+            session=s1,
+            sender=ChatMessage.Sender.ASSISTANT,
+            content="Found Riya Vocals",
+            topic="Artist Search",
+            latency_ms=300,
+        )
+        ChatMessage.objects.create(
+            session=s2,
+            sender=ChatMessage.Sender.USER,
+            content="Private artist message should not appear",
+            topic="Payments & Commission",
+        )
+        ChatMessage.objects.create(
+            session=s2,
+            sender=ChatMessage.Sender.ASSISTANT,
+            content="Your earnings are 0",
+            topic="Payments & Commission",
+            latency_ms=500,
+        )
+        ChatbotErrorLog.objects.create(role_context="customer", error_type="service_error")
+
+        self.client.force_login(self.admin_user)
+        res = self.client.get("/api/admin/chatbot/?page=1&page_size=1")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+
+        self.assertEqual(data["total_conversations"], 2)
+        self.assertEqual(data["total_messages"], 4)
+        self.assertEqual(data["customer_conversations"], 1)
+        self.assertEqual(data["artist_conversations"], 1)
+        self.assertEqual(data["failed_requests"], 1)
+        self.assertEqual(data["avg_response_time_ms"], 400)
+        self.assertEqual(len(data["recent_activity"]), 1)
+        self.assertEqual(data["pagination"]["total_pages"], 2)
+        self.assertGreaterEqual(len(data["daily_trends"]), 1)
+        self.assertGreaterEqual(len(data["monthly_trends"]), 1)
+        self.assertEqual(len(data["top_topics"]), 2)
+
+        # Ensure private conversation content is never exposed in analytics
+        serialized = json.dumps(data)
+        self.assertNotIn("Private customer message", serialized)
+        self.assertNotIn("Private artist message", serialized)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_artist_cards_metadata_persisted_and_returned_and_errors_logged(self, mock_genai_client):
+        from app.models import ChatbotErrorLog
+
+        mock_fc = MagicMock()
+        mock_fc.name = "search_artists"
+        mock_fc.args = {"location": "Kochi"}
+
+        first_resp = MagicMock()
+        first_resp.function_calls = [mock_fc]
+        first_cand = MagicMock()
+        first_cand.content = MagicMock()
+        first_resp.candidates = [first_cand]
+
+        second_resp = MagicMock()
+        second_resp.function_calls = []
+        second_resp.text = "Here is Riya Vocals in Kochi."
+
+        mock_generate = mock_genai_client.return_value.models.generate_content
+        mock_generate.side_effect = [first_resp, second_resp]
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "Find singers in Kochi"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        cards = res.json()["assistant_message"]["metadata"]["artists"]
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["stage_name"], "Riya Vocals")
+        self.assertEqual(cards[0]["artist_id"], self.artist.id)
+
+        # History endpoint also returns persisted metadata
+        hist = self.client.get("/api/chat/history/").json()
+        self.assertEqual(hist["messages"][1]["metadata"]["artists"][0]["stage_name"], "Riya Vocals")
+
+        # Simulate Gemini failure -> logged in ChatbotErrorLog
+        mock_generate.side_effect = RuntimeError("Simulated outage")
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            err_res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "Trigger failure"}),
+                content_type="application/json",
+            )
+        self.assertEqual(err_res.status_code, 502)
+        self.assertEqual(ChatbotErrorLog.objects.count(), 1)
+
+
+class ChatbotPhase6SecurityAndOptimizationTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        self.customer_user = User.objects.create_user(
+            username="p6_customer",
+            email="p6_cust@example.com",
+            password="securepassword123",
+        )
+        self.artist_user = User.objects.create_user(
+            username="p6_artist",
+            email="p6_artist@example.com",
+            password="securepassword123",
+        )
+        self.cat, _ = Category.objects.get_or_create(name="Live Bands")
+        self.artist = ArtistProfile.objects.create(
+            user=self.artist_user,
+            category=self.cat,
+            stage_name="Phase6 Band",
+            location="Kochi",
+            starting_price=Decimal("22000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
+    def test_unexpected_llm_kwargs_filtered_safely_without_crashing(self):
+        from app.services.chatbot_tools import execute_tool
+
+        # Extra hallucinated parameter 'city' or 'role' should not cause TypeError
+        res = execute_tool(
+            "search_artists",
+            {"location": "Kochi", "city": "Kochi", "unexpected_arg": 123},
+            user=self.customer_user,
+            role="customer",
+        )
+        self.assertNotIn("error", res)
+        self.assertGreaterEqual(res["returned_count"], 1)
+
+    def test_system_instruction_includes_prompt_injection_defenses(self):
+        from app.services.chatbot_service import build_system_instruction
+
+        prompt = build_system_instruction("customer")
+        self.assertIn("PROMPT INJECTION & SECURITY", prompt)
+        self.assertIn("untrusted input", prompt)
+        self.assertIn("API keys", prompt)
+
+    @patch("app.services.chatbot_service.genai.Client")
+    def test_history_context_bounded_to_max_history_messages(self, mock_genai_client):
+        from app.models import ChatSession, ChatMessage
+        from app.services.chatbot_service import MAX_HISTORY_MESSAGES
+
+        session = ChatSession.objects.create(
+            user=self.customer_user,
+            role_context=ChatSession.RoleContext.CUSTOMER,
+        )
+        for i in range(MAX_HISTORY_MESSAGES + 10):
+            ChatMessage.objects.create(
+                session=session,
+                sender=ChatMessage.Sender.USER if i % 2 == 0 else ChatMessage.Sender.ASSISTANT,
+                content=f"Message {i}",
+            )
+
+        mock_resp = MagicMock()
+        mock_resp.function_calls = []
+        mock_resp.text = "Bounded reply."
+        mock_generate = mock_genai_client.return_value.models.generate_content
+        mock_generate.return_value = mock_resp
+
+        self.client.force_login(self.customer_user)
+        with self.settings(GEMINI_API_KEY="test-key-123"):
+            res = self.client.post(
+                "/api/chat/message/",
+                data=json.dumps({"message": "Latest question"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, 200)
+        sent_contents = mock_generate.call_args.kwargs["contents"]
+        # MAX_HISTORY_MESSAGES from DB + 1 new user message
+        self.assertEqual(len(sent_contents), MAX_HISTORY_MESSAGES + 1)
+        self.assertEqual(sent_contents[0].parts[0].text, "Message 10")
+
+
+
+
+
+
+
+
 
 
 

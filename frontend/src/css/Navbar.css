@@ -14,6 +14,7 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   transition: all 0.2s ease;
   box-sizing: border-box;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
 }
 
 .site-navbar {
@@ -26,6 +27,11 @@
   justify-content: space-between;
   gap: 24px;
   box-sizing: border-box;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+}
+
+.site-navbar * {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 /* Brand Logo */
@@ -33,7 +39,8 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 1.45rem;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-size: 24px;
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.025em;
@@ -85,20 +92,23 @@
 }
 
 .navbar-link {
-  font-size: 1.05rem;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-size: 16.5px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #9E9E9E);
   text-decoration: none;
   position: relative;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
   transition: color 0.2s ease;
 }
 
 .navbar-link:hover {
-  color: var(--hover-effect);
+  color: var(--hover-effect, #FFFFFF);
 }
 
 .navbar-link.active {
-  color: var(--text-primary);
+  color: var(--text-primary, #FFFFFF);
   font-weight: 600;
 }
 
@@ -207,7 +217,8 @@
 
 /* Initials - Bold dark charcoal on solid orange as shown in reference */
 .navbar-avatar-initials {
-  font-size: 1.05rem;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-size: 17px;
   font-weight: 800;
   color: #181818;
   line-height: 1;
@@ -222,10 +233,11 @@
 
 /* Profile Name */
 .navbar-profile-name {
-  font-size: 0.98rem;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-size: 15.5px;
   font-weight: 600;
   color: #FFFFFF;
-  max-width: 150px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -234,12 +246,13 @@
 }
 
 .navbar-login {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
   color: var(--text-primary);
-  font-size: 0.95rem;
+  font-size: 15.5px;
   font-weight: 500;
   letter-spacing: normal;
   text-decoration: none;
-  padding: 8px 14px;
+  padding: 8px 16px;
   border-radius: var(--radius-sm, 6px);
   transition: all 0.2s ease;
 }
@@ -250,12 +263,13 @@
 }
 
 .navbar-register {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
   background: var(--accent-1, #FF5722);
   color: #FFFFFF;
-  font-size: 0.95rem;
+  font-size: 15.5px;
   font-weight: 600;
   letter-spacing: normal;
-  padding: 8px 22px;
+  padding: 9px 24px;
   border-radius: 8px;
   text-decoration: none;
   border: 1px solid transparent;

@@ -46,7 +46,7 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
     { label: 'Home', path: '/' },
     { label: 'Explore Artists', path: '/artists' },
     { label: 'Categories', path: '/#categories' },
-    { label: 'About Us', path: '/#about' },
+    { label: 'About us', path: '/about' },
     { label: 'Contact', path: '/#contact' },
   ];
 
@@ -103,7 +103,10 @@ function Navbar({ user, onLogout, currentPath = '/', navigate }) {
                 key={link.path}
                 href={link.path}
                 className={
-                  currentPath === link.path ? 'navbar-link active' : 'navbar-link'
+                  currentPath === link.path ||
+                  (link.path === '/about' && (currentPath === '/about' || currentPath === '/about-us'))
+                    ? 'navbar-link active'
+                    : 'navbar-link'
                 }
                 onClick={(event) => goTo(event, link.path)}
               >

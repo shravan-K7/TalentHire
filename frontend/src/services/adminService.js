@@ -230,8 +230,12 @@ export async function sendAdminAnnouncement({ title, message, recipientType = 'a
 }
 
 // 10. Chatbot Monitoring
-export async function fetchAdminChatbotStats() {
-  const response = await fetch(`${BASE_URL}/chatbot/`, {
+export async function fetchAdminChatbotStats(page = 1, pageSize = 10) {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  const response = await fetch(`${BASE_URL}/chatbot/?${params.toString()}`, {
     credentials: 'include',
   });
   return handleResponse(response);

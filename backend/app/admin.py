@@ -14,6 +14,9 @@ from .models import (
     ProcessedWebhookEvent,
     BookingCancellation,
     ReschedulingRequest,
+    ChatSession,
+    ChatMessage,
+    ChatbotErrorLog,
 )
 
 
@@ -165,5 +168,25 @@ class ReschedulingRequestAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "requested_at", "responded_at")
     search_fields = ("booking__id", "customer__username", "artist__stage_name", "reason", "artist_response")
+
+
+@admin.register(ChatSession)
+class ChatSessionAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "role_context", "title", "is_active", "created_at", "updated_at")
+    list_filter = ("role_context", "is_active", "created_at")
+    search_fields = ("user__username", "user__email", "title")
+
+
+@admin.register(ChatMessage)
+class ChatMessageAdmin(admin.ModelAdmin):
+    list_display = ("id", "session", "sender", "topic", "latency_ms", "created_at")
+    list_filter = ("sender", "topic", "created_at")
+    search_fields = ("session__user__username", "content", "topic")
+
+
+@admin.register(ChatbotErrorLog)
+class ChatbotErrorLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "role_context", "error_type", "latency_ms", "created_at")
+    list_filter = ("role_context", "error_type", "created_at")
 
 

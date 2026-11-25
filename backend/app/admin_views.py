@@ -28,6 +28,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
+from django.db.models.functions import TruncDate, TruncMonth
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect
@@ -39,6 +40,9 @@ from app.models import (
     Booking,
     BookingCancellation,
     Category,
+    ChatMessage,
+    ChatSession,
+    ChatbotErrorLog,
     CustomerProfile,
     Notification,
     Payment,
@@ -1179,29 +1183,114 @@ def admin_notification_send_view(request):
 @admin_required
 def admin_chatbot_monitoring_view(request):
     """
-    Returns AI Chatbot statistics, performance health, and knowledge base topics.
+    Returns real database-aggregated AI Chatbot analytics:
+    - Total, customer, and artist conversation counts
+    - Total messages and failed AI request counts
+    - Average response latency (ms)
+    - Daily (14 days) and monthly (6 months) conversation trends
+    - Top queried topics via DB aggregation
+    - Paginated recent chatbot activity (no private message content exposed)
     """
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = max(1, min(50, int(request.GET.get("page_size", 10))))
+    except (TypeError, ValueError):
+        page_size = 10
+
+    total_conversations = ChatSession.objects.count()
+    total_messages = ChatMessage.objects.count()
+    customer_conversations = ChatSession.objects.filter(
+        role_context=ChatSession.RoleContext.CUSTOMER
+    ).count()
+    artist_conversations = ChatSession.objects.filter(
+        role_context=ChatSession.RoleContext.ARTIST
+    ).count()
+    failed_requests = ChatbotErrorLog.objects.count()
+
+    avg_latency_raw = ChatMessage.objects.filter(
+        sender=ChatMessage.Sender.ASSISTANT,
+        latency_ms__isnull=False,
+    ).aggregate(avg=Avg("latency_ms"))["avg"]
+    avg_response_time_ms = round(float(avg_latency_raw)) if avg_latency_raw is not None else None
+
+    now = timezone.now()
+    daily_cutoff = now - timedelta(days=14)
+    daily_rows = (
+        ChatSession.objects.filter(created_at__gte=daily_cutoff)
+        .annotate(day=TruncDate("created_at", tzinfo=KOLKATA_TZ))
+        .values("day")
+        .annotate(count=Count("id"))
+        .order_by("day")
+    )
+    daily_trends = [
+        {"date": row["day"].isoformat(), "count": row["count"]}
+        for row in daily_rows
+        if row["day"] is not None
+    ]
+
+    monthly_cutoff = now - timedelta(days=180)
+    monthly_rows = (
+        ChatSession.objects.filter(created_at__gte=monthly_cutoff)
+        .annotate(month=TruncMonth("created_at", tzinfo=KOLKATA_TZ))
+        .values("month")
+        .annotate(count=Count("id"))
+        .order_by("month")
+    )
+    monthly_trends = [
+        {"month": row["month"].strftime("%Y-%m"), "count": row["count"]}
+        for row in monthly_rows
+        if row["month"] is not None
+    ]
+
+    topic_rows = (
+        ChatMessage.objects.filter(sender=ChatMessage.Sender.USER)
+        .exclude(topic="")
+        .values("topic")
+        .annotate(count=Count("id"))
+        .order_by("-count")[:8]
+    )
+    top_topics = [
+        {"topic": row["topic"], "count": row["count"]}
+        for row in topic_rows
+    ]
+
+    # Paginated recent activity (non-sensitive summary only)
+    start = (page - 1) * page_size
+    end = start + page_size
+    sessions_qs = ChatSession.objects.annotate(message_count=Count("messages")).order_by("-updated_at")
+    recent_activity = [
+        {
+            "session_id": s.id,
+            "role_context": s.role_context,
+            "message_count": s.message_count,
+            "is_active": s.is_active,
+            "updated_at": timezone.localtime(s.updated_at, KOLKATA_TZ).strftime("%b %d, %Y %I:%M %p"),
+        }
+        for s in sessions_qs[start:end]
+    ]
+    total_pages = max(1, (total_conversations + page_size - 1) // page_size)
+
     return JsonResponse({
         "success": True,
-        "status": "Operational",
-        "knowledge_topics_count": 24,
-        "categories_covered": [
-            "Find an Artist",
-            "Booking Help",
-            "Payments & Refunds",
-            "Artist Account & Verification",
-            "Account & Login",
-            "Contact Support",
-        ],
-        "uptime": "99.98%",
-        "avg_response_time": "120ms",
-        "recent_queries": [
-            {"query": "How to book an artist?", "frequency": 42, "category": "Booking Help"},
-            {"query": "What is the 8% commission fee?", "frequency": 38, "category": "Payments & Refunds"},
-            {"query": "How does cancellation refund work?", "frequency": 29, "category": "Payments & Refunds"},
-            {"query": "How to get verified as an artist?", "frequency": 25, "category": "Artist Account"},
-            {"query": "How to add Google Maps location?", "frequency": 19, "category": "Booking Help"},
-        ],
+        "total_conversations": total_conversations,
+        "total_messages": total_messages,
+        "customer_conversations": customer_conversations,
+        "artist_conversations": artist_conversations,
+        "failed_requests": failed_requests,
+        "avg_response_time_ms": avg_response_time_ms,
+        "daily_trends": daily_trends,
+        "monthly_trends": monthly_trends,
+        "top_topics": top_topics,
+        "recent_activity": recent_activity,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total_conversations,
+            "total_pages": total_pages,
+        },
     })
 
 

@@ -13,6 +13,7 @@ import CustomerDashboard from "./pages/CustomerDashboard";
 import ArtistDashboard from "./pages/ArtistDashboard";
 import BookingPage from "./pages/BookingPage";
 import AdminDashboard from "./pages/AdminDashboard";
+import AboutUs from "./pages/AboutUs";
 import LogoutModal from "./components/LogoutModal";
 
 function LoadingScreen({ message = "Loading..." }) {
@@ -259,6 +260,7 @@ function App() {
   }
 
   const isArtistsList = pathWithoutQuery === "/artists" && !artistDetailId;
+  const isAbout = pathWithoutQuery === "/about" || pathWithoutQuery === "/about-us";
 
   // Automatically redirect unauthenticated users visiting protected dashboard views to /login
   useEffect(() => {
@@ -444,11 +446,15 @@ function App() {
             navigate={navigate}
           />
         </div>
+      ) : isAbout ? (
+        <AboutUs user={user} onLogout={handleRequestLogout} navigate={navigate} />
       ) : (
         <Home user={user} onLogout={handleRequestLogout} navigate={navigate} />
       )}
 
-      {!isLogin && !isRegister && !isAdminRoute && <Chatbot />}
+      {!isLogin && !isRegister && !isAdminRoute && (
+        <Chatbot key={user?.id || "guest"} user={user} navigate={navigate} />
+      )}
 
       <LogoutModal
         isOpen={showLogoutModal}
