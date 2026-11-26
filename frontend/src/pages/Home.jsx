@@ -355,17 +355,17 @@ function Home({ user, onLogout, navigate }) {
               </div>
             </div>
 
-            {/* Right Hero Image Card */}
+            {/* Right Hero Video Card */}
             <div className="layout-hero-right">
               <div className="hero-image-card">
-                <img
-                  src="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80"
-                  alt="Live stage performance"
+                <video
+                  src="/videos/hero-stage.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
                   className="hero-image-img"
                 />
-                <div className="hero-image-overlay">
-                  <span className="hero-image-label">[HERO IMAGE – live stage performance]</span>
-                </div>
               </div>
             </div>
           </div>
