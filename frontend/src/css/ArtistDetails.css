@@ -1082,25 +1082,6 @@
   margin: 0;
 }
 
-.booking-btn-quote {
-  width: 100%;
-  padding: 13px 20px;
-  margin-top: 10px;
-  background-color: #222222;
-  color: #FFFFFF;
-  font-size: 0.98rem;
-  font-weight: 600;
-  border-radius: 10px;
-  border: 1px solid #363636;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.booking-btn-quote:hover {
-  background-color: #2A2A2A;
-  border-color: #555555;
-}
-
 .booking-check-icon {
   color: #4ADE80;
   flex-shrink: 0;

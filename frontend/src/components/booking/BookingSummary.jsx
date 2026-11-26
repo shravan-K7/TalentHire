@@ -95,7 +95,12 @@ export default function BookingSummary({ artist, formData }) {
           <div className="booking-artist-travel-info">
             <span className="booking-artist-travel-label">Travel availability</span>
             <span className="booking-artist-travel-val">
-              {currentArtist.travel_availability_display || currentArtist.travel_availability || 'Across my state'}
+              {(() => {
+                const rawTravel = currentArtist.travel_availability_display || currentArtist.travel_availability || 'Across my state';
+                return (currentArtist.travel_availability === 'city' || rawTravel.toLowerCase() === 'within my city') && currentArtist.location
+                  ? `${rawTravel} (${currentArtist.location})`
+                  : rawTravel;
+              })()}
             </span>
           </div>
         </div>

@@ -706,3 +706,100 @@ class ChatbotErrorLog(models.Model):
         return f"ChatbotErrorLog #{self.id} ({self.error_type} - {self.role_context})"
 
 
+class SupportTicket(models.Model):
+    class Category(models.TextChoices):
+        GENERAL_QUERY = "general_query", "General Query"
+        SUGGESTION = "suggestion", "Suggestion & Feedback"
+        TECHNICAL_ISSUE = "technical_issue", "Technical Issue"
+        PAYMENT_ISSUE = "payment_issue", "Payment Issue"
+        BOOKING_ISSUE = "booking_issue", "Booking Issue"
+        PROFILE_ISSUE = "profile_issue", "Profile Issue"
+        OTHER = "other", "Other"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        IN_PROGRESS = "in_progress", "In Progress"
+        AWAITING_RESPONSE = "awaiting_response", "Awaiting Response"
+        RESOLVED = "resolved", "Resolved"
+        CLOSED = "closed", "Closed"
+
+    ticket_number = models.CharField(
+        max_length=32,
+        unique=True,
+        db_index=True,
+        editable=False,
+    )
+    artist = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="support_tickets",
+        db_index=True,
+    )
+    category = models.CharField(
+        max_length=40,
+        choices=Category.choices,
+        default=Category.GENERAL_QUERY,
+        db_index=True,
+    )
+    subject = models.CharField(max_length=200)
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.OPEN,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-created_at"]
+        indexes = [
+            models.Index(fields=["artist", "status"]),
+            models.Index(fields=["status", "category"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.ticket_number:
+            import secrets
+            from django.utils import timezone
+            date_part = timezone.localtime(timezone.now()).strftime("%y%m%d")
+            while True:
+                candidate = f"SUP-{date_part}-{secrets.token_hex(2).upper()}"
+                if not SupportTicket.objects.filter(ticket_number=candidate).exists():
+                    self.ticket_number = candidate
+                    break
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.ticket_number} - {self.subject} ({self.status})"
+
+
+class SupportMessage(models.Model):
+    ticket = models.ForeignKey(
+        SupportTicket,
+        on_delete=models.CASCADE,
+        related_name="messages",
+        db_index=True,
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="support_messages",
+    )
+    message = models.TextField()
+    attachment = models.FileField(
+        upload_to="support/attachments/",
+        blank=True,
+        null=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    is_read = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"SupportMessage #{self.id} on {self.ticket.ticket_number}"
+
+
+

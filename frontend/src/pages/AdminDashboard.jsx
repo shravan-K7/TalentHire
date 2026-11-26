@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AdminSidebar from "../components/admin/AdminSidebar";
 import AdminHeader from "../components/admin/AdminHeader";
 import AdminOverviewView from "../components/admin/AdminOverviewView";
@@ -8,6 +8,7 @@ import AdminBookingsView from "../components/admin/AdminBookingsView";
 import AdminFinanceView from "../components/admin/AdminFinanceView";
 import AdminCategoriesView from "../components/admin/AdminCategoriesView";
 import AdminComplaintsView from "../components/admin/AdminComplaintsView";
+import AdminSupportView from "../components/admin/AdminSupportView";
 import AdminReviewsView from "../components/admin/AdminReviewsView";
 import AdminNotificationsView from "../components/admin/AdminNotificationsView";
 import AdminChatbotView from "../components/admin/AdminChatbotView";
@@ -31,6 +32,7 @@ const VALID_ADMIN_SECTIONS = new Set([
   "refunds",
   "categories",
   "complaints",
+  "support-management",
   "reviews",
   "notifications",
   "chatbot",
@@ -84,14 +86,14 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  async function refreshDashboardData() {
+  const refreshDashboardData = useCallback(async () => {
     try {
       const data = await fetchAdminOverview();
       setOverviewData(data);
     } catch (err) {
       console.error("Failed to refresh admin metrics:", err);
     }
-  }
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -159,6 +161,7 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
 
   const pendingVerificationsCount = overviewData?.pending_actions?.artist_verifications || 0;
   const openComplaintsCount = overviewData?.pending_actions?.open_complaints || 0;
+  const openSupportTicketsCount = overviewData?.pending_actions?.open_support_tickets || 0;
 
   return (
     <div className={`admin-layout ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -168,6 +171,7 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
         onSelectSection={selectSection}
         pendingVerificationsCount={pendingVerificationsCount}
         openComplaintsCount={openComplaintsCount}
+        openSupportTicketsCount={openSupportTicketsCount}
         onLogout={onLogout}
         navigate={navigate}
       />
@@ -243,6 +247,12 @@ export default function AdminDashboard({ user, onLogout, navigate }) {
 
           {currentSection === "complaints" && (
             <AdminComplaintsView
+              onCountChange={refreshDashboardData}
+            />
+          )}
+
+          {currentSection === "support-management" && (
+            <AdminSupportView
               onCountChange={refreshDashboardData}
             />
           )}

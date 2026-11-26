@@ -75,6 +75,9 @@ function App() {
       window.history.pushState(null, "", path);
       setCurrentPath(path);
     }
+    if (!path.includes("#")) {
+      window.scrollTo(0, 0);
+    }
   }, []);
 
   async function checkSession() {
@@ -302,6 +305,12 @@ function App() {
     }
   }, [checking, user, isBookingRoute, navigate, currentPath]);
 
+  useEffect(() => {
+    if (!checking && user && isBookingRoute && (user.role === "artist" || user.is_artist)) {
+      queueMicrotask(() => navigate("/artists"));
+    }
+  }, [checking, user, isBookingRoute, navigate]);
+
   return (
     <>
       {sessionError && (
@@ -419,6 +428,10 @@ function App() {
           <LoadingScreen message="Loading booking details..." />
         ) : !user ? (
           <LoadingScreen message="Redirecting to sign in..." />
+        ) : (user.role === "artist" || user.is_artist) ? (
+          <main style={{ minHeight: "100vh", padding: "40px 20px", background: "#181818", color: "#F7F7F7", textAlign: "center" }}>
+            <p role="status">Artist accounts cannot book other artists. Only customer accounts can make bookings.</p>
+          </main>
         ) : (
           <BookingPage
             artistId={bookArtistId}

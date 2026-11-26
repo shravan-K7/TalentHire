@@ -1640,7 +1640,7 @@ function CustomerDashboard({
               </div>
 
               {/* Ready to Perform? Register as Artist Banner */}
-              <div className="cd-artist-join-card">
+              {/* <div className="cd-artist-join-card">
                 <div className="cd-artist-join-text">
                   <div className="cd-artist-join-badge">
                     WANT TO PERFORM ON TALENTHIRE?
@@ -1661,7 +1661,7 @@ function CustomerDashboard({
                 >
                   Register as Performing Artist →
                 </button>
-              </div>
+              </div> */}
             </div>
           )}
 

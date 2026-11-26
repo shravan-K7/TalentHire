@@ -17,6 +17,8 @@ from .models import (
     ChatSession,
     ChatMessage,
     ChatbotErrorLog,
+    SupportTicket,
+    SupportMessage,
 )
 
 
@@ -188,5 +190,20 @@ class ChatMessageAdmin(admin.ModelAdmin):
 class ChatbotErrorLogAdmin(admin.ModelAdmin):
     list_display = ("id", "role_context", "error_type", "latency_ms", "created_at")
     list_filter = ("role_context", "error_type", "created_at")
+
+
+@admin.register(SupportTicket)
+class SupportTicketAdmin(admin.ModelAdmin):
+    list_display = ("ticket_number", "subject", "artist", "category", "status", "created_at", "updated_at")
+    list_filter = ("status", "category", "created_at")
+    search_fields = ("ticket_number", "subject", "artist__username", "artist__email")
+
+
+@admin.register(SupportMessage)
+class SupportMessageAdmin(admin.ModelAdmin):
+    list_display = ("id", "ticket", "sender", "is_read", "created_at")
+    list_filter = ("is_read", "created_at")
+    search_fields = ("ticket__ticket_number", "sender__username", "message")
+
 
 

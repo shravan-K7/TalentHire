@@ -55,6 +55,7 @@ export default function AdminHeader({
     refunds: "Refunds",
     categories: "Artist Categories",
     complaints: "Complaints & Disputes",
+    "support-management": "Support Management",
     reviews: "Reviews & Ratings",
     notifications: "Notifications",
     chatbot: "AI Chatbot Monitoring",

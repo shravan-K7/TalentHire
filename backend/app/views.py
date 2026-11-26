@@ -675,15 +675,8 @@ def extract_youtube_id(url):
     return ""
 
 
-def serialize_artist_summary(artist, request=None):
-    travel_map = {
-        "city": "Within my city",
-        "state": "Across my state",
-        "india": "Across India",
-        "international": "International",
-    }
-
-    # Featured image resolution: priority to featured portfolio photo, then profile image, then first photo
+def _resolve_artist_featured_image(artist, request=None):
+    """Resolve the best public image URL for an artist (featured photo, profile image, or first photo)."""
     featured_image = ""
     featured_item = artist.portfolio_items.filter(is_public=True, is_featured=True).first()
     if featured_item and featured_item.item_type == Portfolio.ItemType.PHOTO:
@@ -711,6 +704,19 @@ def serialize_artist_summary(artist, request=None):
                     featured_image = first_photo.media_file.url
             elif first_photo.media_url:
                 featured_image = first_photo.media_url
+
+    return featured_image
+
+
+def serialize_artist_summary(artist, request=None):
+    travel_map = {
+        "city": "Within my city",
+        "state": "Across my state",
+        "india": "Across India",
+        "international": "International",
+    }
+
+    featured_image = _resolve_artist_featured_image(artist, request)
 
     # Video preview resolution
     video_item = (
@@ -782,6 +788,56 @@ def serialize_artist_summary(artist, request=None):
         "is_verified": artist.is_verified,
         "rejection_notes": getattr(artist, "rejection_notes", ""),
     }
+
+
+@require_GET
+def public_upcoming_performances_view(request):
+    """Return upcoming booked/accepted performances with minimal public details."""
+    from zoneinfo import ZoneInfo
+
+    now = timezone.now()
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    qs = (
+        Booking.objects.filter(
+            status=Booking.Status.ACCEPTED,
+            event_date__gte=now,
+            artist__is_active=True,
+        )
+        .select_related("artist", "artist__category", "payment")
+        .prefetch_related("artist__portfolio_items")
+        .order_by("event_date")[:6]
+    )
+
+    shows = []
+    for b in qs:
+        local_dt = timezone.localtime(b.event_date, timezone=kolkata_tz)
+        location_parts = [p for p in [b.venue_name, b.city] if p]
+        location = (
+            b.event_location.strip()
+            if b.event_location and b.event_location.strip()
+            else ", ".join(location_parts) or b.artist.location
+        )
+        artist = b.artist
+        shows.append(
+            {
+                "id": b.id,
+                "event_type": b.event_type,
+                "event_date": local_dt.isoformat(),
+                "date_display": local_dt.strftime("%b %d, %Y"),
+                "time_display": local_dt.strftime("%I:%M %p").lstrip("0"),
+                "location": location,
+                "artist": {
+                    "id": artist.id,
+                    "stage_name": artist.stage_name,
+                    "category_name": artist.category.name if artist.category else "",
+                    "location": artist.location,
+                    "is_verified": artist.is_verified,
+                    "image": _resolve_artist_featured_image(artist, request),
+                },
+            }
+        )
+
+    return JsonResponse({"upcoming_performances": shows})
 
 
 @require_GET
@@ -1479,6 +1535,15 @@ def location_status_view(request):
 def create_booking_view(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Please sign in to book an artist."}, status=401)
+    if (
+        getattr(request.user, "artist_profile", None) is not None
+        or request.user.is_staff
+        or request.user.is_superuser
+    ):
+        return JsonResponse(
+            {"error": "Artist accounts cannot book other artists. Only customer accounts can make bookings."},
+            status=403,
+        )
 
     try:
         data = json.loads(request.body)
@@ -6531,3 +6596,256 @@ def chat_reset_view(request):
             "messages": [],
         }
     )
+
+
+# ============================================================================
+# ARTIST HELP & SUPPORT TICKETING SYSTEM
+# ============================================================================
+
+def _parse_support_payload(request):
+    """Parse JSON or multipart/form-data payload for support endpoints."""
+    if request.content_type and "multipart/form-data" in request.content_type:
+        return request.POST, request.FILES.get("attachment")
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, None
+    return data, None
+
+
+@csrf_protect
+@require_http_methods(["GET", "POST"])
+def artist_support_tickets_view(request):
+    """
+    GET  /api/artist/support/tickets/ - List artist's own support tickets with filters & pagination.
+    POST /api/artist/support/tickets/ - Create a new support ticket with optional attachment.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+    if not hasattr(request.user, "artist_profile"):
+        return JsonResponse({"error": "Artist account required."}, status=403)
+
+    from django.core.paginator import Paginator
+    from app.models import SupportMessage, SupportTicket
+    from app.services.support_service import (
+        notify_admins_new_ticket,
+        serialize_support_ticket,
+        validate_support_attachment,
+    )
+
+    if request.method == "GET":
+        qs = (
+            SupportTicket.objects.filter(artist=request.user)
+            .select_related("artist", "artist__artist_profile", "artist__artist_profile__category")
+            .prefetch_related("messages", "messages__sender", "messages__sender__artist_profile")
+            .order_by("-updated_at", "-created_at")
+        )
+
+        status_filter = (request.GET.get("status") or "").strip().lower()
+        category_filter = (request.GET.get("category") or "").strip().lower()
+        search_q = (request.GET.get("search") or "").strip()
+
+        if status_filter and status_filter != "all":
+            qs = qs.filter(status=status_filter)
+        if category_filter and category_filter != "all":
+            qs = qs.filter(category=category_filter)
+        if search_q:
+            qs = qs.filter(
+                Q(ticket_number__icontains=search_q) | Q(subject__icontains=search_q)
+            )
+
+        try:
+            page_num = max(1, int(request.GET.get("page", 1)))
+        except (TypeError, ValueError):
+            page_num = 1
+        try:
+            page_size = min(50, max(1, int(request.GET.get("page_size", 10))))
+        except (TypeError, ValueError):
+            page_size = 10
+
+        paginator = Paginator(qs, page_size)
+        page_obj = paginator.get_page(page_num)
+
+        tickets = [
+            serialize_support_ticket(t, viewer_user=request.user, include_messages=False, request=request)
+            for t in page_obj.object_list
+        ]
+
+        unread_tickets_count = (
+            SupportMessage.objects.filter(
+                ticket__artist=request.user,
+                is_read=False,
+            )
+            .exclude(sender=request.user)
+            .values("ticket_id")
+            .distinct()
+            .count()
+        )
+
+        return JsonResponse(
+            {
+                "tickets": tickets,
+                "total_count": paginator.count,
+                "page": page_obj.number,
+                "total_pages": paginator.num_pages,
+                "unread_tickets_count": unread_tickets_count,
+                "categories": [
+                    {"value": c[0], "label": c[1]} for c in SupportTicket.Category.choices
+                ],
+                "statuses": [
+                    {"value": s[0], "label": s[1]} for s in SupportTicket.Status.choices
+                ],
+            }
+        )
+
+    # POST: Create new support ticket
+    data, attachment = _parse_support_payload(request)
+    if data is None:
+        return JsonResponse({"error": "Invalid request payload."}, status=400)
+
+    category = (data.get("category") or SupportTicket.Category.GENERAL_QUERY).strip()
+    subject = (data.get("subject") or "").strip()
+    message_text = (data.get("message") or "").strip()
+
+    if category not in SupportTicket.Category.values:
+        return JsonResponse({"error": "Invalid support request category."}, status=400)
+    if not subject:
+        return JsonResponse({"error": "Subject is required."}, status=400)
+    if len(subject) > 200:
+        return JsonResponse({"error": "Subject must be 200 characters or fewer."}, status=400)
+    if not message_text:
+        return JsonResponse({"error": "Detailed message is required."}, status=400)
+
+    valid_file, file_err = validate_support_attachment(attachment)
+    if not valid_file:
+        return JsonResponse({"error": file_err}, status=400)
+
+    with transaction.atomic():
+        ticket = SupportTicket.objects.create(
+            artist=request.user,
+            category=category,
+            subject=subject,
+            status=SupportTicket.Status.OPEN,
+        )
+        SupportMessage.objects.create(
+            ticket=ticket,
+            sender=request.user,
+            message=message_text,
+            attachment=attachment,
+            is_read=False,
+        )
+
+    notify_admins_new_ticket(ticket)
+
+    return JsonResponse(
+        {
+            "message": f"Support ticket {ticket.ticket_number} submitted successfully.",
+            "ticket": serialize_support_ticket(
+                ticket, viewer_user=request.user, include_messages=True, request=request
+            ),
+        },
+        status=201,
+    )
+
+
+@require_GET
+def artist_support_ticket_detail_view(request, ticket_id):
+    """
+    GET /api/artist/support/tickets/<ticket_id>/ - Get ticket conversation and mark admin replies as read.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+    if not hasattr(request.user, "artist_profile"):
+        return JsonResponse({"error": "Artist account required."}, status=403)
+
+    from app.models import SupportTicket
+    from app.services.support_service import serialize_support_ticket
+
+    ticket = (
+        SupportTicket.objects.filter(id=ticket_id, artist=request.user)
+        .select_related("artist", "artist__artist_profile", "artist__artist_profile__category")
+        .first()
+    )
+    if not ticket:
+        return JsonResponse({"error": "Support ticket not found."}, status=404)
+
+    # Mark unread messages from admin as read
+    ticket.messages.filter(is_read=False).exclude(sender=request.user).update(is_read=True)
+
+    return JsonResponse(
+        {
+            "ticket": serialize_support_ticket(
+                ticket, viewer_user=request.user, include_messages=True, request=request
+            )
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def artist_support_ticket_reply_view(request, ticket_id):
+    """
+    POST /api/artist/support/tickets/<ticket_id>/reply/ - Artist replies to an open/active support ticket.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+    if not hasattr(request.user, "artist_profile"):
+        return JsonResponse({"error": "Artist account required."}, status=403)
+
+    from app.models import SupportMessage, SupportTicket
+    from app.services.support_service import (
+        notify_admins_artist_reply,
+        serialize_support_ticket,
+        validate_support_attachment,
+    )
+
+    ticket = SupportTicket.objects.filter(id=ticket_id, artist=request.user).first()
+    if not ticket:
+        return JsonResponse({"error": "Support ticket not found."}, status=404)
+
+    if ticket.status == SupportTicket.Status.CLOSED:
+        return JsonResponse(
+            {"error": "This ticket is closed and cannot receive new replies."},
+            status=400,
+        )
+
+    data, attachment = _parse_support_payload(request)
+    if data is None:
+        return JsonResponse({"error": "Invalid request payload."}, status=400)
+
+    message_text = (data.get("message") or "").strip()
+    if not message_text and not attachment:
+        return JsonResponse({"error": "Reply message or attachment is required."}, status=400)
+    if not message_text:
+        message_text = "(Attachment uploaded)"
+
+    valid_file, file_err = validate_support_attachment(attachment)
+    if not valid_file:
+        return JsonResponse({"error": file_err}, status=400)
+
+    with transaction.atomic():
+        SupportMessage.objects.create(
+            ticket=ticket,
+            sender=request.user,
+            message=message_text,
+            attachment=attachment,
+            is_read=False,
+        )
+        if ticket.status == SupportTicket.Status.AWAITING_RESPONSE:
+            ticket.status = SupportTicket.Status.IN_PROGRESS
+            ticket.save(update_fields=["status", "updated_at"])
+        else:
+            ticket.save(update_fields=["updated_at"])
+
+    notify_admins_artist_reply(ticket)
+
+    return JsonResponse(
+        {
+            "message": "Reply sent successfully.",
+            "ticket": serialize_support_ticket(
+                ticket, viewer_user=request.user, include_messages=True, request=request
+            ),
+        },
+        status=201,
+    )
+

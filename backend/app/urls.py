@@ -12,6 +12,7 @@ urlpatterns = [
     path("artist/categories/", views.artist_categories, name="artist_categories"),
     path("artist/profile/", views.artist_profile_view, name="artist_profile"),
     path("artists/", views.artists_list_view, name="artists_list"),
+    path("upcoming-performances/", views.public_upcoming_performances_view, name="public_upcoming_performances"),
     path("artists/<int:artist_id>/", views.artist_detail_view, name="artist_detail"),
     path("artists/<int:artist_id>/availability/", views.artist_public_availability_view, name="artist_availability_public"),
     path("locations/autocomplete/", views.location_autocomplete_view, name="location_autocomplete"),
@@ -54,6 +55,9 @@ urlpatterns = [
     path("artist/portfolio/<int:item_id>/delete/", views.artist_portfolio_delete_view, name="artist_portfolio_delete"),
     path("artist/availability/", views.artist_availability_view, name="artist_availability"),
     path("artist/availability/<int:avail_id>/delete/", views.artist_availability_delete_view, name="artist_availability_delete"),
+    path("artist/support/tickets/", views.artist_support_tickets_view, name="artist_support_tickets"),
+    path("artist/support/tickets/<int:ticket_id>/", views.artist_support_ticket_detail_view, name="artist_support_ticket_detail"),
+    path("artist/support/tickets/<int:ticket_id>/reply/", views.artist_support_ticket_reply_view, name="artist_support_ticket_reply"),
 
     path("bookings/<int:booking_id>/create-order/", views.create_razorpay_order_view, name="create_razorpay_order"),
     path("bookings/<int:booking_id>/refund/retry/", views.retry_booking_refund_view, name="retry_booking_refund"),

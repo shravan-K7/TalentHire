@@ -950,3 +950,93 @@ export async function checkBookingExpiry(bookingId) {
     return data;
 }
 
+// ============================================================================
+// ARTIST HELP & SUPPORT TICKETS API
+// ============================================================================
+
+export async function fetchArtistSupportTickets({
+    status = "all",
+    category = "all",
+    search = "",
+    page = 1,
+    pageSize = 10,
+} = {}) {
+    const params = new URLSearchParams({
+        status,
+        category,
+        search,
+        page: String(page),
+        page_size: String(pageSize),
+    });
+    const response = await fetch(`/api/artist/support/tickets/?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load support tickets.");
+    }
+    return data;
+}
+
+export async function createArtistSupportTicket({ category, subject, message, attachment = null }) {
+    const token = await getCsrfToken();
+    const formData = new FormData();
+    formData.append("category", category || "general_query");
+    formData.append("subject", subject || "");
+    formData.append("message", message || "");
+    if (attachment) {
+        formData.append("attachment", attachment);
+    }
+
+    const response = await fetch("/api/artist/support/tickets/", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "X-CSRFToken": token,
+        },
+        body: formData,
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to submit support ticket.");
+    }
+    return data;
+}
+
+export async function fetchArtistSupportTicketDetail(ticketId) {
+    const response = await fetch(`/api/artist/support/tickets/${ticketId}/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load ticket conversation.");
+    }
+    return data;
+}
+
+export async function replyArtistSupportTicket(ticketId, { message, attachment = null }) {
+    const token = await getCsrfToken();
+    const formData = new FormData();
+    formData.append("message", message || "");
+    if (attachment) {
+        formData.append("attachment", attachment);
+    }
+
+    const response = await fetch(`/api/artist/support/tickets/${ticketId}/reply/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "X-CSRFToken": token,
+        },
+        body: formData,
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to send reply.");
+    }
+    return data;
+}
+
+

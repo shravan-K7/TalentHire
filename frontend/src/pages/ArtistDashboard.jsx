@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import gsap from "gsap";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import ArtistSupportTab from "../components/artist/ArtistSupportTab";
 import {
   fetchArtistDashboard,
   respondArtistBooking,
@@ -288,6 +289,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
 
   // Support Inquiry State
   const [supportForm, setSupportForm] = useState({ subject: "", message: "" });
+  const [unreadSupportCount, setUnreadSupportCount] = useState(0);
   const [supportSending, setSupportSending] = useState(false);
   const [supportSuccessMsg, setSupportSuccessMsg] = useState("");
   const [supportErrorMsg, setSupportErrorMsg] = useState("");
@@ -1902,6 +1904,11 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             >
               <Headset className="artist-nav-icon" size={19} strokeWidth={2} />
               <span className="artist-nav-label">Help & Support</span>
+              {unreadSupportCount > 0 && (
+                <span className="artist-nav-badge" aria-label={`${unreadSupportCount} unread support replies`}>
+                  {unreadSupportCount}
+                </span>
+              )}
             </button>
 
             {/* 12. Settings */}
@@ -5561,100 +5568,7 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               TAB 11: ARTIST HELP & SUPPORT PAGE
               ================================================================= */}
           {activeTab === "support" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-              <div className="cd-form-card">
-                <div className="cd-form-header">
-                  <h2 className="cd-form-title">Artist Help & Support</h2>
-                  <p className="cd-form-subtext">
-                    Have questions about bookings, payments, or your artist profile? Submit an inquiry and our support team will respond promptly.
-                  </p>
-                </div>
-
-                {supportSuccessMsg && (
-                  <div className="cd-alert-success" role="status" style={{ marginBottom: "16px" }}>
-                    {supportSuccessMsg}
-                  </div>
-                )}
-                {supportErrorMsg && (
-                  <div className="cd-alert-error" role="alert" style={{ marginBottom: "16px" }}>
-                    {supportErrorMsg}
-                  </div>
-                )}
-
-                <form onSubmit={handleSupportSubmit} className="cd-form">
-                  <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="support_subject">
-                      Inquiry Subject *
-                    </label>
-                    <input
-                      id="support_subject"
-                      type="text"
-                      className="cd-input"
-                      placeholder="e.g. Question about booking payout, cancellation, or schedule"
-                      value={supportForm.subject}
-                      onChange={(e) =>
-                        setSupportForm((p) => ({ ...p, subject: e.target.value }))
-                      }
-                      required
-                    />
-                  </div>
-
-                  <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="support_message">
-                      Message Details *
-                    </label>
-                    <textarea
-                      id="support_message"
-                      rows={5}
-                      className="cd-textarea"
-                      placeholder="Describe your inquiry with relevant details such as booking reference or dates..."
-                      value={supportForm.message}
-                      onChange={(e) =>
-                        setSupportForm((p) => ({ ...p, message: e.target.value }))
-                      }
-                      required
-                    />
-                  </div>
-
-                  <div className="cd-form-actions">
-                    <button
-                      type="submit"
-                      className="cd-btn-primary cd-btn-sm"
-                      disabled={supportSending}
-                    >
-                      {supportSending ? "Submitting..." : "Submit Support Request"}
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* Quick Help & FAQs Card */}
-              <div className="cd-profile-card">
-                <h3 className="cd-card-title" style={{ marginBottom: "14px" }}>
-                  Frequently Asked Questions
-                </h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                  <div style={{ background: "rgba(255, 255, 255, 0.03)", padding: "14px 16px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
-                    <strong style={{ color: "#F7F7F7", fontSize: "0.95rem" }}>When do I receive booking payouts?</strong>
-                    <p style={{ margin: "6px 0 0", color: "#AAAAAA", fontSize: "0.88rem", lineHeight: 1.5 }}>
-                      Payouts are released directly after the event date and completion verification by the host. Check the Payments & Earnings tab for real-time history and payout receipts.
-                    </p>
-                  </div>
-                  <div style={{ background: "rgba(255, 255, 255, 0.03)", padding: "14px 16px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
-                    <strong style={{ color: "#F7F7F7", fontSize: "0.95rem" }}>How do I block unavailable dates?</strong>
-                    <p style={{ margin: "6px 0 0", color: "#AAAAAA", fontSize: "0.88rem", lineHeight: 1.5 }}>
-                      Navigate to Availability tab (CalendarCheck icon) to mark specific dates as unavailable for bookings so clients cannot inquire for those days.
-                    </p>
-                  </div>
-                  <div style={{ background: "rgba(255, 255, 255, 0.03)", padding: "14px 16px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.06)" }}>
-                    <strong style={{ color: "#F7F7F7", fontSize: "0.95rem" }}>What happens if I cancel a confirmed booking?</strong>
-                    <p style={{ margin: "6px 0 0", color: "#AAAAAA", fontSize: "0.88rem", lineHeight: 1.5 }}>
-                      Under TalentHire's Artist Cancellation Policy, cancelling an accepted booking releases your calendar date and immediately issues a full 100% refund to the client.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <ArtistSupportTab onUnreadChange={setUnreadSupportCount} />
           )}
         </main>
       </div>

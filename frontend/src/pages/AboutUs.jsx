@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import {
@@ -84,6 +85,10 @@ const WHY_CHOOSE_US = [
 ];
 
 export default function AboutUs({ user, onLogout, navigate }) {
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   function goTo(path) {
     if (navigate) {
       navigate(path);
@@ -129,18 +134,10 @@ export default function AboutUs({ user, onLogout, navigate }) {
 
           <div className="about-hero-banner" role="img" aria-label="Event performance banner">
             <img
-              src="https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80"
+              src="/images/about-banner.jpg"
               alt="Live stage event performance"
               className="about-hero-banner-img"
             />
-            <div className="about-hero-banner-overlay">
-              <div className="about-hero-banner-icon">
-                <Mic size={28} />
-              </div>
-              <span className="about-hero-banner-tag">
-                EVENT PERFORMANCE BANNER IMAGE
-              </span>
-            </div>
           </div>
         </section>
 

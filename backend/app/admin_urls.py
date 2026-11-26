@@ -37,6 +37,12 @@ urlpatterns = [
     path("complaints/", admin_views.admin_complaints_list_view, name="admin_complaints_list"),
     path("complaints/<int:complaint_id>/resolve/", admin_views.admin_complaint_resolve_view, name="admin_complaint_resolve"),
 
+    # Support Management (Artist Help & Support Tickets)
+    path("support/tickets/", admin_views.admin_support_tickets_list_view, name="admin_support_tickets_list"),
+    path("support/tickets/<int:ticket_id>/", admin_views.admin_support_ticket_detail_view, name="admin_support_ticket_detail"),
+    path("support/tickets/<int:ticket_id>/reply/", admin_views.admin_support_ticket_reply_view, name="admin_support_ticket_reply"),
+    path("support/tickets/<int:ticket_id>/status/", admin_views.admin_support_ticket_status_view, name="admin_support_ticket_status"),
+
     # Reviews & Moderation
     path("reviews/", admin_views.admin_reviews_list_view, name="admin_reviews_list"),
     path("reviews/<int:review_id>/delete/", admin_views.admin_review_delete_view, name="admin_review_delete"),

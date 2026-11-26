@@ -267,3 +267,64 @@ export async function fetchAdminActivityLogs() {
   });
   return handleResponse(response);
 }
+
+// 13. Support Management (Artist Help & Support Tickets)
+export async function fetchAdminSupportTickets({
+  search = '',
+  status = 'all',
+  category = 'all',
+  page = 1,
+  pageSize = 15,
+} = {}) {
+  const params = new URLSearchParams({
+    search,
+    status,
+    category,
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  const response = await fetch(`${BASE_URL}/support/tickets/?${params.toString()}`, {
+    credentials: 'include',
+  });
+  return handleResponse(response);
+}
+
+export async function fetchAdminSupportTicketDetail(ticketId) {
+  const response = await fetch(`${BASE_URL}/support/tickets/${ticketId}/`, {
+    credentials: 'include',
+  });
+  return handleResponse(response);
+}
+
+export async function replyAdminSupportTicket(ticketId, { message, attachment = null, status = '' }) {
+  const csrfToken = await getCsrfToken();
+  const formData = new FormData();
+  formData.append('message', message || '');
+  if (status) formData.append('status', status);
+  if (attachment) formData.append('attachment', attachment);
+
+  const response = await fetch(`${BASE_URL}/support/tickets/${ticketId}/reply/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'X-CSRFToken': csrfToken,
+    },
+    body: formData,
+  });
+  return handleResponse(response);
+}
+
+export async function updateAdminSupportTicketStatus(ticketId, status) {
+  const csrfToken = await getCsrfToken();
+  const response = await fetch(`${BASE_URL}/support/tickets/${ticketId}/status/`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': csrfToken,
+    },
+    body: JSON.stringify({ status }),
+  });
+  return handleResponse(response);
+}
+

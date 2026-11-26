@@ -50,6 +50,14 @@ from app.models import (
     Refund,
     ReschedulingRequest,
     Review,
+    SupportMessage,
+    SupportTicket,
+)
+from app.services.support_service import (
+    notify_artist_ticket_reply,
+    notify_artist_ticket_status,
+    serialize_support_ticket,
+    validate_support_attachment,
 )
 
 User = get_user_model()
@@ -190,10 +198,19 @@ def admin_overview_view(request):
     ).exclude(title__icontains="[Resolved]").count()
     flagged_reviews_count = Review.objects.filter(rating__lte=2).count()
 
+    open_support_tickets = SupportTicket.objects.filter(
+        status__in=[
+            SupportTicket.Status.OPEN,
+            SupportTicket.Status.IN_PROGRESS,
+            SupportTicket.Status.AWAITING_RESPONSE,
+        ]
+    ).count()
+
     pending_actions = {
         "artist_verifications": pending_verifications,
         "refund_requests": pending_refunds_count,
         "open_complaints": open_complaints_count,
+        "open_support_tickets": open_support_tickets,
         "flagged_reviews": flagged_reviews_count,
     }
 
@@ -1524,3 +1541,207 @@ def _format_relative_time(dt):
         return f"{diff.days}d ago"
     else:
         return dt.astimezone(KOLKATA_TZ).strftime("%d %b %Y")
+
+
+# ============================================================================
+# 13. SUPPORT MANAGEMENT (ARTIST TICKETS & CONVERSATIONS)
+# ============================================================================
+
+@require_GET
+@admin_required
+def admin_support_tickets_list_view(request):
+    """
+    List all artist support tickets with search, category/status filters, and pagination.
+    """
+    from django.core.paginator import Paginator
+
+    qs = (
+        SupportTicket.objects.all()
+        .select_related("artist", "artist__artist_profile", "artist__artist_profile__category")
+        .prefetch_related("messages", "messages__sender", "messages__sender__artist_profile")
+        .order_by("-updated_at", "-created_at")
+    )
+
+    search_q = (request.GET.get("search") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip().lower()
+    category_filter = (request.GET.get("category") or "").strip().lower()
+
+    if search_q:
+        qs = qs.filter(
+            Q(ticket_number__icontains=search_q)
+            | Q(subject__icontains=search_q)
+            | Q(artist__username__icontains=search_q)
+            | Q(artist__email__icontains=search_q)
+            | Q(artist__artist_profile__stage_name__icontains=search_q)
+        )
+    if status_filter and status_filter != "all":
+        qs = qs.filter(status=status_filter)
+    if category_filter and category_filter != "all":
+        qs = qs.filter(category=category_filter)
+
+    try:
+        page_num = max(1, int(request.GET.get("page", 1)))
+    except (TypeError, ValueError):
+        page_num = 1
+    try:
+        page_size = min(50, max(1, int(request.GET.get("page_size", 15))))
+    except (TypeError, ValueError):
+        page_size = 15
+
+    paginator = Paginator(qs, page_size)
+    page_obj = paginator.get_page(page_num)
+
+    tickets = [
+        serialize_support_ticket(t, viewer_user=request.user, include_messages=False, request=request)
+        for t in page_obj.object_list
+    ]
+
+    open_count = SupportTicket.objects.filter(
+        status__in=[
+            SupportTicket.Status.OPEN,
+            SupportTicket.Status.IN_PROGRESS,
+            SupportTicket.Status.AWAITING_RESPONSE,
+        ]
+    ).count()
+
+    return JsonResponse({
+        "success": True,
+        "tickets": tickets,
+        "total_count": paginator.count,
+        "open_count": open_count,
+        "page": page_obj.number,
+        "total_pages": paginator.num_pages,
+        "categories": [{"value": c[0], "label": c[1]} for c in SupportTicket.Category.choices],
+        "statuses": [{"value": s[0], "label": s[1]} for s in SupportTicket.Status.choices],
+    })
+
+
+@require_GET
+@admin_required
+def admin_support_ticket_detail_view(request, ticket_id):
+    """
+    Retrieve full ticket conversation and artist info, marking artist messages as read.
+    """
+    ticket = (
+        SupportTicket.objects.filter(id=ticket_id)
+        .select_related("artist", "artist__artist_profile", "artist__artist_profile__category")
+        .first()
+    )
+    if not ticket:
+        return JsonResponse({"error": "Support ticket not found."}, status=404)
+
+    # Mark unread artist messages as read by admin
+    ticket.messages.filter(sender_id=ticket.artist_id, is_read=False).update(is_read=True)
+
+    return JsonResponse({
+        "success": True,
+        "ticket": serialize_support_ticket(
+            ticket, viewer_user=request.user, include_messages=True, request=request
+        ),
+    })
+
+
+@csrf_protect
+@require_POST
+@admin_required
+def admin_support_ticket_reply_view(request, ticket_id):
+    """
+    Admin replies to an artist support ticket (supports optional attachment and status update).
+    """
+    ticket = SupportTicket.objects.filter(id=ticket_id).select_related("artist").first()
+    if not ticket:
+        return JsonResponse({"error": "Support ticket not found."}, status=404)
+
+    if request.content_type and "multipart/form-data" in request.content_type:
+        data = request.POST
+        attachment = request.FILES.get("attachment")
+    else:
+        try:
+            data = json.loads(request.body) if request.body else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"error": "Invalid JSON body."}, status=400)
+        attachment = None
+
+    message_text = (data.get("message") or "").strip()
+    new_status = (data.get("status") or "").strip()
+
+    if not message_text and not attachment:
+        return JsonResponse({"error": "Reply message or attachment is required."}, status=400)
+    if not message_text:
+        message_text = "(Attachment uploaded)"
+
+    if new_status and new_status not in SupportTicket.Status.values:
+        return JsonResponse({"error": "Invalid ticket status."}, status=400)
+
+    valid_file, file_err = validate_support_attachment(attachment)
+    if not valid_file:
+        return JsonResponse({"error": file_err}, status=400)
+
+    old_status = ticket.status
+    target_status = new_status or (
+        SupportTicket.Status.AWAITING_RESPONSE
+        if old_status in (SupportTicket.Status.OPEN, SupportTicket.Status.IN_PROGRESS)
+        else old_status
+    )
+
+    with transaction.atomic():
+        SupportMessage.objects.create(
+            ticket=ticket,
+            sender=request.user,
+            message=message_text,
+            attachment=attachment,
+            is_read=False,
+        )
+        ticket.status = target_status
+        ticket.save(update_fields=["status", "updated_at"])
+
+    notify_artist_ticket_reply(ticket)
+    if old_status != target_status:
+        notify_artist_ticket_status(ticket, old_status, target_status)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": "Reply sent to artist.",
+            "ticket": serialize_support_ticket(
+                ticket, viewer_user=request.user, include_messages=True, request=request
+            ),
+        },
+        status=201,
+    )
+
+
+@csrf_protect
+@require_POST
+@admin_required
+def admin_support_ticket_status_view(request, ticket_id):
+    """
+    Update a support ticket's status (Open, In Progress, Awaiting Response, Resolved, Closed).
+    """
+    ticket = SupportTicket.objects.filter(id=ticket_id).select_related("artist").first()
+    if not ticket:
+        return JsonResponse({"error": "Support ticket not found."}, status=404)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+    new_status = (data.get("status") or "").strip()
+    if new_status not in SupportTicket.Status.values:
+        return JsonResponse({"error": "Invalid ticket status."}, status=400)
+
+    old_status = ticket.status
+    if old_status != new_status:
+        ticket.status = new_status
+        ticket.save(update_fields=["status", "updated_at"])
+        notify_artist_ticket_status(ticket, old_status, new_status)
+
+    return JsonResponse({
+        "success": True,
+        "message": f"Ticket status updated to {ticket.get_status_display()}.",
+        "ticket": serialize_support_ticket(
+            ticket, viewer_user=request.user, include_messages=True, request=request
+        ),
+    })
+

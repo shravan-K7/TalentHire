@@ -152,12 +152,13 @@
   height: 100%;
   object-fit: cover;
   display: block;
-  opacity: 0.38;
-  transition: opacity 0.3s ease;
+  opacity: 0.94;
+  transition: opacity 0.3s ease, transform 0.35s ease;
 }
 
 .about-hero-banner:hover .about-hero-banner-img {
-  opacity: 0.46;
+  opacity: 1;
+  transform: scale(1.02);
 }
 
 .about-hero-banner-overlay {

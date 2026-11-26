@@ -70,16 +70,6 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [imageErrors, setImageErrors] = useState({});
 
-  // Custom Quote Modal State
-  const [showQuoteModal, setShowQuoteModal] = useState(false);
-  const [quoteForm, setQuoteForm] = useState({
-    eventType: 'Wedding Reception',
-    eventDate: '',
-    venue: '',
-    audience: '200',
-    message: '',
-  });
-
   useEffect(() => {
     let ignore = false;
 
@@ -318,6 +308,12 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
   }
 
   const isOwner = user && artist && user.artist_profile && user.artist_profile.id === artist.id;
+  const isArtistAccount = user?.role === 'artist' || user?.is_artist;
+  const rawTravel = artist?.travel_availability_display || 'Across my state';
+  const travelDisplay =
+    (artist?.travel_availability === 'city' || rawTravel.toLowerCase() === 'within my city') && artist?.location
+      ? `${rawTravel} (${artist.location})`
+      : rawTravel;
 
   return (
     <div className="artist-details-wrapper">
@@ -545,7 +541,7 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
                     </svg>
-                    <span>Travel: <strong>{artist.travel_availability_display || 'Across my state'}</strong></span>
+                    <span>Travel: <strong>{travelDisplay}</strong></span>
                   </span>
                   <span className="meta-divider">•</span>
                   <span>{artist.languages || 'English & Hindi'}</span>
@@ -577,7 +573,7 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
 
                   <div className="artist-stat-card">
                     <span className="artist-stat-value highlight-travel-stat">
-                      {artist.travel_availability_display || 'Across my state'}
+                      {travelDisplay}
                     </span>
                     <span className="artist-stat-label">Travel availability</span>
                   </div>
@@ -768,7 +764,7 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                     <div className="booking-travel-content">
                       <span className="booking-travel-title">Travel Availability</span>
                       <span className="booking-travel-value">
-                        {artist.travel_availability_display || 'Across my state'}
+                        {travelDisplay}
                       </span>
                     </div>
                   </div>
@@ -784,33 +780,27 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                     >
                       Manage My Artist Studio
                     </button>
+                  ) : isArtistAccount ? (
+                    <p className="booking-fee-note" role="status">
+                      Artist accounts cannot book other artists. Only customer accounts can make bookings.
+                    </p>
                   ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="booking-btn-primary"
-                        onClick={() => {
-                          if (!user) {
-                            const dest = `/login?redirect=${encodeURIComponent(`/book-artist/${artist.id}`)}`;
-                            if (navigate) navigate(dest);
-                            else window.location.assign(dest);
-                          } else {
-                            if (navigate) navigate(`/book-artist/${artist.id}`);
-                            else window.location.assign(`/book-artist/${artist.id}`);
-                          }
-                        }}
-                      >
-                        Book Now
-                      </button>
-
-                      <button
-                        type="button"
-                        className="booking-btn-quote"
-                        onClick={() => setShowQuoteModal(true)}
-                      >
-                        Get Custom Quote
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      className="booking-btn-primary"
+                      onClick={() => {
+                        if (!user) {
+                          const dest = `/login?redirect=${encodeURIComponent(`/book-artist/${artist.id}`)}`;
+                          if (navigate) navigate(dest);
+                          else window.location.assign(dest);
+                        } else {
+                          if (navigate) navigate(`/book-artist/${artist.id}`);
+                          else window.location.assign(`/book-artist/${artist.id}`);
+                        }
+                      }}
+                    >
+                      Book Now
+                    </button>
                   )}
 
                   <div className="booking-checklist">
@@ -955,140 +945,6 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                 </svg>
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Get Custom Quote Modal */}
-      {showQuoteModal && (
-        <div className="modal-overlay" onClick={() => setShowQuoteModal(false)}>
-          <div
-            className="video-modal-box"
-            style={{ maxWidth: 540 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="video-modal-header">
-              <h3 className="video-modal-title">
-                Get Custom Quote from {artist?.stage_name}
-              </h3>
-              <button
-                type="button"
-                className="modal-close-icon-btn"
-                onClick={() => setShowQuoteModal(false)}
-                aria-label="Close quote modal"
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setShowQuoteModal(false);
-                const query = new URLSearchParams({
-                  quote: '1',
-                  event_type: quoteForm.eventType,
-                  event_date: quoteForm.eventDate,
-                  venue: quoteForm.venue,
-                  audience: quoteForm.audience,
-                  message: quoteForm.message,
-                }).toString();
-                const dest = user
-                  ? `/book-artist/${artist.id}?${query}`
-                  : `/login?redirect=${encodeURIComponent(`/book-artist/${artist.id}?${query}`)}`;
-                if (navigate) navigate(dest);
-                else window.location.assign(dest);
-              }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 10 }}
-            >
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#A0A0A0', marginBottom: 6 }}>
-                  Event Type
-                </label>
-                <select
-                  className="artist-port-modal-input"
-                  value={quoteForm.eventType}
-                  onChange={(e) => setQuoteForm({ ...quoteForm, eventType: e.target.value })}
-                >
-                  <option value="Wedding Reception">Wedding Reception</option>
-                  <option value="Corporate Event">Corporate Event</option>
-                  <option value="College Fest">College Fest</option>
-                  <option value="Birthday Party">Birthday Party</option>
-                  <option value="Private Celebration">Private Celebration</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#A0A0A0', marginBottom: 6 }}>
-                    Tentative Date
-                  </label>
-                  <input
-                    type="date"
-                    className="artist-port-modal-input"
-                    value={quoteForm.eventDate}
-                    onChange={(e) => setQuoteForm({ ...quoteForm, eventDate: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: '#A0A0A0', marginBottom: 6 }}>
-                    Expected Audience
-                  </label>
-                  <input
-                    type="number"
-                    className="artist-port-modal-input"
-                    placeholder="e.g. 250"
-                    value={quoteForm.audience}
-                    onChange={(e) => setQuoteForm({ ...quoteForm, audience: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#A0A0A0', marginBottom: 6 }}>
-                  Venue / City
-                </label>
-                <input
-                  type="text"
-                  className="artist-port-modal-input"
-                  placeholder="e.g. Kannur, Kerala"
-                  value={quoteForm.venue}
-                  onChange={(e) => setQuoteForm({ ...quoteForm, venue: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: '#A0A0A0', marginBottom: 6 }}>
-                  Event Details / Message
-                </label>
-                <textarea
-                  className="artist-port-modal-input"
-                  rows={3}
-                  placeholder="Describe your event requirements, schedule, or duration..."
-                  value={quoteForm.message}
-                  onChange={(e) => setQuoteForm({ ...quoteForm, message: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="artist-port-modal-btn-cancel"
-                  onClick={() => setShowQuoteModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="artist-port-modal-btn-save"
-                >
-                  Proceed to Booking
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

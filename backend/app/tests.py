@@ -374,7 +374,7 @@ class BookingViewTests(TestCase):
         )
         self.assertEqual(res.status_code, 401)
 
-    def test_create_booking_self_booking_prevented(self):
+    def test_artist_cannot_create_booking(self):
         self.client.login(username="performingartist", password="securepassword123")
         res = self.client.post(
             "/api/bookings/",
@@ -388,8 +388,8 @@ class BookingViewTests(TestCase):
             }),
             content_type="application/json",
         )
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("cannot book your own", res.json()["error"])
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("Only customer accounts can make bookings", res.json()["error"])
 
     def test_create_booking_past_date_rejected(self):
         self.client.login(username="bookingcustomer", password="securepassword123")

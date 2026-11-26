@@ -130,27 +130,6 @@ const CATEGORIES = [
   },
 ];
 
-const UPCOMING_PERFORMANCES = [
-  {
-    id: 1,
-    title: 'Sunburn Arena Live - DJ Nucleya',
-    dateVenue: 'Nov 18, 2026 · NSCI Dome, Mumbai',
-    image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 2,
-    title: 'Soulful Sufi Symphony - Kabir Ensemble',
-    dateVenue: 'Nov 28, 2026 · Siri Fort Auditorium, New Delhi',
-    image: 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 3,
-    title: 'Echoes of Classical Fusion - Anoushka & Co',
-    dateVenue: 'Dec 12, 2026 · Palace Grounds, Bengaluru',
-    image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=800&q=80',
-  },
-];
-
 function Home({ user, onLogout, navigate }) {
   // Search form fields
   const [eventType, setEventType] = useState('');
@@ -159,6 +138,8 @@ function Home({ user, onLogout, navigate }) {
 
   // Featured artists from backend or fallback
   const [featuredArtists, setFeaturedArtists] = useState(DEFAULT_FEATURED_ARTISTS);
+  const [upcomingPerformances, setUpcomingPerformances] = useState([]);
+  const [upcomingLoading, setUpcomingLoading] = useState(true);
 
   // Check if current user is logged in strictly as a customer (not already registered as performing artist)
   const isCustomerOnly = Boolean(
@@ -201,7 +182,24 @@ function Home({ user, onLogout, navigate }) {
       }
     }
 
+    async function loadUpcoming() {
+      try {
+        const res = await fetch('/api/auth/upcoming-performances/', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          if (!ignore && Array.isArray(data.upcoming_performances)) {
+            setUpcomingPerformances(data.upcoming_performances.slice(0, 3));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load upcoming booked performances:', err);
+      } finally {
+        if (!ignore) setUpcomingLoading(false);
+      }
+    }
+
     loadFeatured();
+    loadUpcoming();
     return () => {
       ignore = true;
     };
@@ -306,6 +304,7 @@ function Home({ user, onLogout, navigate }) {
                     placeholder="Enter city"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
+                    required
                   />
                 </div>
 
@@ -509,22 +508,64 @@ function Home({ user, onLogout, navigate }) {
             <p className="section-sub-heading">Most booked this month, and shows you can catch live.</p>
           </div>
 
-          <div className="upcoming-performances-grid">
-            {UPCOMING_PERFORMANCES.map((event) => (
-              <div key={event.id} className="upcoming-performance-card">
-                <div className="upcoming-performance-image-box">
-                  <img src={event.image} alt={event.title} className="upcoming-performance-image" />
-                  <div className="upcoming-performance-overlay">
-                    <span>[Event / artist image]</span>
+          {upcomingLoading ? (
+            <div className="upcoming-performances-empty">
+              Loading upcoming booked performances...
+            </div>
+          ) : upcomingPerformances.length === 0 ? (
+            <div className="upcoming-performances-empty">
+              No upcoming booked performances scheduled yet.
+            </div>
+          ) : (
+            <div className="upcoming-performances-grid">
+              {upcomingPerformances.map((show) => (
+                <article
+                  key={show.id}
+                  className="upcoming-performance-card"
+                  onClick={() => handleArtistClick(show.artist.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleArtistClick(show.artist.id);
+                    }
+                  }}
+                >
+                  <div className="upcoming-performance-image-box">
+                    {show.artist.image ? (
+                      <img
+                        src={show.artist.image}
+                        alt={show.artist.stage_name}
+                        className="upcoming-performance-image"
+                      />
+                    ) : (
+                      <div className="upcoming-performance-fallback">
+                        <span className="upcoming-performance-initial">
+                          {(show.artist.stage_name || 'A').charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="upcoming-performance-info">
-                  <h3 className="upcoming-performance-title">{event.title}</h3>
-                  <p className="upcoming-performance-venue">{event.dateVenue}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+                  <div className="upcoming-performance-info">
+                    <h3 className="upcoming-performance-title">{show.event_type}</h3>
+                    <p className="upcoming-performance-datetime">
+                      {show.date_display} · {show.time_display}
+                    </p>
+                    <p className="upcoming-performance-venue">{show.location}</p>
+                    <div className="upcoming-performance-artist">
+                      <span className="upcoming-artist-name">{show.artist.stage_name}</span>
+                      {show.artist.category_name && (
+                        <span className="upcoming-artist-category">
+                          {' '}· {show.artist.category_name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* =================================================================

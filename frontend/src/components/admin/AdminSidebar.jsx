@@ -18,6 +18,7 @@ import {
   Shield,
   FileText,
   Globe,
+  Headset,
 } from "lucide-react";
 
 export default function AdminSidebar({
@@ -25,6 +26,7 @@ export default function AdminSidebar({
   onSelectSection,
   pendingVerificationsCount = 0,
   openComplaintsCount = 0,
+  openSupportTicketsCount = 0,
   navigate,
 }) {
   const navGroups = [
@@ -73,6 +75,12 @@ export default function AdminSidebar({
           label: "Complaints & Disputes",
           icon: AlertCircle,
           badge: openComplaintsCount > 0 ? openComplaintsCount : null,
+        },
+        {
+          id: "support-management",
+          label: "Support Management",
+          icon: Headset,
+          badge: openSupportTicketsCount > 0 ? openSupportTicketsCount : null,
         },
         { id: "reviews", label: "Reviews & Ratings", icon: Star },
         { id: "notifications", label: "Notifications", icon: Bell },
