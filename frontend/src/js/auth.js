@@ -1039,4 +1039,47 @@ export async function replyArtistSupportTicket(ticketId, { message, attachment =
     return data;
 }
 
+// ============================================================================
+// Collaboration Discovery APIs (Phase 3)
+// ============================================================================
+
+export async function fetchCollaborationRecommendations(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, val]) => {
+        if (val !== null && val !== undefined && val !== "") {
+            query.append(key, val);
+        }
+    });
+    const queryString = query.toString();
+    const url = `/api/artist/collaborations/recommendations/${queryString ? `?${queryString}` : ""}`;
+    const response = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load collaboration recommendations.");
+    }
+    return data;
+}
+
+export async function calculateSharedCoverage(artistIds = []) {
+    const token = await getCsrfToken();
+    const response = await fetch("/api/artist/collaborations/shared-coverage/", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ artist_ids: artistIds }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to calculate shared coverage.");
+    }
+    return data;
+}
+
+
 

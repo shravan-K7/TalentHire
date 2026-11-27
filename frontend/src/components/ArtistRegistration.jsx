@@ -1,7 +1,6 @@
-import { useEffect, useState, useRef, useCallback } from "react";
-import { MapPin, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { getCsrfToken, fetchArtistCategories } from "../js/auth";
-import { autocompleteLocations } from "../services/locationService";
+import ArtistLocationCoverageFields from "./artist/ArtistLocationCoverageFields";
 import "../css/ArtistRegistration.css";
 
 const performanceOptions = [
@@ -43,15 +42,7 @@ export default function ArtistRegistration({
   const [isExistingProfile, setIsExistingProfile] = useState(false);
   const [existingImageUrl, setExistingImageUrl] = useState(null);
   const [isUnauthenticated, setIsUnauthenticated] = useState(false);
-
-  // Place autocomplete state
-  const [locationSuggestions, setLocationSuggestions] = useState([]);
-  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
-  const [highlightedLocationIndex, setHighlightedLocationIndex] = useState(-1);
-  const locationContainerRef = useRef(null);
-  const locationDebounceTimer = useRef(null);
-  const locationReqSeqRef = useRef(0);
+  const [initialServiceStates, setInitialServiceStates] = useState([]);
 
   const [form, setForm] = useState({
     stage_name: user?.artist_profile?.stage_name || "",
@@ -60,11 +51,14 @@ export default function ArtistRegistration({
     gender: user?.artist_profile?.gender || "male",
     bio: user?.artist_profile?.bio || "",
     location: user?.artist_profile?.location || "",
+    state: user?.artist_profile?.state?.id ? String(user.artist_profile.state.id) : "",
+    district: user?.artist_profile?.district?.id ? String(user.artist_profile.district.id) : "",
+    city: user?.artist_profile?.city?.id ? String(user.artist_profile.city.id) : "",
+    service_districts: user?.artist_profile?.service_district_ids || [],
     phone: user?.artist_profile?.phone || "",
     starting_price: user?.artist_profile?.starting_price || "",
     years_of_experience: "0",
     performance_types: [],
-    travel_availability: "city",
     portfolio_url: "",
     additional_information: "",
     profile_image: null,
@@ -117,14 +111,22 @@ export default function ArtistRegistration({
             gender: artist.gender || "male",
             bio: artist.bio || "",
             location: artist.location || "",
+            state: artist.state?.id ? String(artist.state.id) : "",
+            district: artist.district?.id ? String(artist.district.id) : "",
+            city: artist.city?.id ? String(artist.city.id) : "",
+            service_districts: Array.isArray(artist.service_district_ids)
+              ? artist.service_district_ids
+              : [],
             phone: artist.phone || "",
             starting_price: artist.starting_price || "",
             years_of_experience: String(artist.years_of_experience ?? "0"),
             performance_types: artist.performance_types || [],
-            travel_availability: artist.travel_availability || "city",
             portfolio_url: artist.portfolio_url || "",
             additional_information: artist.additional_information || "",
           }));
+          setInitialServiceStates(
+            Array.isArray(artist.service_states) ? artist.service_states : []
+          );
         }
       } catch (err) {
         if (!ignore) {
@@ -143,111 +145,6 @@ export default function ArtistRegistration({
       ignore = true;
     };
   }, []);
-
-  // Close place suggestions dropdown on click outside
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (
-        locationContainerRef.current &&
-        !locationContainerRef.current.contains(event.target)
-      ) {
-        setShowLocationDropdown(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const fetchLocationSuggestions = useCallback(async (queryText) => {
-    const clean = (queryText || "").trim();
-    if (clean.length < 2) {
-      setLocationSuggestions([]);
-      setShowLocationDropdown(false);
-      setLocationLoading(false);
-      return;
-    }
-
-    const currentReqId = ++locationReqSeqRef.current;
-    setLocationLoading(true);
-
-    try {
-      const res = await autocompleteLocations(clean);
-      if (currentReqId !== locationReqSeqRef.current) return;
-
-      if (res.suggestions && res.suggestions.length > 0) {
-        setLocationSuggestions(res.suggestions);
-        setShowLocationDropdown(true);
-        setHighlightedLocationIndex(-1);
-      } else {
-        setLocationSuggestions([]);
-        setShowLocationDropdown(false);
-      }
-    } catch {
-      if (currentReqId === locationReqSeqRef.current) {
-        setLocationSuggestions([]);
-        setShowLocationDropdown(false);
-      }
-    } finally {
-      if (currentReqId === locationReqSeqRef.current) {
-        setLocationLoading(false);
-      }
-    }
-  }, []);
-
-  function handleLocationChange(e) {
-    const value = e.target.value;
-    setForm((prev) => ({ ...prev, location: value }));
-
-    if (fieldErrors.location) {
-      setFieldErrors((prev) => ({ ...prev, location: null }));
-    }
-
-    if (locationDebounceTimer.current) {
-      clearTimeout(locationDebounceTimer.current);
-    }
-
-    locationDebounceTimer.current = setTimeout(() => {
-      fetchLocationSuggestions(value);
-    }, 320);
-  }
-
-  function handleSelectLocation(suggestion) {
-    const formatted =
-      suggestion.formatted_address ||
-      [suggestion.title, suggestion.subtitle].filter(Boolean).join(", ");
-    setForm((prev) => ({ ...prev, location: formatted }));
-    setShowLocationDropdown(false);
-    setLocationSuggestions([]);
-    if (fieldErrors.location) {
-      setFieldErrors((prev) => ({ ...prev, location: null }));
-    }
-  }
-
-  function handleLocationKeyDown(e) {
-    if (!showLocationDropdown || locationSuggestions.length === 0) return;
-
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlightedLocationIndex((prev) =>
-        prev < locationSuggestions.length - 1 ? prev + 1 : 0
-      );
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlightedLocationIndex((prev) =>
-        prev > 0 ? prev - 1 : locationSuggestions.length - 1
-      );
-    } else if (e.key === "Enter") {
-      if (
-        highlightedLocationIndex >= 0 &&
-        highlightedLocationIndex < locationSuggestions.length
-      ) {
-        e.preventDefault();
-        handleSelectLocation(locationSuggestions[highlightedLocationIndex]);
-      }
-    } else if (e.key === "Escape") {
-      setShowLocationDropdown(false);
-    }
-  }
 
   function handleChange(event) {
     const { name, value, files } = event.target;
@@ -294,7 +191,7 @@ export default function ArtistRegistration({
       const data = new FormData();
 
       Object.entries(form).forEach(([key, value]) => {
-        if (key === "performance_types") {
+        if (key === "performance_types" || key === "service_districts") {
           data.append(key, JSON.stringify(value));
         } else if (key === "profile_image") {
           if (value instanceof File) {
@@ -537,70 +434,6 @@ export default function ArtistRegistration({
             {renderError("bio")}
           </label>
 
-          <div className="artist-location-wrapper" ref={locationContainerRef}>
-            <label htmlFor="artist_location">Location *</label>
-            <div className="artist-location-input-box">
-              <input
-                id="artist_location"
-                name="location"
-                value={form.location}
-                onChange={handleLocationChange}
-                onFocus={() => {
-                  if (
-                    locationSuggestions.length > 0 &&
-                    form.location.trim().length >= 2
-                  ) {
-                    setShowLocationDropdown(true);
-                  }
-                }}
-                onKeyDown={handleLocationKeyDown}
-                required
-                maxLength={150}
-                placeholder="e.g. Mumbai, Maharashtra"
-                autoComplete="off"
-              />
-              {locationLoading && (
-                <div className="artist-location-spinner-icon">
-                  <Loader2 size={16} className="spin" />
-                </div>
-              )}
-            </div>
-            {renderError("location")}
-
-            {showLocationDropdown && locationSuggestions.length > 0 && (
-              <ul className="artist-location-dropdown" role="listbox">
-                {locationSuggestions.map((item, idx) => {
-                  const isHighlighted = idx === highlightedLocationIndex;
-                  return (
-                    <li
-                      key={item.place_id || `${item.title}-${idx}`}
-                      role="option"
-                      aria-selected={isHighlighted}
-                      className={`artist-location-option ${isHighlighted ? "active" : ""}`}
-                      onClick={() => handleSelectLocation(item)}
-                      onMouseEnter={() => setHighlightedLocationIndex(idx)}
-                    >
-                      <MapPin size={16} className="artist-location-pin" />
-                      <div className="artist-location-info">
-                        <div className="artist-location-title-row">
-                          <span className="artist-location-title">{item.title}</span>
-                          {item.area_type && (
-                            <span className="artist-location-tag">
-                              {item.area_type.replace(/([A-Z])/g, " $1").toLowerCase()}
-                            </span>
-                          )}
-                        </div>
-                        {item.subtitle && (
-                          <div className="artist-location-subtitle">{item.subtitle}</div>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-
           <label>
             Phone Number *
             <input
@@ -660,25 +493,45 @@ export default function ArtistRegistration({
         </div>
         {renderError("performance_types")}
 
-        <h2>Travel and Portfolio</h2>
+        <h2>Location &amp; Booking Coverage</h2>
 
         <div className="artist-grid">
-          <label>
-            Travel Availability *
-            <select
-              name="travel_availability"
-              value={form.travel_availability}
-              onChange={handleChange}
-              required
-            >
-              <option value="city">Within my city</option>
-              <option value="state">Across my state</option>
-              <option value="india">Across India</option>
-              <option value="international">International</option>
-            </select>
-            {renderError("travel_availability")}
-          </label>
+          <ArtistLocationCoverageFields
+            stateId={form.state}
+            districtId={form.district}
+            cityId={form.city}
+            serviceDistrictIds={form.service_districts}
+            initialServiceStates={initialServiceStates}
+            legacyLocation={form.location}
+            errors={fieldErrors}
+            onBaseLocationChange={(loc) => {
+              setForm((prev) => ({
+                ...prev,
+                state: loc.state,
+                district: loc.district,
+                city: loc.city,
+                location: loc.location,
+              }));
+              setFieldErrors((prev) => ({
+                ...prev,
+                state: null,
+                district: null,
+                city: null,
+                location: null,
+              }));
+            }}
+            onServiceDistrictsChange={(ids) => {
+              setForm((prev) => ({ ...prev, service_districts: ids }));
+              if (fieldErrors.service_districts) {
+                setFieldErrors((prev) => ({ ...prev, service_districts: null }));
+              }
+            }}
+          />
+        </div>
 
+        <h2>Portfolio &amp; Additional Details</h2>
+
+        <div className="artist-grid">
           <label>
             Portfolio or Video URL
             <input

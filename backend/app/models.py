@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -9,6 +10,92 @@ class Category(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Country(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    code = models.CharField(max_length=10, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name_plural = "Countries"
+
+    def __str__(self):
+        return self.name
+
+
+class State(models.Model):
+    country = models.ForeignKey(
+        Country,
+        on_delete=models.PROTECT,
+        related_name="states",
+    )
+    name = models.CharField(max_length=120, db_index=True)
+    code = models.CharField(max_length=10, blank=True, default="")
+    is_union_territory = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["country", "name"],
+                name="unique_state_per_country",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class District(models.Model):
+    state = models.ForeignKey(
+        State,
+        on_delete=models.PROTECT,
+        related_name="districts",
+    )
+    name = models.CharField(max_length=120, db_index=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["state", "name"],
+                name="unique_district_per_state",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name}, {self.state.name}"
+
+
+class City(models.Model):
+    district = models.ForeignKey(
+        District,
+        on_delete=models.PROTECT,
+        related_name="cities",
+    )
+    state = models.ForeignKey(
+        State,
+        on_delete=models.PROTECT,
+        related_name="cities",
+    )
+    name = models.CharField(max_length=120, db_index=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name_plural = "Cities"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["district", "name"],
+                name="unique_city_per_district",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["state", "name"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name}, {self.district.name}, {self.state.name}"
 
 
 class ArtistProfile(models.Model):
@@ -36,6 +123,34 @@ class ArtistProfile(models.Model):
     )
     bio = models.TextField(blank=True)
     location = models.CharField(max_length=150)
+    country = models.ForeignKey(
+        Country,
+        on_delete=models.PROTECT,
+        related_name="artists",
+        null=True,
+        blank=True,
+    )
+    state = models.ForeignKey(
+        State,
+        on_delete=models.PROTECT,
+        related_name="artists",
+        null=True,
+        blank=True,
+    )
+    district = models.ForeignKey(
+        District,
+        on_delete=models.PROTECT,
+        related_name="artists",
+        null=True,
+        blank=True,
+    )
+    city = models.ForeignKey(
+        City,
+        on_delete=models.PROTECT,
+        related_name="artists",
+        null=True,
+        blank=True,
+    )
     phone = models.CharField(max_length=20, blank=True)
     profile_image = models.ImageField(
         upload_to="artists/profiles/",
@@ -44,14 +159,19 @@ class ArtistProfile(models.Model):
     )
     years_of_experience = models.PositiveSmallIntegerField(default=0)
     performance_types = models.JSONField(default=list, blank=True)
+    TRAVEL_AVAILABILITY_CHOICES = [
+        ("CITY", "Within my city"),
+        ("DISTRICT", "Within my district"),
+        ("STATE", "Across my state"),
+        ("INDIA", "Across India"),
+        ("city", "Within my city"),
+        ("state", "Across my state"),
+        ("india", "Across India"),
+        ("international", "International"),
+    ]
     travel_availability = models.CharField(
         max_length=50,
-        choices=[
-            ("city", "Within my city"),
-            ("state", "Across my state"),
-            ("india", "Across India"),
-            ("international", "International"),
-        ],
+        choices=TRAVEL_AVAILABILITY_CHOICES,
         default="city",
     )
     portfolio_url = models.URLField(blank=True)
@@ -68,6 +188,54 @@ class ArtistProfile(models.Model):
 
     def __str__(self):
         return self.stage_name
+
+
+class ArtistServiceDistrict(models.Model):
+    """
+    Normalized booking coverage: maps an ArtistProfile to each Indian District
+    where they accept bookings. Supports multi-state, multi-district coverage
+    and future Smart Collaboration Discovery / team intersection queries.
+    """
+
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.CASCADE,
+        related_name="service_districts",
+    )
+    district = models.ForeignKey(
+        District,
+        on_delete=models.PROTECT,
+        related_name="serviced_by_artists",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["district__state__name", "district__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["artist", "district"],
+                name="unique_artist_service_district",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["district", "artist"]),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.district_id:
+            country = getattr(getattr(self.district, "state", None), "country", None)
+            if not country or country.code.upper() != "IN":
+                raise ValidationError(
+                    {"district": "Service districts must belong to an Indian state or union territory."}
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.artist.stage_name} -> {self.district}"
 
 
 class Portfolio(models.Model):

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { fetchArtists, fetchArtistCategoriesSummary } from '../js/auth';
+import { fetchIndianStates, fetchDistrictsByState } from '../services/locationService';
 import '../css/Artists.css';
 
 // Canonical category display labels mapped from database names
@@ -45,7 +46,7 @@ function getFallbackPerformanceType(artist) {
 function ArtistsList({ user, onLogout, navigate }) {
   const [artists, setArtists] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [locations, setLocations] = useState([]);
+  const [_locations, setLocations] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [overallTotal, setOverallTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -67,13 +68,87 @@ function ArtistsList({ user, onLogout, navigate }) {
     const params = new URLSearchParams(window.location.search);
     return params.get('category') || 'all';
   });
-  const [location, setLocation] = useState(() => {
+  const [states, setStates] = useState([]);
+  const [districts, setDistricts] = useState([]);
+  const [selectedState, setSelectedState] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('location') || 'anywhere';
+    return params.get('state_id') || params.get('state') || '';
+  });
+  const [selectedDistrict, setSelectedDistrict] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('district_id') || params.get('district') || '';
+  });
+  const [eventDate, setEventDate] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('event_date') || params.get('date') || '';
+  });
+  const [minPrice, setMinPrice] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('min_price') || '';
+  });
+  const [maxPrice, setMaxPrice] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('max_price') || '';
   });
   const [gender, setGender] = useState('all');
   const [artistType, setArtistType] = useState('all');
   const [sort, setSort] = useState('featured');
+
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
+  // Load Indian states once
+  useEffect(() => {
+    let active = true;
+    async function loadStates() {
+      try {
+        const res = await fetchIndianStates();
+        if (active && res.states) {
+          setStates(res.states);
+        }
+      } catch (err) {
+        console.warn('Could not load states:', err);
+      }
+    }
+    loadStates();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load districts whenever selectedState changes
+  useEffect(() => {
+    let active = true;
+    if (!selectedState) {
+      setDistricts([]);
+      setSelectedDistrict('');
+      return;
+    }
+    async function loadDistricts() {
+      try {
+        const res = await fetchDistrictsByState(selectedState);
+        if (active && res.districts) {
+          setDistricts(res.districts);
+          setSelectedDistrict((prev) => {
+            if (!prev) return '';
+            const exists = (res.districts || []).some((d) => String(d.id) === String(prev));
+            return exists ? prev : '';
+          });
+        }
+      } catch (err) {
+        console.warn('Could not load districts:', err);
+      }
+    }
+    loadDistricts();
+    return () => {
+      active = false;
+    };
+  }, [selectedState]);
 
   // Load categories and initial artist total dynamically from DB
   useEffect(() => {
@@ -123,7 +198,11 @@ function ArtistsList({ user, onLogout, navigate }) {
       const data = await fetchArtists({
         search: search.trim(),
         category: selectedCategory === 'all' ? '' : selectedCategory,
-        location: location === 'anywhere' || location === 'all' ? '' : location,
+        state_id: selectedState || '',
+        district_id: selectedDistrict || '',
+        event_date: eventDate || '',
+        min_price: minPrice || '',
+        max_price: maxPrice || '',
         gender: gender === 'all' ? '' : gender,
         artist_type: artistType === 'all' ? '' : artistType,
         sort: sort === 'featured' ? '' : sort,
@@ -142,7 +221,18 @@ function ArtistsList({ user, onLogout, navigate }) {
     } finally {
       setLoading(false);
     }
-  }, [search, selectedCategory, location, gender, artistType, sort]);
+  }, [
+    search,
+    selectedCategory,
+    selectedState,
+    selectedDistrict,
+    eventDate,
+    minPrice,
+    maxPrice,
+    gender,
+    artistType,
+    sort,
+  ]);
 
   // Debounced load on filter/search change
   useEffect(() => {
@@ -162,7 +252,11 @@ function ArtistsList({ user, onLogout, navigate }) {
       const data = await fetchArtists({
         search: search.trim(),
         category: selectedCategory === 'all' ? '' : selectedCategory,
-        location: location === 'anywhere' || location === 'all' ? '' : location,
+        state_id: selectedState || '',
+        district_id: selectedDistrict || '',
+        event_date: eventDate || '',
+        min_price: minPrice || '',
+        max_price: maxPrice || '',
         gender: gender === 'all' ? '' : gender,
         artist_type: artistType === 'all' ? '' : artistType,
         sort: sort === 'featured' ? '' : sort,
@@ -184,23 +278,48 @@ function ArtistsList({ user, onLogout, navigate }) {
   // Sync category selection with URL
   function handleCategorySelect(catName) {
     setSelectedCategory(catName);
-    if (window.history.replaceState) {
-      const p = new URLSearchParams(window.location.search);
-      if (catName === 'all') {
-        p.delete('category');
-      } else {
-        p.set('category', catName);
-      }
-      const newQuery = p.toString() ? `?${p.toString()}` : '';
-      window.history.replaceState(null, '', `${window.location.pathname}${newQuery}`);
-    }
   }
+
+  // Deep-link URL sync for active filters
+  useEffect(() => {
+    if (!window.history.replaceState) return;
+    const p = new URLSearchParams();
+    if (search.trim()) p.set('search', search.trim());
+    if (selectedCategory && selectedCategory !== 'all') p.set('category', selectedCategory);
+    if (selectedState) p.set('state_id', selectedState);
+    if (selectedDistrict) p.set('district_id', selectedDistrict);
+    if (eventDate) p.set('date', eventDate);
+    if (minPrice) p.set('min_price', minPrice);
+    if (maxPrice) p.set('max_price', maxPrice);
+    if (gender && gender !== 'all') p.set('gender', gender);
+    if (artistType && artistType !== 'all') p.set('artist_type', artistType);
+    if (sort && sort !== 'featured') p.set('sort', sort);
+
+    const newQuery = p.toString() ? `?${p.toString()}` : '';
+    window.history.replaceState(null, '', `${window.location.pathname}${newQuery}`);
+  }, [
+    search,
+    selectedCategory,
+    selectedState,
+    selectedDistrict,
+    eventDate,
+    minPrice,
+    maxPrice,
+    gender,
+    artistType,
+    sort,
+  ]);
 
   // Reset all filters to default
   function handleResetFilters() {
     setSearch('');
     setSelectedCategory('all');
-    setLocation('anywhere');
+    setSelectedState('');
+    setSelectedDistrict('');
+    setDistricts([]);
+    setEventDate('');
+    setMinPrice('');
+    setMaxPrice('');
     setGender('all');
     setArtistType('all');
     setSort('featured');
@@ -317,22 +436,103 @@ function ArtistsList({ user, onLogout, navigate }) {
               )}
             </div>
 
-            {/* Location Filter Dropdown */}
+            {/* State / UT Filter Dropdown */}
             <div className="explore-select-wrapper location-select-wrapper">
               <select
-                className="explore-select location-select"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                aria-label="Filter by Location"
+                className="explore-select"
+                value={selectedState}
+                onChange={(e) => setSelectedState(e.target.value)}
+                aria-label="Filter by State or Union Territory"
               >
-                <option value="anywhere">Location: Anywhere</option>
-                {locations.map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc}
+                <option value="">State: All States / UTs</option>
+                {states.map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.name}{s.is_union_territory ? ' (UT)' : ''}
                   </option>
                 ))}
               </select>
               <span className="explore-select-chevron" aria-hidden="true">▾</span>
+            </div>
+
+            {/* District Filter Dropdown (dependent on State) */}
+            <div className={`explore-select-wrapper location-select-wrapper ${!selectedState ? 'disabled' : ''}`}>
+              <select
+                className="explore-select"
+                value={selectedDistrict}
+                onChange={(e) => setSelectedDistrict(e.target.value)}
+                disabled={!selectedState}
+                aria-label="Filter by District"
+              >
+                <option value="">{selectedState ? 'District: All Districts' : 'District: Select State first'}</option>
+                {districts.map((d) => (
+                  <option key={d.id} value={String(d.id)}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <span className="explore-select-chevron" aria-hidden="true">▾</span>
+            </div>
+
+            {/* Event Date Availability Picker */}
+            <div className="explore-date-box" title="Check availability for your event date">
+              <span className="explore-date-icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </span>
+              <input
+                type="date"
+                className="explore-date-input"
+                min={todayIso}
+                value={eventDate}
+                onChange={(e) => setEventDate(e.target.value)}
+                aria-label="Filter by event date availability"
+              />
+              {eventDate && (
+                <button
+                  type="button"
+                  className="explore-date-clear"
+                  onClick={() => setEventDate('')}
+                  title="Clear event date"
+                  aria-label="Clear event date"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Starting Price Range Filter */}
+            <div className="explore-price-range-group" title="Filter by Starting Price (INR)">
+              <div className="explore-price-input-box">
+                <span className="explore-price-prefix">₹</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  className="explore-price-input"
+                  placeholder="Min ₹"
+                  value={minPrice}
+                  onChange={(e) => setMinPrice(e.target.value)}
+                  aria-label="Minimum Starting Price"
+                />
+              </div>
+              <span className="explore-price-divider">–</span>
+              <div className="explore-price-input-box">
+                <span className="explore-price-prefix">₹</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  className="explore-price-input"
+                  placeholder="Max ₹"
+                  value={maxPrice}
+                  onChange={(e) => setMaxPrice(e.target.value)}
+                  aria-label="Maximum Starting Price"
+                />
+              </div>
             </div>
 
             {/* Gender Filter Dropdown */}

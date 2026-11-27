@@ -148,6 +148,122 @@
   border: 1px solid #FF5722;
 }
 
+.explore-select-wrapper.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.explore-select-wrapper.disabled select {
+  cursor: not-allowed;
+}
+
+/* Event Date Box */
+.explore-date-box {
+  position: relative;
+  height: 40px;
+  min-width: 165px;
+  flex: 1;
+  background: #14161d;
+  border: 1px solid #232732;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.explore-date-box:hover,
+.explore-date-box:focus-within {
+  border-color: #FF5722;
+}
+
+.explore-date-icon {
+  display: flex;
+  align-items: center;
+  color: #7E8695;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.explore-date-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #FFFFFF;
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+  color-scheme: dark;
+}
+
+.explore-date-clear {
+  background: transparent;
+  border: none;
+  color: #7E8695;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  margin-left: 4px;
+}
+
+.explore-date-clear:hover {
+  color: #FFFFFF;
+}
+
+/* Price Range Inputs */
+.explore-price-range-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1.2;
+  min-width: 180px;
+}
+
+.explore-price-input-box {
+  height: 40px;
+  background: #14161d;
+  border: 1px solid #232732;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  box-sizing: border-box;
+  flex: 1;
+  transition: border-color 0.2s ease;
+}
+
+.explore-price-input-box:focus-within {
+  border-color: #FF5722;
+}
+
+.explore-price-prefix {
+  color: #7E8695;
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.explore-price-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #FFFFFF;
+  font-size: 0.88rem;
+  font-family: inherit;
+}
+
+.explore-price-input::placeholder {
+  color: #6C7280;
+}
+
+.explore-price-divider {
+  color: #7E8695;
+  font-weight: 600;
+}
+
 .explore-select {
   width: 100%;
   height: 100%;

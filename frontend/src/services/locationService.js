@@ -135,3 +135,71 @@ export async function resolveGoogleMapsLink(mapUrl) {
     };
   }
 }
+
+/**
+ * Fetches all Indian states and union territories.
+ * @returns {Promise<{states: Array, error?: string}>}
+ */
+export async function fetchIndianStates() {
+  try {
+    const res = await fetch('/api/locations/states/?country=IN', {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { states: [], error: data.error || 'Failed to load states.' };
+    }
+    return { states: Array.isArray(data.states) ? data.states : [] };
+  } catch {
+    return { states: [], error: 'Network error loading states.' };
+  }
+}
+
+/**
+ * Fetches districts for a given state ID.
+ * @param {number|string} stateId
+ * @returns {Promise<{districts: Array, error?: string}>}
+ */
+export async function fetchDistrictsByState(stateId) {
+  if (!stateId) {
+    return { districts: [] };
+  }
+  try {
+    const res = await fetch(`/api/locations/districts/?state_id=${encodeURIComponent(stateId)}`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { districts: [], error: data.error || 'Failed to load districts.' };
+    }
+    return { districts: Array.isArray(data.districts) ? data.districts : [] };
+  } catch {
+    return { districts: [], error: 'Network error loading districts.' };
+  }
+}
+
+/**
+ * Fetches optional cities/towns for a given district ID.
+ * @param {number|string} districtId
+ * @returns {Promise<{cities: Array, error?: string}>}
+ */
+export async function fetchCitiesByDistrict(districtId) {
+  if (!districtId) {
+    return { cities: [] };
+  }
+  try {
+    const res = await fetch(`/api/locations/cities/?district_id=${encodeURIComponent(districtId)}`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { cities: [], error: data.error || 'Failed to load cities.' };
+    }
+    return { cities: Array.isArray(data.cities) ? data.cities : [] };
+  } catch {
+    return { cities: [], error: 'Network error loading cities.' };
+  }
+}

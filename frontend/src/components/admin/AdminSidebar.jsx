@@ -19,6 +19,7 @@ import {
   FileText,
   Globe,
   Headset,
+  ExternalLink,
 } from "lucide-react";
 
 export default function AdminSidebar({
@@ -146,7 +147,23 @@ export default function AdminSidebar({
         ))}
       </nav>
 
-      <div className="admin-sidebar-footer">
+      <div className="admin-sidebar-footer" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <button
+          type="button"
+          className="admin-btn admin-btn-secondary admin-btn-sm"
+          style={{ width: "100%", justifyContent: "flex-start", gap: "8px" }}
+          onClick={() => {
+            const devPorts = new Set(["5173", "5174", "3000"]);
+            const djangoAdminUrl = devPorts.has(window.location.port)
+              ? `${window.location.protocol}//${window.location.hostname}:8000/admin/`
+              : "/admin/";
+            window.open(djangoAdminUrl, "_blank", "noopener,noreferrer");
+          }}
+        >
+          <ExternalLink size={15} />
+          <span>Django Admin</span>
+        </button>
+
         <button
           type="button"
           className="admin-btn admin-btn-secondary admin-btn-sm"

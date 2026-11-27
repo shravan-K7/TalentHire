@@ -25,6 +25,8 @@ class LoginForm(forms.Form):
         return value
 
 class ArtistProfileForm(forms.ModelForm):
+    location = forms.CharField(max_length=150, required=False)
+    travel_availability = forms.CharField(max_length=50, required=False)
     years_of_experience = forms.IntegerField(
         required=False,
         min_value=0,
@@ -97,6 +99,17 @@ class ArtistProfileForm(forms.ModelForm):
                 "class": "form-control",
             }),
         }
+
+    def clean_travel_availability(self):
+        value = (self.cleaned_data.get("travel_availability") or "").strip()
+        if not value:
+            if self.instance and self.instance.pk and self.instance.travel_availability:
+                return self.instance.travel_availability
+            return "city"
+        valid_choices = {choice[0] for choice in ArtistProfile.TRAVEL_AVAILABILITY_CHOICES}
+        if value not in valid_choices:
+            raise forms.ValidationError("Select a valid travel availability option.")
+        return value
 
     def clean_years_of_experience(self):
         years = self.cleaned_data.get("years_of_experience", 0)

@@ -1,7 +1,12 @@
 from django.contrib import admin
 from .models import (
     Category,
+    Country,
+    State,
+    District,
+    City,
     ArtistProfile,
+    ArtistServiceDistrict,
     Portfolio,
     Booking,
     Payment,
@@ -28,6 +33,33 @@ class CategoryAdmin(admin.ModelAdmin):
     search_fields = ("name", "description")
 
 
+@admin.register(Country)
+class CountryAdmin(admin.ModelAdmin):
+    list_display = ("name", "code")
+    search_fields = ("name", "code")
+
+
+@admin.register(State)
+class StateAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "country", "is_union_territory")
+    list_filter = ("country", "is_union_territory")
+    search_fields = ("name", "code")
+
+
+@admin.register(District)
+class DistrictAdmin(admin.ModelAdmin):
+    list_display = ("name", "state")
+    list_filter = ("state",)
+    search_fields = ("name", "state__name")
+
+
+@admin.register(City)
+class CityAdmin(admin.ModelAdmin):
+    list_display = ("name", "district", "state")
+    list_filter = ("state",)
+    search_fields = ("name", "district__name", "state__name")
+
+
 @admin.register(ArtistProfile)
 class ArtistProfileAdmin(admin.ModelAdmin):
     list_display = (
@@ -45,6 +77,13 @@ class ArtistProfileAdmin(admin.ModelAdmin):
     list_filter = ("category", "gender", "is_verified", "is_active", "travel_availability")
     search_fields = ("stage_name", "user__username", "user__email", "location", "bio")
     list_editable = ("is_verified", "is_active")
+
+
+@admin.register(ArtistServiceDistrict)
+class ArtistServiceDistrictAdmin(admin.ModelAdmin):
+    list_display = ("artist", "district", "created_at")
+    list_filter = ("district__state",)
+    search_fields = ("artist__stage_name", "district__name", "district__state__name")
 
 
 @admin.register(Portfolio)

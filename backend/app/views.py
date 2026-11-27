@@ -31,7 +31,12 @@ from .forms import LoginForm, ArtistProfileForm
 from .cancellation_policy import calculate_cancellation_refund
 from .models import (
     ArtistProfile,
+    ArtistServiceDistrict,
     Category,
+    Country,
+    State,
+    District,
+    City,
     Booking,
     Portfolio,
     Payment,
@@ -542,6 +547,247 @@ def artist_categories(request):
     )
 
 
+def _serialize_artist_location_data(artist):
+    """Return structured base location and multi-state/multi-district service coverage."""
+    service_qs = artist.service_districts.select_related(
+        "district", "district__state"
+    ).order_by("district__state__name", "district__name")
+
+    service_districts = []
+    states_map = {}
+    for sd in service_qs:
+        d = sd.district
+        s = d.state
+        service_districts.append(
+            {
+                "id": d.id,
+                "name": d.name,
+                "state_id": s.id,
+                "state_name": s.name,
+            }
+        )
+        if s.id not in states_map:
+            states_map[s.id] = {
+                "id": s.id,
+                "name": s.name,
+                "code": s.code,
+                "is_union_territory": s.is_union_territory,
+                "districts": [],
+            }
+        states_map[s.id]["districts"].append({"id": d.id, "name": d.name})
+
+    return {
+        "country": {
+            "id": artist.country.id,
+            "name": artist.country.name,
+            "code": artist.country.code,
+        }
+        if artist.country_id and artist.country
+        else None,
+        "state": {
+            "id": artist.state.id,
+            "name": artist.state.name,
+            "code": artist.state.code,
+            "is_union_territory": artist.state.is_union_territory,
+        }
+        if artist.state_id and artist.state
+        else None,
+        "district": {
+            "id": artist.district.id,
+            "name": artist.district.name,
+            "state_id": artist.district.state_id,
+        }
+        if artist.district_id and artist.district
+        else None,
+        "city": {
+            "id": artist.city.id,
+            "name": artist.city.name,
+            "district_id": artist.city.district_id,
+            "state_id": artist.city.state_id,
+        }
+        if artist.city_id and artist.city
+        else None,
+        "service_districts": service_districts,
+        "service_district_ids": [item["id"] for item in service_districts],
+        "service_states": list(states_map.values()),
+    }
+
+
+def _parse_int_id(raw_val):
+    if raw_val is None or isinstance(raw_val, bool):
+        return None
+    if isinstance(raw_val, int):
+        return raw_val
+    text = str(raw_val).strip()
+    if not text or text.lower() in ("null", "none"):
+        return None
+    if not text.isdigit():
+        raise ValueError("Must be a valid integer ID.")
+    return int(text)
+
+
+def _parse_and_validate_artist_location(payload, is_json=False, instance=None):
+    """
+    Validate base location (state, district, optional city) and service_districts.
+    Returns (cleaned_dict, errors_dict).
+    """
+    errors = {}
+    has_state_key = "state" in payload or "state_id" in payload
+    has_district_key = "district" in payload or "district_id" in payload
+    has_city_key = "city" in payload or "city_id" in payload
+    has_service_key = "service_districts" in payload
+
+    raw_state = payload.get("state", payload.get("state_id")) if has_state_key else None
+    raw_district = payload.get("district", payload.get("district_id")) if has_district_key else None
+    raw_city = payload.get("city", payload.get("city_id")) if has_city_key else None
+
+    state_obj = instance.state if (instance and not has_state_key) else None
+    district_obj = instance.district if (instance and not has_district_key) else None
+    city_obj = instance.city if (instance and not has_city_key) else None
+
+    if has_state_key:
+        try:
+            state_id = _parse_int_id(raw_state)
+        except ValueError:
+            errors["state"] = [{"message": "Invalid state ID."}]
+            state_id = None
+        if state_id is not None:
+            state_obj = State.objects.select_related("country").filter(id=state_id).first()
+            if not state_obj:
+                errors["state"] = [{"message": "Selected state does not exist."}]
+            elif state_obj.country.code.upper() != "IN":
+                errors["state"] = [{"message": "Base state must be an Indian state or union territory."}]
+        else:
+            state_obj = None
+
+    if has_district_key:
+        try:
+            district_id = _parse_int_id(raw_district)
+        except ValueError:
+            errors["district"] = [{"message": "Invalid district ID."}]
+            district_id = None
+        if district_id is not None:
+            district_obj = District.objects.select_related("state", "state__country").filter(id=district_id).first()
+            if not district_obj:
+                errors["district"] = [{"message": "Selected district does not exist."}]
+            elif district_obj.state.country.code.upper() != "IN":
+                errors["district"] = [{"message": "Base district must belong to an Indian state."}]
+            elif state_obj and district_obj.state_id != state_obj.id:
+                errors["district"] = [{"message": "Selected district does not belong to the selected state."}]
+            elif not state_obj and "state" not in errors:
+                state_obj = district_obj.state
+        else:
+            district_obj = None
+
+    if has_city_key:
+        try:
+            city_id = _parse_int_id(raw_city)
+        except ValueError:
+            errors["city"] = [{"message": "Invalid city ID."}]
+            city_id = None
+        if city_id is not None:
+            city_obj = City.objects.select_related("district", "state").filter(id=city_id).first()
+            if not city_obj:
+                errors["city"] = [{"message": "Selected city does not exist."}]
+            elif district_obj and city_obj.district_id != district_obj.id:
+                errors["city"] = [{"message": "Selected city does not belong to the selected district."}]
+            elif state_obj and city_obj.state_id != state_obj.id:
+                errors["city"] = [{"message": "Selected city does not belong to the selected state."}]
+        else:
+            city_obj = None
+
+    # Validate service_districts if provided
+    service_district_objs = None
+    if has_service_key:
+        raw_sd = payload.get("service_districts")
+        parsed_ids = []
+        parse_ok = True
+
+        if is_json:
+            if raw_sd is None:
+                parsed_ids = []
+            elif isinstance(raw_sd, list):
+                parsed_ids = raw_sd
+            else:
+                parse_ok = False
+        else:
+            raw_list = payload.getlist("service_districts") if hasattr(payload, "getlist") else [raw_sd]
+            if len(raw_list) == 1:
+                single = str(raw_list[0] or "").strip()
+                if not single:
+                    parsed_ids = []
+                elif single.startswith("["):
+                    try:
+                        decoded = json.loads(single)
+                        if isinstance(decoded, list):
+                            parsed_ids = decoded
+                        else:
+                            parse_ok = False
+                    except (json.JSONDecodeError, TypeError):
+                        parse_ok = False
+                else:
+                    parsed_ids = [item.strip() for item in single.split(",") if item.strip()]
+            else:
+                parsed_ids = [item for item in raw_list if str(item).strip()]
+
+        if not parse_ok:
+            errors["service_districts"] = [{"message": "service_districts must be a list of district IDs."}]
+        else:
+            seen_ids = set()
+            ordered_ids = []
+            for item in parsed_ids:
+                try:
+                    did = _parse_int_id(item)
+                except ValueError:
+                    did = None
+                if did is None:
+                    errors["service_districts"] = [{"message": "All service district IDs must be valid integers."}]
+                    break
+                if did not in seen_ids:
+                    seen_ids.add(did)
+                    ordered_ids.append(did)
+
+            if "service_districts" not in errors:
+                districts_by_id = {
+                    d.id: d
+                    for d in District.objects.select_related("state", "state__country").filter(id__in=ordered_ids)
+                }
+                invalid_ids = [did for did in ordered_ids if did not in districts_by_id]
+                if invalid_ids:
+                    errors["service_districts"] = [
+                        {"message": f"Invalid service district ID(s): {', '.join(map(str, invalid_ids))}."}
+                    ]
+                else:
+                    non_indian = [
+                        did
+                        for did in ordered_ids
+                        if districts_by_id[did].state.country.code.upper() != "IN"
+                    ]
+                    if non_indian:
+                        errors["service_districts"] = [
+                            {"message": "All service districts must belong to Indian states or union territories."}
+                        ]
+                    else:
+                        # Explicitly include the artist's base district in service coverage
+                        # so their home district is always covered for bookings.
+                        if district_obj and district_obj.id not in seen_ids:
+                            ordered_ids.insert(0, district_obj.id)
+                            districts_by_id[district_obj.id] = district_obj
+                        service_district_objs = [districts_by_id[did] for did in ordered_ids]
+
+    return {
+        "has_state_key": has_state_key,
+        "has_district_key": has_district_key,
+        "has_city_key": has_city_key,
+        "has_service_key": has_service_key,
+        "country": state_obj.country if state_obj else (instance.country if instance else None),
+        "state": state_obj,
+        "district": district_obj,
+        "city": city_obj,
+        "service_district_objs": service_district_objs,
+    }, errors
+
+
 @csrf_protect
 @require_http_methods(["GET", "POST"])
 def artist_profile_view(request):
@@ -552,7 +798,12 @@ def artist_profile_view(request):
         )
 
     # Reuse existing profile if the logged-in user already has one.
-    instance = ArtistProfile.objects.filter(user=request.user).first()
+    # Never trust any artist_id sent by the frontend for ownership.
+    instance = (
+        ArtistProfile.objects.filter(user=request.user)
+        .select_related("category", "country", "state", "district", "city")
+        .first()
+    )
 
     if request.method == "GET":
         if instance:
@@ -581,12 +832,48 @@ def artist_profile_view(request):
                         else None,
                         "is_verified": instance.is_verified,
                         "rejection_notes": instance.rejection_notes,
+                        **_serialize_artist_location_data(instance),
                     },
                 }
             )
         return JsonResponse({"exists": False})
 
-    post_data = request.POST.copy()
+    is_json = (request.content_type or "").startswith("application/json")
+    if is_json:
+        try:
+            raw_json = json.loads(request.body or "{}")
+            if not isinstance(raw_json, dict):
+                return JsonResponse({"error": "JSON body must be an object."}, status=400)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"error": "Invalid JSON request body."}, status=400)
+        from django.http import QueryDict
+        post_data = QueryDict("", mutable=True)
+        for k, v in raw_json.items():
+            if k in ("performance_types", "service_districts") and isinstance(v, list):
+                post_data[k] = json.dumps(v)
+            elif v is not None:
+                post_data[k] = str(v)
+        loc_payload = raw_json
+    else:
+        post_data = request.POST.copy()
+        loc_payload = request.POST
+
+    # For JSON partial updates on an existing profile, default omitted required form fields
+    # from the existing instance so partial location/coverage updates work cleanly.
+    if is_json and instance:
+        if "stage_name" not in raw_json:
+            post_data["stage_name"] = instance.stage_name
+        if "category" not in raw_json and instance.category_id:
+            post_data["category"] = str(instance.category_id)
+        if "gender" not in raw_json:
+            post_data["gender"] = instance.gender
+        if "bio" not in raw_json:
+            post_data["bio"] = instance.bio
+        if "location" not in raw_json:
+            post_data["location"] = instance.location
+        if "starting_price" not in raw_json:
+            post_data["starting_price"] = str(instance.starting_price)
+
     category_val = post_data.get("category", "").strip()
     other_category_val = post_data.get("other_category", "").strip()
 
@@ -609,15 +896,71 @@ def artist_profile_view(request):
             cat_obj = Category.objects.create(name=cat_name.title())
         post_data["category"] = str(cat_obj.id)
 
+    loc_cleaned, loc_errors = _parse_and_validate_artist_location(
+        loc_payload, is_json=is_json, instance=instance
+    )
+
+    # Auto-build legacy location string if omitted/empty when structured base location is provided
+    if not (post_data.get("location") or "").strip():
+        parts = [
+            loc_cleaned["city"].name if loc_cleaned["city"] else None,
+            loc_cleaned["district"].name if loc_cleaned["district"] else None,
+            loc_cleaned["state"].name if loc_cleaned["state"] else None,
+        ]
+        built_location = ", ".join(p for p in parts if p)
+        if built_location:
+            post_data["location"] = built_location[:150]
+
     form = ArtistProfileForm(post_data, request.FILES, instance=instance)
-    if form.is_valid():
+    form_valid = form.is_valid()
+    combined_errors = form.errors.get_json_data() if not form_valid else {}
+    if not (post_data.get("location") or "").strip() and "location" not in combined_errors:
+        combined_errors["location"] = [{"message": "Please provide your base location."}]
+    combined_errors.update(loc_errors)
+
+    if not combined_errors:
         try:
-            artist = form.save(commit=False)
-            artist.user = request.user
-            if not artist.is_verified and artist.rejection_notes:
-                if not artist.rejection_notes.startswith("[Resubmitted"):
-                    artist.rejection_notes = f"[Resubmitted] Updated profile awaiting review. Prior feedback: {artist.rejection_notes}"
-            artist.save()
+            with transaction.atomic():
+                artist = form.save(commit=False)
+                artist.user = request.user
+                if loc_cleaned["has_state_key"] or loc_cleaned["has_district_key"]:
+                    artist.country = loc_cleaned["country"]
+                    artist.state = loc_cleaned["state"]
+                    artist.district = loc_cleaned["district"]
+                if loc_cleaned["has_city_key"]:
+                    artist.city = loc_cleaned["city"]
+                elif loc_cleaned["has_district_key"] and not loc_cleaned["district"]:
+                    artist.city = None
+
+                if not artist.is_verified and artist.rejection_notes:
+                    if not artist.rejection_notes.startswith("[Resubmitted"):
+                        artist.rejection_notes = f"[Resubmitted] Updated profile awaiting review. Prior feedback: {artist.rejection_notes}"
+                artist.save()
+
+                if loc_cleaned["has_service_key"]:
+                    desired_districts = loc_cleaned["service_district_objs"] or []
+                    desired_ids = {d.id for d in desired_districts}
+                    ArtistServiceDistrict.objects.filter(artist=artist).exclude(
+                        district_id__in=desired_ids
+                    ).delete()
+                    existing_ids = set(
+                        ArtistServiceDistrict.objects.filter(artist=artist).values_list(
+                            "district_id", flat=True
+                        )
+                    )
+                    to_create = [
+                        ArtistServiceDistrict(artist=artist, district=d)
+                        for d in desired_districts
+                        if d.id not in existing_ids
+                    ]
+                    if to_create:
+                        ArtistServiceDistrict.objects.bulk_create(to_create)
+                elif loc_cleaned["district"] is not None:
+                    # Ensure base district is covered when base district is set without explicit service_districts
+                    ArtistServiceDistrict.objects.get_or_create(
+                        artist=artist,
+                        district=loc_cleaned["district"],
+                    )
 
             return JsonResponse(
                 {
@@ -646,6 +989,7 @@ def artist_profile_view(request):
                         else None,
                         "is_verified": artist.is_verified,
                         "rejection_notes": artist.rejection_notes,
+                        **_serialize_artist_location_data(artist),
                     },
                 },
                 status=200 if instance else 201,
@@ -656,7 +1000,7 @@ def artist_profile_view(request):
                 status=400,
             )
 
-    return JsonResponse({"errors": form.errors.get_json_data()}, status=400)
+    return JsonResponse({"errors": combined_errors}, status=400)
 
 
 def extract_youtube_id(url):
@@ -787,6 +1131,7 @@ def serialize_artist_summary(artist, request=None):
         "avg_rating": avg_rating,
         "is_verified": artist.is_verified,
         "rejection_notes": getattr(artist, "rejection_notes", ""),
+        **_serialize_artist_location_data(artist),
     }
 
 
@@ -840,9 +1185,135 @@ def public_upcoming_performances_view(request):
     return JsonResponse({"upcoming_performances": shows})
 
 
+def is_artist_date_occupied(artist, calendar_date, exclude_booking_id=None):
+    """
+    Determines whether an artist is occupied on a specific Asia/Kolkata calendar date.
+    Returns: (is_occupied: bool, reason: str, conflicting_obj)
+
+    Occupied conditions:
+      1. Manually blocked by the artist (ArtistAvailability where is_available=False).
+      2. Completed booking (Booking status COMPLETED).
+      3. Confirmed booking with successful payment (Booking status ACCEPTED, Payment status SUCCESS).
+      4. Active accepted reservation (Booking status ACCEPTED, unpaid, within 24 hours of accepted_at).
+         - For legacy accepted bookings where accepted_at is NULL, treats them conservatively as active
+           to avoid prematurely releasing dates.
+
+    Unoccupied conditions:
+      - Ordinary pending inquiries (Booking status PENDING).
+      - Cancelled or rejected bookings.
+      - Expired unpaid reservations (Booking status ACCEPTED, unpaid, past 24-hour deadline).
+    """
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone
+
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    now_tz = timezone.now()
+
+    # 1. Check manual availability override
+    manual_block = ArtistAvailability.objects.filter(
+        artist=artist,
+        date=calendar_date,
+        is_available=False,
+    ).first()
+    if manual_block:
+        reason_text = (
+            f"Date is manually marked as unavailable ({manual_block.reason})."
+            if manual_block.reason
+            else "Date is manually marked as unavailable by the artist."
+        )
+        return True, reason_text, manual_block
+
+    # 2. Query bookings in an expanded window to catch any time boundaries
+    day_start = datetime.combine(calendar_date, time.min, tzinfo=kolkata_tz)
+    day_end = datetime.combine(calendar_date + timedelta(days=1), time.min, tzinfo=kolkata_tz)
+
+    bookings_qs = (
+        Booking.objects.filter(
+            artist=artist,
+            status__in=[Booking.Status.ACCEPTED, Booking.Status.COMPLETED],
+            event_date__gte=day_start - timedelta(days=1),
+            event_date__lt=day_end + timedelta(days=1),
+        )
+        .select_related("payment")
+    )
+    if exclude_booking_id:
+        bookings_qs = bookings_qs.exclude(id=exclude_booking_id)
+
+    for b in bookings_qs:
+        b_date = timezone.localtime(b.event_date, timezone=kolkata_tz).date()
+        if b_date == calendar_date:
+            if b.status == Booking.Status.COMPLETED:
+                return True, "a completed booking already exists on this date.", b
+
+            if b.status == Booking.Status.ACCEPTED:
+                payment = getattr(b, "payment", None)
+                if payment and payment.status == Payment.Status.SUCCESS:
+                    return True, "a confirmed booking with successful payment already exists on this date.", b
+
+                # 24-hour payment reservation check
+                accepted_at = getattr(b, "accepted_at", None)
+                if accepted_at:
+                    if accepted_at + timedelta(hours=24) > now_tz:
+                        return True, "an active accepted reservation is awaiting payment for this date.", b
+                    # If accepted_at + 24 hours <= now_tz, it has expired and does NOT occupy the date.
+                else:
+                    # Legacy fallback for existing pre-migration records without accepted_at
+                    legacy_ts = payment.updated_at if payment else b.created_at
+                    if legacy_ts and (legacy_ts + timedelta(hours=24) > now_tz):
+                        return True, "an active accepted reservation is awaiting payment for this date.", b
+                    elif not legacy_ts:
+                        return True, "an accepted reservation occupies this date.", b
+
+    return False, "", None
+
+
+def get_occupied_artist_ids_for_date(calendar_date):
+    """
+    Returns set of artist IDs who are occupied on the given Asia/Kolkata calendar date,
+    strictly reusing is_artist_date_occupied() logic.
+    """
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+
+    manual_block_ids = set(
+        ArtistAvailability.objects.filter(
+            date=calendar_date,
+            is_available=False,
+        ).values_list("artist_id", flat=True)
+    )
+
+    day_start = datetime.combine(calendar_date, time.min, tzinfo=kolkata_tz)
+    day_end = datetime.combine(calendar_date + timedelta(days=1), time.min, tzinfo=kolkata_tz)
+
+    potential_booking_ids = set(
+        Booking.objects.filter(
+            status__in=[Booking.Status.ACCEPTED, Booking.Status.COMPLETED],
+            event_date__gte=day_start - timedelta(days=1),
+            event_date__lt=day_end + timedelta(days=1),
+        ).values_list("artist_id", flat=True)
+    )
+
+    occupied_ids = set(manual_block_ids)
+    candidates_to_check = potential_booking_ids - occupied_ids
+    if candidates_to_check:
+        artists_qs = ArtistProfile.objects.filter(id__in=candidates_to_check)
+        for a in artists_qs:
+            occupied, _, _ = is_artist_date_occupied(a, calendar_date)
+            if occupied:
+                occupied_ids.add(a.id)
+
+    return occupied_ids
+
+
 @require_GET
 def artists_list_view(request):
-    qs = ArtistProfile.objects.filter(is_active=True, user__is_active=True).select_related("category")
+    qs = (
+        ArtistProfile.objects.filter(is_active=True, user__is_active=True)
+        .select_related("category", "country", "state", "district", "city")
+        .prefetch_related("service_districts__district__state")
+    )
 
     search = request.GET.get("search", "").strip()
     if search:
@@ -864,10 +1335,6 @@ def artists_list_view(request):
                 models.Q(category__name__iexact=category)
                 | models.Q(category__name__icontains=category)
             )
-
-    location = request.GET.get("location", "").strip()
-    if location and location.lower() not in ("all", "anywhere"):
-        qs = qs.filter(location__icontains=location)
 
     gender = request.GET.get("gender", "").strip().lower()
     if gender and gender != "all":
@@ -896,6 +1363,65 @@ def artists_list_view(request):
     travel = request.GET.get("travel", "").strip()
     if travel and travel.lower() != "all":
         qs = qs.filter(travel_availability__iexact=travel)
+
+    # Location filtering via State/District models and ArtistServiceDistrict
+    state_param = (request.GET.get("state_id") or request.GET.get("state") or "").strip()
+    district_param = (request.GET.get("district_id") or request.GET.get("district") or "").strip()
+
+    state_obj = None
+    district_obj = None
+
+    if state_param:
+        if not state_param.isdigit():
+            return JsonResponse({"error": "Invalid state_id."}, status=400)
+        state_obj = State.objects.filter(id=int(state_param)).first()
+        if not state_obj:
+            return JsonResponse({"error": "Selected state does not exist."}, status=400)
+
+    if district_param:
+        if not district_param.isdigit():
+            return JsonResponse({"error": "Invalid district_id."}, status=400)
+        district_obj = District.objects.filter(id=int(district_param)).first()
+        if not district_obj:
+            return JsonResponse({"error": "Selected district does not exist."}, status=400)
+
+    if state_obj and district_obj:
+        if district_obj.state_id != state_obj.id:
+            return JsonResponse(
+                {"error": "Selected district does not belong to the selected state."},
+                status=400,
+            )
+
+    if district_obj:
+        qs = qs.filter(service_districts__district=district_obj).distinct()
+    elif state_obj:
+        qs = qs.filter(service_districts__district__state=state_obj).distinct()
+    else:
+        # Legacy location search string
+        location = request.GET.get("location", "").strip()
+        if location and location.lower() not in ("all", "anywhere"):
+            qs = qs.filter(location__icontains=location)
+
+    # Event date availability filtering
+    event_date_param = (request.GET.get("event_date") or request.GET.get("date") or "").strip()
+    if event_date_param:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", event_date_param):
+            return JsonResponse(
+                {"error": "Invalid event_date format. Expected YYYY-MM-DD."},
+                status=400,
+            )
+        try:
+            year, month, day = [int(p) for p in event_date_param.split("-")]
+            event_calendar_date = datetime.date(year, month, day)
+        except ValueError:
+            return JsonResponse(
+                {"error": "Invalid event_date. Date does not exist."},
+                status=400,
+            )
+
+        occupied_artist_ids = get_occupied_artist_ids_for_date(event_calendar_date)
+        if occupied_artist_ids:
+            qs = qs.exclude(id__in=occupied_artist_ids)
 
     min_price = request.GET.get("min_price", "").strip()
     if min_price:
@@ -1031,7 +1557,8 @@ def serialize_portfolio_item(item, request=None):
 def artist_detail_view(request, artist_id):
     artist = (
         ArtistProfile.objects.filter(id=artist_id, is_active=True, user__is_active=True)
-        .select_related("category")
+        .select_related("category", "country", "state", "district", "city")
+        .prefetch_related("service_districts__district__state")
         .first()
     )
     if not artist:
@@ -1194,89 +1721,6 @@ def artist_detail_view(request, artist_id):
         ]
 
     return JsonResponse({"artist": data})
-
-
-def is_artist_date_occupied(artist, calendar_date, exclude_booking_id=None):
-    """
-    Determines whether an artist is occupied on a specific Asia/Kolkata calendar date.
-    Returns: (is_occupied: bool, reason: str, conflicting_obj)
-
-    Occupied conditions:
-      1. Manually blocked by the artist (ArtistAvailability where is_available=False).
-      2. Completed booking (Booking status COMPLETED).
-      3. Confirmed booking with successful payment (Booking status ACCEPTED, Payment status SUCCESS).
-      4. Active accepted reservation (Booking status ACCEPTED, unpaid, within 24 hours of accepted_at).
-         - For legacy accepted bookings where accepted_at is NULL, treats them conservatively as active
-           to avoid prematurely releasing dates.
-
-    Unoccupied conditions:
-      - Ordinary pending inquiries (Booking status PENDING).
-      - Cancelled or rejected bookings.
-      - Expired unpaid reservations (Booking status ACCEPTED, unpaid, past 24-hour deadline).
-    """
-    from datetime import datetime, time, timedelta
-    from zoneinfo import ZoneInfo
-    from django.utils import timezone
-
-    kolkata_tz = ZoneInfo("Asia/Kolkata")
-    now_tz = timezone.now()
-
-    # 1. Check manual availability override
-    manual_block = ArtistAvailability.objects.filter(
-        artist=artist,
-        date=calendar_date,
-        is_available=False,
-    ).first()
-    if manual_block:
-        reason_text = (
-            f"Date is manually marked as unavailable ({manual_block.reason})."
-            if manual_block.reason
-            else "Date is manually marked as unavailable by the artist."
-        )
-        return True, reason_text, manual_block
-
-    # 2. Query bookings in an expanded window to catch any time boundaries
-    day_start = datetime.combine(calendar_date, time.min, tzinfo=kolkata_tz)
-    day_end = datetime.combine(calendar_date + timedelta(days=1), time.min, tzinfo=kolkata_tz)
-
-    bookings_qs = (
-        Booking.objects.filter(
-            artist=artist,
-            status__in=[Booking.Status.ACCEPTED, Booking.Status.COMPLETED],
-            event_date__gte=day_start - timedelta(days=1),
-            event_date__lt=day_end + timedelta(days=1),
-        )
-        .select_related("payment")
-    )
-    if exclude_booking_id:
-        bookings_qs = bookings_qs.exclude(id=exclude_booking_id)
-
-    for b in bookings_qs:
-        b_date = timezone.localtime(b.event_date, timezone=kolkata_tz).date()
-        if b_date == calendar_date:
-            if b.status == Booking.Status.COMPLETED:
-                return True, "a completed booking already exists on this date.", b
-
-            if b.status == Booking.Status.ACCEPTED:
-                payment = getattr(b, "payment", None)
-                if payment and payment.status == Payment.Status.SUCCESS:
-                    return True, "a confirmed booking with successful payment already exists on this date.", b
-
-                # 24-hour payment reservation check
-                accepted_at = getattr(b, "accepted_at", None)
-                if accepted_at:
-                    if accepted_at + timedelta(hours=24) > now_tz:
-                        return True, "an active accepted reservation is awaiting payment for this date.", b
-                    # If accepted_at + 24 hours <= now_tz, it has expired and does NOT occupy the date.
-                else:
-                    # Legacy fallback for existing pre-migration records without accepted_at
-                    legacy_ts = payment.updated_at if payment else b.created_at
-                    if legacy_ts and (legacy_ts + timedelta(hours=24) > now_tz):
-                        return True, "an active accepted reservation is awaiting payment for this date.", b
-                    elif not legacy_ts:
-                        return True, "an accepted reservation occupies this date.", b
-
-    return False, "", None
 
 
 @require_GET
@@ -1528,6 +1972,75 @@ def location_status_view(request):
     """
     from app.services import location_service
     return JsonResponse(location_service.get_location_service_status(), status=200)
+
+
+@require_GET
+def location_states_view(request):
+    """
+    Return all Indian states and union territories (or filtered by country code).
+    GET /api/locations/states/?country=IN
+    """
+    country_code = request.GET.get("country", "IN").strip().upper() or "IN"
+    states = (
+        State.objects.filter(country__code__iexact=country_code)
+        .order_by("name")
+        .values("id", "name", "code", "is_union_territory")
+    )
+    return JsonResponse({"states": list(states)}, status=200)
+
+
+@require_GET
+def location_districts_view(request):
+    """
+    Return districts belonging to a given state_id.
+    GET /api/locations/districts/?state_id=<id>
+    """
+    state_id = (request.GET.get("state_id") or request.GET.get("state") or "").strip()
+    if not state_id or not state_id.isdigit():
+        return JsonResponse(
+            {"error": "Valid state_id query parameter is required.", "districts": []},
+            status=400,
+        )
+
+    districts = (
+        District.objects.filter(state_id=int(state_id))
+        .order_by("name")
+        .values("id", "name", "state_id")
+    )
+    return JsonResponse({"districts": list(districts)}, status=200)
+
+
+@require_GET
+def location_cities_view(request):
+    """
+    Return cities belonging to a given district_id (or state_id).
+    GET /api/locations/cities/?district_id=<id>
+    """
+    district_id = (request.GET.get("district_id") or request.GET.get("district") or "").strip()
+    state_id = (request.GET.get("state_id") or request.GET.get("state") or "").strip()
+
+    if district_id:
+        if not district_id.isdigit():
+            return JsonResponse(
+                {"error": "Valid district_id query parameter is required.", "cities": []},
+                status=400,
+            )
+        qs = City.objects.filter(district_id=int(district_id))
+    elif state_id:
+        if not state_id.isdigit():
+            return JsonResponse(
+                {"error": "Valid state_id query parameter is required.", "cities": []},
+                status=400,
+            )
+        qs = City.objects.filter(state_id=int(state_id))
+    else:
+        return JsonResponse(
+            {"error": "district_id or state_id query parameter is required.", "cities": []},
+            status=400,
+        )
+
+    cities = qs.order_by("name").values("id", "name", "district_id", "state_id")
+    return JsonResponse({"cities": list(cities)}, status=200)
 
 
 @csrf_protect
@@ -3844,6 +4357,7 @@ def artist_dashboard_view(request):
                 "created_at": artist.created_at.strftime("%b %Y")
                 if artist.created_at
                 else "",
+                **_serialize_artist_location_data(artist),
             },
             "stats": {
                 "total_bookings": total_requests,
@@ -6848,4 +7362,187 @@ def artist_support_ticket_reply_view(request, ticket_id):
         },
         status=201,
     )
+
+
+# ==============================================================================
+# Smart Collaboration Discovery Views (Phase 3)
+# ==============================================================================
+
+@require_GET
+def artist_collaboration_recommendations_view(request):
+    """
+    Returns recommended artist collaborators for the currently authenticated artist.
+    Collaborators are matched on shared service districts (ArtistServiceDistrict),
+    filtered by optional category, event_date availability (using is_artist_date_occupied),
+    and price range.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access collaboration discovery."},
+            status=403,
+        )
+
+    # Optional location constraints within shared districts
+    state_id_param = (request.GET.get("state_id") or request.GET.get("state") or "").strip()
+    district_id_param = (request.GET.get("district_id") or request.GET.get("district") or "").strip()
+
+    target_state_id = None
+    target_district_id = None
+
+    if state_id_param:
+        if not state_id_param.isdigit():
+            return JsonResponse({"error": "Invalid state_id."}, status=400)
+        target_state_id = int(state_id_param)
+        if not State.objects.filter(id=target_state_id).exists():
+            return JsonResponse({"error": "Selected state does not exist."}, status=400)
+
+    if district_id_param:
+        if not district_id_param.isdigit():
+            return JsonResponse({"error": "Invalid district_id."}, status=400)
+        target_district_id = int(district_id_param)
+        dist_obj = District.objects.filter(id=target_district_id).first()
+        if not dist_obj:
+            return JsonResponse({"error": "Selected district does not exist."}, status=400)
+        if target_state_id and dist_obj.state_id != target_state_id:
+            return JsonResponse(
+                {"error": "Selected district does not belong to the selected state."},
+                status=400,
+            )
+
+    event_date_param = (request.GET.get("event_date") or request.GET.get("date") or "").strip()
+    category_param = request.GET.get("category", "").strip()
+    min_price_param = request.GET.get("min_price", "").strip()
+    max_price_param = request.GET.get("max_price", "").strip()
+    search_query = request.GET.get("search", "").strip()
+
+    page_param = request.GET.get("page", "1").strip()
+    page_size_param = request.GET.get("page_size", "20").strip()
+
+    try:
+        page = max(1, int(page_param))
+    except (ValueError, TypeError):
+        page = 1
+
+    try:
+        page_size = max(1, min(100, int(page_size_param)))
+    except (ValueError, TypeError):
+        page_size = 20
+
+    from .collaboration_service import find_collaboration_recommendations
+
+    try:
+        results = find_collaboration_recommendations(
+            requesting_artist=artist,
+            category=category_param,
+            event_date_str=event_date_param,
+            min_price=min_price_param or None,
+            max_price=max_price_param or None,
+            search_query=search_query or None,
+            target_state_id=target_state_id,
+            target_district_id=target_district_id,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400)
+
+    return JsonResponse(results)
+
+
+@require_http_methods(["GET", "POST"])
+def artist_collaboration_shared_coverage_view(request):
+    """
+    Calculates the exact shared service district coverage (intersection)
+    for a list of artists.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can calculate collaboration coverage."},
+            status=403,
+        )
+
+    raw_artist_ids = []
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body) if request.body else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"error": "Invalid JSON format."}, status=400)
+        raw_artist_ids = body.get("artist_ids", [])
+        if not isinstance(raw_artist_ids, list):
+            return JsonResponse({"error": "artist_ids must be a list."}, status=400)
+    else:
+        # GET params
+        ids_param = request.GET.get("artist_ids", "")
+        if ids_param:
+            raw_artist_ids = [p.strip() for p in ids_param.split(",") if p.strip()]
+        else:
+            raw_artist_ids = request.GET.getlist("artist_id")
+
+    # Validate integer IDs
+    artist_ids = []
+    for item in raw_artist_ids:
+        if isinstance(item, int):
+            artist_ids.append(item)
+        elif isinstance(item, str) and item.isdigit():
+            artist_ids.append(int(item))
+        else:
+            return JsonResponse(
+                {"error": f"Invalid artist ID: {item}. Artist IDs must be integers."},
+                status=400,
+            )
+
+    # Always ensure the requesting artist is part of the calculation
+    if artist.id not in artist_ids:
+        artist_ids.insert(0, artist.id)
+
+    # Validate that specified artist IDs actually exist
+    existing_artists = list(
+        ArtistProfile.objects.filter(id__in=artist_ids)
+        .select_related("category", "state", "district", "user")
+    )
+    existing_id_set = {a.id for a in existing_artists}
+    missing_ids = [aid for aid in artist_ids if aid not in existing_id_set]
+    if missing_ids:
+        return JsonResponse(
+            {"error": f"Artist ID(s) not found: {missing_ids}."},
+            status=400,
+        )
+
+    from .collaboration_service import (
+        calculate_shared_service_districts,
+        serialize_district_data,
+    )
+
+    shared_districts_qs = calculate_shared_service_districts(existing_artists, only_eligible=True)
+    coverage_data = serialize_district_data(shared_districts_qs)
+
+    participating_artists = [
+        {
+            "id": a.id,
+            "stage_name": a.stage_name,
+            "category_name": a.category.name if a.category else "",
+            "is_verified": a.is_verified,
+            "is_active": a.is_active and getattr(a.user, "is_active", False),
+        }
+        for a in existing_artists
+    ]
+
+    return JsonResponse(
+        {
+            "participating_artists": participating_artists,
+            "shared_districts": coverage_data["districts"],
+            "shared_districts_count": coverage_data["count"],
+            "states": coverage_data["states"],
+            "states_count": coverage_data["states_count"],
+        }
+    )
+
 

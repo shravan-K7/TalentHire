@@ -52,6 +52,10 @@
   box-sizing: border-box;
 }
 
+html {
+  font-size: 14px;
+}
+
 html,
 body,
 #root {
@@ -68,9 +72,9 @@ body,
   overflow-x: clip;
 }
 
-/* Base font scaling for dashboard pages for improved visibility & readability */
+/* Base font scaling for dashboard pages */
 html:has(.cd-page) {
-  font-size: 18px;
+  font-size: 14px;
 }
 
 /* Custom Scrollbar */

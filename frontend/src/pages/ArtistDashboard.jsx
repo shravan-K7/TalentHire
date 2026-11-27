@@ -3,6 +3,8 @@ import gsap from "gsap";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import ArtistSupportTab from "../components/artist/ArtistSupportTab";
+import ArtistCollaborationTab from "../components/artist/ArtistCollaborationTab";
+import ArtistLocationCoverageFields from "../components/artist/ArtistLocationCoverageFields";
 import {
   fetchArtistDashboard,
   respondArtistBooking,
@@ -229,7 +231,11 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
     years_of_experience: 0,
     phone: "",
     location: "",
-    travel_availability: "city",
+    state: "",
+    district: "",
+    city: "",
+    service_districts: [],
+    service_states: [],
     bio: "",
     performance_types: [],
     portfolio_url: "",
@@ -458,7 +464,15 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
         years_of_experience: artist.years_of_experience || 0,
         phone: artist.phone || "",
         location: artist.location || "",
-        travel_availability: artist.travel_availability || "city",
+        state: artist.state?.id ? String(artist.state.id) : "",
+        district: artist.district?.id ? String(artist.district.id) : "",
+        city: artist.city?.id ? String(artist.city.id) : "",
+        service_districts: Array.isArray(artist.service_district_ids)
+          ? artist.service_district_ids
+          : [],
+        service_states: Array.isArray(artist.service_states)
+          ? artist.service_states
+          : [],
         bio: artist.bio || "",
         performance_types: Array.isArray(artist.performance_types)
           ? artist.performance_types
@@ -494,7 +508,15 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
             years_of_experience: artist.years_of_experience || 0,
             phone: artist.phone || "",
             location: artist.location || "",
-            travel_availability: artist.travel_availability || "city",
+            state: artist.state?.id ? String(artist.state.id) : "",
+            district: artist.district?.id ? String(artist.district.id) : "",
+            city: artist.city?.id ? String(artist.city.id) : "",
+            service_districts: Array.isArray(artist.service_district_ids)
+              ? artist.service_district_ids
+              : [],
+            service_states: Array.isArray(artist.service_states)
+              ? artist.service_states
+              : [],
             bio: artist.bio || "",
             performance_types: Array.isArray(artist.performance_types)
               ? artist.performance_types
@@ -1105,7 +1127,13 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
       );
       formData.append("phone", editForm.phone);
       formData.append("location", editForm.location);
-      formData.append("travel_availability", editForm.travel_availability);
+      formData.append("state", editForm.state || "");
+      formData.append("district", editForm.district || "");
+      formData.append("city", editForm.city || "");
+      formData.append(
+        "service_districts",
+        JSON.stringify(editForm.service_districts || []),
+      );
       formData.append("bio", editForm.bio);
       formData.append(
         "performance_types",
@@ -1878,6 +1906,16 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               <span className="artist-nav-label">Reviews & Ratings</span>
             </button>
 
+            {/* Smart Collaboration Discovery (Phase 3) */}
+            <button
+              type="button"
+              className={`artist-nav-item ${activeTab === "collaborations" ? "active" : ""}`}
+              onClick={() => switchTab("collaborations")}
+            >
+              <Users className="artist-nav-icon" size={19} strokeWidth={2} />
+              <span className="artist-nav-label">Collaborations</span>
+            </button>
+
             {/* Spacing gap before secondary sections */}
             <div className="artist-sidebar-spacer" />
 
@@ -2541,8 +2579,19 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                         </svg>
                       </span>
                       <span className="cd-contact-text">
-                        {artist.years_of_experience || 0} years experience ·
-                        Travel: {artist.travel_availability || "Within City"}
+                        {artist.years_of_experience || 0} years experience ·{" "}
+                        {Array.isArray(artist.service_districts) &&
+                        artist.service_districts.length > 0
+                          ? `Covers ${artist.service_districts.length} district${
+                              artist.service_districts.length === 1 ? "" : "s"
+                            } across ${
+                              (artist.service_states || []).length || 1
+                            } state${
+                              (artist.service_states || []).length === 1
+                                ? ""
+                                : "s"
+                            }`
+                          : `Travel: ${artist.travel_availability || "Within City"}`}
                       </span>
                     </div>
                   </div>
@@ -2934,43 +2983,26 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
                     />
                   </div>
 
-                  <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="location">
-                      City / Location *
-                    </label>
-                    <input
-                      id="location"
-                      type="text"
-                      className="cd-input"
-                      value={editForm.location}
-                      onChange={(e) =>
-                        setEditForm((p) => ({ ...p, location: e.target.value }))
-                      }
-                      required
-                    />
-                  </div>
-
-                  <div className="cd-form-group">
-                    <label className="cd-label" htmlFor="travel">
-                      Travel Availability *
-                    </label>
-                    <select
-                      id="travel"
-                      className="cd-select"
-                      value={editForm.travel_availability}
-                      onChange={(e) =>
-                        setEditForm((p) => ({
-                          ...p,
-                          travel_availability: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="city">Within my city</option>
-                      <option value="state">Across my state</option>
-                      <option value="india">Across India</option>
-                      <option value="international">International</option>
-                    </select>
-                  </div>
+                  <ArtistLocationCoverageFields
+                    stateId={editForm.state}
+                    districtId={editForm.district}
+                    cityId={editForm.city}
+                    serviceDistrictIds={editForm.service_districts}
+                    initialServiceStates={editForm.service_states}
+                    legacyLocation={editForm.location}
+                    onBaseLocationChange={(loc) =>
+                      setEditForm((p) => ({
+                        ...p,
+                        state: loc.state,
+                        district: loc.district,
+                        city: loc.city,
+                        location: loc.location,
+                      }))
+                    }
+                    onServiceDistrictsChange={(ids) =>
+                      setEditForm((p) => ({ ...p, service_districts: ids }))
+                    }
+                  />
                 </div>
 
                 <div className="cd-form-group">
@@ -5569,6 +5601,17 @@ function ArtistDashboard({ user, onLogout, navigate, onUserUpdate }) {
               ================================================================= */}
           {activeTab === "support" && (
             <ArtistSupportTab onUnreadChange={setUnreadSupportCount} />
+          )}
+
+          {/* =================================================================
+              TAB 12: SMART COLLABORATION DISCOVERY (PHASE 3)
+              ================================================================= */}
+          {activeTab === "collaborations" && (
+            <ArtistCollaborationTab
+              artistProfile={data?.artist}
+              navigate={navigate}
+              onSwitchTab={switchTab}
+            />
           )}
         </main>
       </div>
