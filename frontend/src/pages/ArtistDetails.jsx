@@ -315,6 +315,11 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
       ? `${rawTravel} (${artist.location})`
       : rawTravel;
 
+  const serviceStates = Array.isArray(artist?.service_states) ? artist.service_states : [];
+  const totalDistrictsCount = Array.isArray(artist?.service_districts)
+    ? artist.service_districts.length
+    : serviceStates.reduce((acc, st) => acc + (st.districts?.length || 0), 0);
+
   return (
     <div className="artist-details-wrapper">
       <Navbar user={user} onLogout={onLogout} currentPath="/artists" navigate={navigate} />
@@ -612,6 +617,91 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                   )}
                 </article>
 
+                {/* Section: Service Coverage */}
+                <article className="artist-card-section artist-coverage-section" id="service-coverage">
+                  <div className="artist-coverage-header">
+                    <div className="artist-coverage-heading-wrap">
+                      <div className="artist-coverage-title-row">
+                        <h2 className="artist-section-title">Service Coverage</h2>
+                        {totalDistrictsCount > 0 && (
+                          <span className="artist-coverage-counter-badge">
+                            {totalDistrictsCount} District{totalDistrictsCount === 1 ? '' : 's'} Covered
+                          </span>
+                        )}
+                      </div>
+                      <p className="artist-section-sub">
+                        Specific districts where {artist.stage_name} accepts direct event bookings and live performances.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Travel Preference vs Service Coverage Distinction */}
+                  <div className="artist-coverage-distinction-banner">
+                    <div className="coverage-distinction-col">
+                      <span className="coverage-distinction-label">Travel Availability (Preference)</span>
+                      <span className="coverage-distinction-value">{travelDisplay}</span>
+                      <span className="coverage-distinction-hint">Broad regional travel preference</span>
+                    </div>
+                    <div className="coverage-distinction-divider" />
+                    <div className="coverage-distinction-col">
+                      <span className="coverage-distinction-label">Service Coverage (Configured)</span>
+                      <span className="coverage-distinction-value">
+                        {totalDistrictsCount > 0
+                          ? `${totalDistrictsCount} District${totalDistrictsCount === 1 ? '' : 's'} across ${serviceStates.length} State${serviceStates.length === 1 ? '' : 's'}/UT${serviceStates.length === 1 ? '' : 's'}`
+                          : 'No specific districts mapped'}
+                      </span>
+                      <span className="coverage-distinction-hint">Actual confirmed destination coverage</span>
+                    </div>
+                  </div>
+
+                  {/* Districts Grouped by State */}
+                  {serviceStates && serviceStates.length > 0 ? (
+                    <div className="artist-coverage-states-container">
+                      {serviceStates.map((st) => (
+                        <div key={st.id || st.name} className="artist-coverage-state-card">
+                          <div className="artist-coverage-state-header">
+                            <div className="artist-coverage-state-name-wrap">
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FF5722" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                <circle cx="12" cy="10" r="3" />
+                              </svg>
+                              <h3 className="artist-coverage-state-name">{st.name}</h3>
+                              {st.is_union_territory && (
+                                <span className="artist-coverage-ut-tag">UT</span>
+                              )}
+                            </div>
+                            <span className="artist-coverage-state-count">
+                              {st.districts?.length || 0} district{st.districts?.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+
+                          <div className="artist-coverage-chips-list">
+                            {(st.districts || []).map((district) => (
+                              <span key={district.id || district.name} className="artist-district-chip">
+                                <span className="district-chip-dot" aria-hidden="true" />
+                                <span className="district-chip-name">{district.name}</span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="artist-coverage-empty-box">
+                      <div className="coverage-empty-icon-wrap" aria-hidden="true">
+                        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                          <circle cx="12" cy="10" r="3" />
+                        </svg>
+                      </div>
+                      <h3 className="coverage-empty-title">No Specific Districts Configured</h3>
+                      <p className="coverage-empty-message">
+                        This performer has not mapped specific district coverage yet. They accept bookings based on their travel preference of <strong>{travelDisplay}</strong>.
+                      </p>
+                    </div>
+                  )}
+                </article>
+
                 {/* Section: Performance Reel */}
                 <article className="artist-card-section">
                   <h2 className="artist-section-title">Performance Reel</h2>
@@ -766,6 +856,13 @@ function ArtistDetails({ artistId, user, onLogout, navigate }) {
                       <span className="booking-travel-value">
                         {travelDisplay}
                       </span>
+                      {totalDistrictsCount > 0 ? (
+                        <a href="#service-coverage" className="booking-coverage-link">
+                          Covers {totalDistrictsCount} district{totalDistrictsCount === 1 ? '' : 's'} ({serviceStates.length} state{serviceStates.length === 1 ? '' : 's'})
+                        </a>
+                      ) : (
+                        <span className="booking-coverage-subtext">No specific districts set</span>
+                      )}
                     </div>
                   </div>
 

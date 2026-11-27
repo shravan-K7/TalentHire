@@ -307,3 +307,61 @@ class ArtistServiceDistrictTests(TestCase):
         self.assertIn("service_districts", dash_artist)
         self.assertIn("service_district_ids", dash_artist)
         self.assertIn("service_states", dash_artist)
+
+    def test_artist_detail_api_service_coverage_grouped_by_state(self):
+        """
+        Verify GET /api/artists/<id>/ returns service districts grouped by state,
+        includes district counts, and preserves travel_availability unchanged.
+        """
+        covered_user = User.objects.create_user(
+            username="covered_artist", email="covered@example.com", password="Password123!"
+        )
+        covered_artist = ArtistProfile.objects.create(
+            user=covered_user,
+            category=self.category,
+            stage_name="Aarav South Tour",
+            bio="Multi-state performing band",
+            location="Kozhikode, Kerala",
+            travel_availability="state",
+            starting_price=25000,
+            is_active=True,
+            is_verified=True,
+            state=self.kerala,
+            district=self.kozhikode,
+        )
+        # Configure coverage in Kerala (2 districts) and Karnataka (1 district)
+        ArtistServiceDistrict.objects.create(artist=covered_artist, district=self.kozhikode)
+        ArtistServiceDistrict.objects.create(artist=covered_artist, district=self.kannur)
+        ArtistServiceDistrict.objects.create(artist=covered_artist, district=self.bengaluru)
+
+        res = self.client.get(f"/api/artists/{covered_artist.id}/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()["artist"]
+
+        # Travel availability must remain unchanged
+        self.assertEqual(data["travel_availability"], "state")
+        self.assertEqual(data["travel_availability_display"], "Across my state")
+
+        # Total covered districts
+        self.assertEqual(len(data["service_districts"]), 3)
+        self.assertEqual(
+            set(data["service_district_ids"]),
+            {self.kozhikode.id, self.kannur.id, self.bengaluru.id},
+        )
+
+        # Grouped by state
+        self.assertEqual(len(data["service_states"]), 2)
+        state_names = [st["name"] for st in data["service_states"]]
+        self.assertIn("Karnataka", state_names)
+        self.assertIn("Kerala", state_names)
+
+        kerala_group = next(st for st in data["service_states"] if st["name"] == "Kerala")
+        self.assertEqual(len(kerala_group["districts"]), 2)
+        kerala_dist_names = [d["name"] for d in kerala_group["districts"]]
+        self.assertIn("Kozhikode", kerala_dist_names)
+        self.assertIn("Kannur", kerala_dist_names)
+
+        karnataka_group = next(st for st in data["service_states"] if st["name"] == "Karnataka")
+        self.assertEqual(len(karnataka_group["districts"]), 1)
+        self.assertEqual(karnataka_group["districts"][0]["name"], "Bengaluru Urban")
+

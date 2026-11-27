@@ -970,4 +970,189 @@ class SupportMessage(models.Model):
         return f"SupportMessage #{self.id} on {self.ticket.ticket_number}"
 
 
+class CollaborationTeam(models.Model):
+    """
+    Collaboration team created and owned by an artist.
+    Shared booking coverage is calculated dynamically as the strict
+    intersection of all active members' ArtistServiceDistrict records.
+    """
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True, default="")
+    owner = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.PROTECT,
+        related_name="owned_collaboration_teams",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="collaboration_teams",
+    )
+    profile_image = models.ImageField(
+        upload_to="teams/logos/",
+        null=True,
+        blank=True,
+    )
+    cover_image = models.ImageField(
+        upload_to="teams/covers/",
+        null=True,
+        blank=True,
+    )
+    is_publicly_visible = models.BooleanField(default=True, db_index=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"CollaborationTeam #{self.id}: {self.name} (Owner: {self.owner.stage_name})"
+
+    def get_active_members(self):
+        return self.memberships.filter(
+            status=CollaborationTeamMember.Status.ACTIVE
+        ).select_related("artist", "artist__category", "artist__user", "artist__state", "artist__district")
+
+    def check_eligibility(self):
+        """
+        Determines if the team is eligible for public discovery.
+        Rule: Every active member (including owner) must be eligible
+        (is_active=True, is_verified=True, user.is_active=True).
+        If any active member fails, returns (False, reason).
+        """
+        if not self.is_active:
+            return False, "This collaboration team is closed or inactive."
+
+        # Check owner eligibility
+        from .collaboration_service import is_artist_eligible_for_collaboration
+        if not is_artist_eligible_for_collaboration(self.owner):
+            return False, f"Team owner '{self.owner.stage_name}' is currently inactive or pending verification."
+
+        # Check all active members
+        active_memberships = self.get_active_members()
+        for m in active_memberships:
+            if not is_artist_eligible_for_collaboration(m.artist):
+                return False, f"Active member '{m.artist.stage_name}' is currently inactive or pending verification."
+
+        return True, "Eligible"
+
+
+class CollaborationTeamMember(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        PENDING = "pending", "Pending"
+        DECLINED = "declined", "Declined"
+        REMOVED = "removed", "Removed"
+        LEFT = "left", "Left"
+
+    class Role(models.TextChoices):
+        OWNER = "owner", "Owner"
+        MEMBER = "member", "Member"
+
+    team = models.ForeignKey(
+        CollaborationTeam,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+    )
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.CASCADE,
+        related_name="team_memberships",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.MEMBER,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    invited_by = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_team_invitations",
+    )
+    message = models.TextField(blank=True, default="")
+    joined_at = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["team", "artist"],
+                name="unique_team_artist_membership",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["team", "status"]),
+            models.Index(fields=["artist", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.artist.stage_name} ({self.role}) in {self.team.name} [{self.status}]"
+
+
+class CollaborationTeamPortfolio(models.Model):
+    class ItemType(models.TextChoices):
+        PHOTO = "photo", "Photo"
+        VIDEO = "video", "Video"
+        YOUTUBE = "youtube", "YouTube Link"
+
+    team = models.ForeignKey(
+        CollaborationTeam,
+        on_delete=models.CASCADE,
+        related_name="portfolio_items",
+    )
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True, default="")
+    item_type = models.CharField(
+        max_length=20,
+        choices=ItemType.choices,
+        default=ItemType.PHOTO,
+    )
+    media_file = models.FileField(
+        upload_to="teams/portfolio/",
+        blank=True,
+        null=True,
+    )
+    media_url = models.URLField(blank=True, max_length=500, default="")
+    thumbnail = models.ImageField(
+        upload_to="teams/portfolio/thumbnails/",
+        blank=True,
+        null=True,
+    )
+    thumbnail_url = models.CharField(max_length=500, blank=True, default="")
+    youtube_url = models.URLField(blank=True, max_length=500, default="")
+    duration = models.CharField(max_length=30, blank=True, default="")
+    dimensions = models.CharField(max_length=50, blank=True, default="")
+    file_size = models.CharField(max_length=50, blank=True, default="")
+    format_ext = models.CharField(max_length=20, blank=True, default="")
+    is_featured = models.BooleanField(default=False)
+    is_public = models.BooleanField(default=True, db_index=True)
+    display_order = models.PositiveIntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_order", "-uploaded_at"]
+        indexes = [
+            models.Index(fields=["team", "is_public", "display_order"]),
+        ]
+
+    def __str__(self):
+        return f"Team #{self.team_id} ({self.team.name}) - {self.title} ({self.item_type})"
+
+
+
 

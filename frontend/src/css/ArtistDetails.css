@@ -1335,4 +1335,252 @@
   .artist-reviews-summary {
     gap: 20px;
   }
+
+  .artist-coverage-distinction-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .coverage-distinction-divider {
+    width: 100%;
+    height: 1px;
+  }
 }
+
+/* --------------------------------------------------------------------------
+   Service Coverage Section (Phase 3 Location Update)
+   Theme: Dark charcoal (#181818, #202020, #262626) & Vibrant Orange (#FF5722)
+   -------------------------------------------------------------------------- */
+.artist-coverage-section {
+  scroll-margin-top: 100px;
+}
+
+.artist-coverage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.artist-coverage-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.artist-coverage-counter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 87, 34, 0.12);
+  border: 1px solid rgba(255, 87, 34, 0.35);
+  color: #ff7043;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+/* Travel Preference vs Service Coverage Distinction Banner */
+.artist-coverage-distinction-banner {
+  background-color: #171717;
+  border: 1px solid #2b2b2b;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.coverage-distinction-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 170px;
+}
+
+.coverage-distinction-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8e8e8e;
+}
+
+.coverage-distinction-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.coverage-distinction-hint {
+  font-size: 0.78rem;
+  color: #a0a0a0;
+}
+
+.coverage-distinction-divider {
+  width: 1px;
+  height: 38px;
+  background-color: #2c2c2c;
+  flex-shrink: 0;
+}
+
+/* States Container & State Cards */
+.artist-coverage-states-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.artist-coverage-state-card {
+  background-color: #191919;
+  border: 1px solid #2c2c2c;
+  border-radius: 12px;
+  padding: 16px 18px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.artist-coverage-state-card:hover {
+  border-color: #3d3d3d;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.artist-coverage-state-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.artist-coverage-state-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.artist-coverage-state-name {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.artist-coverage-ut-tag {
+  background-color: #2a2a2a;
+  color: #ff7043;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.artist-coverage-state-count {
+  font-size: 0.8rem;
+  color: #8e8e8e;
+  font-weight: 500;
+}
+
+/* Compact District Chips */
+.artist-coverage-chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.artist-district-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background-color: #242424;
+  border: 1px solid #363636;
+  color: #e2e2e2;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.artist-district-chip:hover {
+  border-color: rgba(255, 87, 34, 0.55);
+  background-color: #2c2624;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.district-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #FF5722;
+  flex-shrink: 0;
+}
+
+.district-chip-name {
+  white-space: nowrap;
+}
+
+/* Empty State */
+.artist-coverage-empty-box {
+  background-color: #191919;
+  border: 1px dashed #363636;
+  border-radius: 12px;
+  padding: 32px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.coverage-empty-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: #242424;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.coverage-empty-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #e2e2e2;
+  margin: 0;
+}
+
+.coverage-empty-message {
+  font-size: 0.88rem;
+  color: #9e9e9e;
+  margin: 0;
+  max-width: 480px;
+  line-height: 1.5;
+}
+
+.booking-coverage-link {
+  font-size: 0.78rem;
+  color: #ff7043;
+  text-decoration: none;
+  margin-top: 3px;
+  display: inline-block;
+  font-weight: 500;
+}
+
+.booking-coverage-link:hover {
+  text-decoration: underline;
+  color: #ff8a65;
+}
+
+.booking-coverage-subtext {
+  font-size: 0.78rem;
+  color: #757575;
+  margin-top: 2px;
+}
+

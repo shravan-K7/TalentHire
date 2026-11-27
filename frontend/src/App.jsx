@@ -14,6 +14,7 @@ import ArtistDashboard from "./pages/ArtistDashboard";
 import BookingPage from "./pages/BookingPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import AboutUs from "./pages/AboutUs";
+import TeamDetails from "./pages/TeamDetails";
 import LogoutModal from "./components/LogoutModal";
 
 function LoadingScreen({ message = "Loading..." }) {
@@ -262,6 +263,20 @@ function App() {
     }
   }
 
+  // Extract team detail ID if path is /teams/123 or /teams?id=123
+  let teamDetailId = null;
+  const matchTeam = pathWithoutQuery.match(/^\/teams\/(\d+)\/?$/);
+  if (matchTeam) {
+    teamDetailId = matchTeam[1];
+  } else {
+    const queryIdx = currentPath.indexOf("?");
+    const searchStr = queryIdx !== -1 ? currentPath.substring(queryIdx) : "";
+    const params = new URLSearchParams(searchStr);
+    if ((pathWithoutQuery === "/teams" || pathWithoutQuery === "/team") && params.get("id")) {
+      teamDetailId = params.get("id");
+    }
+  }
+
   const isArtistsList = pathWithoutQuery === "/artists" && !artistDetailId;
   const isAbout = pathWithoutQuery === "/about" || pathWithoutQuery === "/about-us";
 
@@ -441,6 +456,17 @@ function App() {
             checking={checking}
           />
         )
+      ) : teamDetailId ? (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
+          <Navbar user={user} onLogout={handleRequestLogout} />
+          <TeamDetails
+            key={teamDetailId}
+            teamId={teamDetailId}
+            user={user}
+            onLogout={handleRequestLogout}
+            navigate={navigate}
+          />
+        </div>
       ) : artistDetailId ? (
         <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#181818" }}>
           <ArtistDetails

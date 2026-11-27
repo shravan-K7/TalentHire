@@ -7546,3 +7546,1273 @@ def artist_collaboration_shared_coverage_view(request):
     )
 
 
+# ==============================================================================
+# Collaboration Team Management Views (Phase 4)
+# ==============================================================================
+
+@require_http_methods(["GET", "POST"])
+def artist_teams_view(request):
+    """
+    GET: List all collaboration teams where the authenticated artist is an active member or owner.
+    POST: Create a new collaboration team (caller automatically becomes the owner & first active member).
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access collaboration teams."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, Notification
+    from .collaboration_service import (
+        serialize_team_summary,
+        serialize_team_detail,
+        is_artist_eligible_for_collaboration,
+    )
+
+    if request.method == "GET":
+        # Find teams where artist is owner or active member
+        member_team_ids = CollaborationTeamMember.objects.filter(
+            artist=artist,
+            status=CollaborationTeamMember.Status.ACTIVE,
+        ).values_list("team_id", flat=True)
+
+        teams_qs = (
+            CollaborationTeam.objects.filter(
+                models.Q(id__in=member_team_ids) | models.Q(owner=artist),
+                is_active=True,
+            )
+            .select_related("owner", "owner__category", "owner__user", "owner__district", "owner__state")
+            .distinct()
+            .order_by("-created_at")
+        )
+
+        teams_data = [serialize_team_summary(t, current_artist=artist) for t in teams_qs]
+        received_invites_count = CollaborationTeamMember.objects.filter(
+            artist=artist,
+            status=CollaborationTeamMember.Status.PENDING,
+            team__is_active=True,
+        ).count()
+
+        return JsonResponse(
+            {
+                "teams": teams_data,
+                "count": len(teams_data),
+                "received_invitations_count": received_invites_count,
+            }
+        )
+
+    # POST: Create a team
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    name = str(body.get("name") or "").strip()
+    description = str(body.get("description") or "").strip()
+
+    if not name:
+        return JsonResponse({"error": "Team name is required."}, status=400)
+    if len(name) > 150:
+        return JsonResponse(
+            {"error": "Team name must not exceed 150 characters."}, status=400
+        )
+
+    with transaction.atomic():
+        team = CollaborationTeam.objects.create(
+            name=name,
+            description=description,
+            owner=artist,
+            is_active=True,
+        )
+        # Creator automatically becomes the owner and first active member
+        CollaborationTeamMember.objects.create(
+            team=team,
+            artist=artist,
+            role=CollaborationTeamMember.Role.OWNER,
+            status=CollaborationTeamMember.Status.ACTIVE,
+            joined_at=timezone.now(),
+        )
+
+    return JsonResponse(
+        {
+            "message": f"Team '{team.name}' created successfully.",
+            "team": serialize_team_detail(team, current_artist=artist),
+        },
+        status=201,
+    )
+
+
+@require_GET
+def artist_team_detail_view(request, team_id):
+    """
+    Returns full details for a team, including members, pending invitations,
+    and dynamically calculated shared service districts.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access collaboration teams."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember
+    from .collaboration_service import serialize_team_detail
+
+    team = (
+        CollaborationTeam.objects.filter(id=team_id, is_active=True)
+        .select_related("owner", "owner__category", "owner__user", "owner__district", "owner__state")
+        .first()
+    )
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    # Security check: Must be owner or active member or pending invitee
+    is_associated = (
+        team.owner_id == artist.id
+        or CollaborationTeamMember.objects.filter(
+            team=team,
+            artist=artist,
+            status__in=[
+                CollaborationTeamMember.Status.ACTIVE,
+                CollaborationTeamMember.Status.PENDING,
+            ],
+        ).exists()
+    )
+    if not is_associated:
+        return JsonResponse(
+            {"error": "You do not have permission to view this team."}, status=403
+        )
+
+    return JsonResponse({"team": serialize_team_detail(team, current_artist=artist)})
+
+
+@require_POST
+def artist_team_invite_view(request, team_id):
+    """
+    Allows a team owner to invite an eligible artist to their team.
+    Enforces:
+    - Only team owner can invite.
+    - Cannot invite self.
+    - Target artist must be active and verified.
+    - Cannot invite an already active member.
+    - Cannot send duplicate pending invitations.
+    - Sends TalentHire in-app notification.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    caller_artist = getattr(request.user, "artist_profile", None)
+    if not caller_artist or not caller_artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can invite team members."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, Notification
+    from .collaboration_service import is_artist_eligible_for_collaboration
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    if team.owner_id != caller_artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can invite collaborators."}, status=403
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    raw_target = body.get("artist_id") or body.get("target_artist_id") or body.get("query")
+    message = str(body.get("message") or "").strip()
+
+    if raw_target is None or str(raw_target).strip() == "":
+        return JsonResponse({"error": "Valid artist_id or stage name is required."}, status=400)
+
+    target_str = str(raw_target).strip()
+    target_artist = None
+
+    if target_str.isdigit():
+        numeric_id = int(target_str)
+        # 1. Primary check: ArtistProfile PK
+        target_artist = (
+            ArtistProfile.objects.filter(id=numeric_id)
+            .select_related("user", "category")
+            .first()
+        )
+        # 2. Secondary check: User PK (prevents confusing User ID with ArtistProfile ID)
+        if not target_artist:
+            target_artist = (
+                ArtistProfile.objects.filter(user_id=numeric_id)
+                .select_related("user", "category")
+                .first()
+            )
+
+    # 3. If not found by numeric ID or if string was passed (stage_name or username)
+    if not target_artist:
+        target_artist = (
+            ArtistProfile.objects.filter(
+                models.Q(stage_name__iexact=target_str)
+                | models.Q(user__username__iexact=target_str)
+            )
+            .select_related("user", "category")
+            .first()
+        )
+
+    if not target_artist:
+        logger.warning(
+            f"[Invite] Target artist not found for identifier '{raw_target}' (Team #{team.id} '{team.name}', Inviter: {caller_artist.stage_name} #{caller_artist.id})"
+        )
+        return JsonResponse({"error": f"Target artist '{raw_target}' not found."}, status=404)
+
+    if target_artist.id == caller_artist.id:
+        return JsonResponse({"error": "You cannot invite yourself."}, status=400)
+
+    if not is_artist_eligible_for_collaboration(target_artist):
+        logger.warning(
+            f"[Invite] Target artist {target_artist.stage_name} (#{target_artist.id}) is ineligible (active={target_artist.is_active}, verified={target_artist.is_verified})"
+        )
+        return JsonResponse(
+            {
+                "error": f"Artist '{target_artist.stage_name}' is currently inactive or pending verification and cannot be invited."
+            },
+            status=400,
+        )
+
+    # Check existing membership
+    existing_membership = CollaborationTeamMember.objects.filter(
+        team=team, artist=target_artist
+    ).first()
+
+    if existing_membership:
+        if existing_membership.status == CollaborationTeamMember.Status.ACTIVE:
+            return JsonResponse(
+                {"error": f"'{target_artist.stage_name}' is already an active member of this team."},
+                status=400,
+            )
+        if existing_membership.status == CollaborationTeamMember.Status.PENDING:
+            return JsonResponse(
+                {"error": f"A pending invitation already exists for '{target_artist.stage_name}'."},
+                status=400,
+            )
+
+        # If previously declined, removed, or left, update existing row
+        with transaction.atomic():
+            existing_membership.status = CollaborationTeamMember.Status.PENDING
+            existing_membership.role = CollaborationTeamMember.Role.MEMBER
+            existing_membership.invited_by = caller_artist
+            existing_membership.message = message
+            existing_membership.responded_at = None
+            existing_membership.joined_at = None
+            existing_membership.save()
+
+            # Create notification for invitee
+            Notification.objects.create(
+                user=target_artist.user,
+                title=f"Collaboration Invitation: {team.name}",
+                message=f"{caller_artist.stage_name} invited you to join the team '{team.name}'.",
+                notification_type=Notification.NotificationType.GENERAL,
+            )
+        logger.info(
+            f"[Invite] Renewed invitation #{existing_membership.id} for {target_artist.stage_name} (Team #{team.id} '{team.name}', Inviter: {caller_artist.stage_name})"
+        )
+        return JsonResponse(
+            {
+                "message": f"Invitation sent to {target_artist.stage_name}.",
+                "invitation_id": existing_membership.id,
+                "team_id": team.id,
+                "artist_id": target_artist.id,
+            },
+            status=201,
+        )
+
+    # Brand new invitation
+    with transaction.atomic():
+        membership = CollaborationTeamMember.objects.create(
+            team=team,
+            artist=target_artist,
+            role=CollaborationTeamMember.Role.MEMBER,
+            status=CollaborationTeamMember.Status.PENDING,
+            invited_by=caller_artist,
+            message=message,
+        )
+        Notification.objects.create(
+            user=target_artist.user,
+            title=f"Collaboration Invitation: {team.name}",
+            message=f"{caller_artist.stage_name} invited you to join the team '{team.name}'.",
+            notification_type=Notification.NotificationType.GENERAL,
+        )
+    logger.info(
+        f"[Invite] Created invitation #{membership.id} for {target_artist.stage_name} (Team #{team.id} '{team.name}', Inviter: {caller_artist.stage_name})"
+    )
+    return JsonResponse(
+        {
+            "message": f"Invitation sent to {target_artist.stage_name}.",
+            "invitation_id": membership.id,
+            "team_id": team.id,
+            "artist_id": target_artist.id,
+        },
+        status=201,
+    )
+
+
+@require_GET
+def artist_received_invitations_view(request):
+    """
+    Lists pending team invitations received by the currently authenticated artist.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access invitations."},
+            status=403,
+        )
+
+    from .models import CollaborationTeamMember
+    from .collaboration_service import (
+        calculate_team_shared_service_districts,
+        serialize_district_data,
+    )
+
+    invitations_qs = (
+        CollaborationTeamMember.objects.filter(
+            artist=artist,
+            status=CollaborationTeamMember.Status.PENDING,
+            team__is_active=True,
+        )
+        .select_related(
+            "team",
+            "team__owner",
+            "team__owner__category",
+            "team__owner__district",
+            "team__owner__state",
+            "invited_by",
+        )
+        .order_by("-created_at")
+    )
+
+    invitations_data = []
+    for inv in invitations_qs:
+        districts_count = 0
+        states_count = 0
+        try:
+            districts_qs, _, _ = calculate_team_shared_service_districts(inv.team)
+            cov = serialize_district_data(districts_qs)
+            districts_count = cov.get("count", 0)
+            states_count = cov.get("states_count", 0)
+        except Exception as e:
+            logger.warning(
+                f"[Invitations] Error calculating shared coverage for team #{inv.team_id}: {e}"
+            )
+
+        owner = inv.team.owner
+        profile_img_url = None
+        if owner.profile_image:
+            try:
+                profile_img_url = owner.profile_image.url
+            except Exception:
+                profile_img_url = None
+
+        invitations_data.append(
+            {
+                "id": inv.id,
+                "team_id": inv.team.id,
+                "team_name": inv.team.name,
+                "team_description": inv.team.description,
+                "invited_by_name": inv.invited_by.stage_name if inv.invited_by else owner.stage_name,
+                "message": inv.message,
+                "created_at": inv.created_at.strftime("%b %d, %Y") if inv.created_at else "",
+                "owner": {
+                    "id": owner.id,
+                    "stage_name": owner.stage_name,
+                    "category_name": owner.category.name if owner.category else "",
+                    "profile_image": profile_img_url,
+                },
+                "team_current_coverage": {
+                    "districts_count": districts_count,
+                    "states_count": states_count,
+                },
+            }
+        )
+
+    logger.info(
+        f"[Invitations] Returning {len(invitations_data)} pending invitations for artist '{artist.stage_name}' (#{artist.id})"
+    )
+    return JsonResponse({"invitations": invitations_data, "count": len(invitations_data)})
+
+
+@require_POST
+def artist_respond_invitation_view(request, invitation_id):
+    """
+    Accept or decline a pending team invitation.
+    Only the intended invitee can respond.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can respond to invitations."},
+            status=403,
+        )
+
+    from .models import CollaborationTeamMember, Notification
+
+    invitation = (
+        CollaborationTeamMember.objects.filter(id=invitation_id)
+        .select_related("team", "team__owner", "artist")
+        .first()
+    )
+    if not invitation:
+        return JsonResponse({"error": "Invitation not found."}, status=404)
+
+    if invitation.artist_id != artist.id:
+        return JsonResponse(
+            {"error": "You do not have permission to respond to this invitation."},
+            status=403,
+        )
+
+    if invitation.status != CollaborationTeamMember.Status.PENDING:
+        return JsonResponse(
+            {"error": f"This invitation has already been {invitation.status}."},
+            status=400,
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    action = str(body.get("action") or "").strip().lower()
+    if action not in ("accept", "decline"):
+        return JsonResponse(
+            {"error": "Action must be either 'accept' or 'decline'."}, status=400
+        )
+
+    now = timezone.now()
+    if action == "accept":
+        with transaction.atomic():
+            invitation.status = CollaborationTeamMember.Status.ACTIVE
+            invitation.joined_at = now
+            invitation.responded_at = now
+            invitation.save()
+
+            # Notify team owner
+            Notification.objects.create(
+                user=invitation.team.owner.user,
+                title=f"Invitation Accepted: {invitation.team.name}",
+                message=f"{artist.stage_name} has accepted your invitation to join '{invitation.team.name}'.",
+                notification_type=Notification.NotificationType.GENERAL,
+            )
+
+        logger.info(
+            f"[Invitation Respond] Artist '{artist.stage_name}' (#{artist.id}) accepted invitation #{invitation.id} to join Team #{invitation.team_id} '{invitation.team.name}'"
+        )
+        return JsonResponse(
+            {
+                "message": f"You have joined '{invitation.team.name}'.",
+                "status": "active",
+                "team_id": invitation.team_id,
+            }
+        )
+    else:
+        with transaction.atomic():
+            invitation.status = CollaborationTeamMember.Status.DECLINED
+            invitation.responded_at = now
+            invitation.save()
+
+            # Notify team owner
+            Notification.objects.create(
+                user=invitation.team.owner.user,
+                title=f"Invitation Declined: {invitation.team.name}",
+                message=f"{artist.stage_name} declined the invitation to join '{invitation.team.name}'.",
+                notification_type=Notification.NotificationType.GENERAL,
+            )
+
+        logger.info(
+            f"[Invitation Respond] Artist '{artist.stage_name}' (#{artist.id}) declined invitation #{invitation.id} to join Team #{invitation.team_id} '{invitation.team.name}'"
+        )
+        return JsonResponse(
+            {
+                "message": f"Invitation to '{invitation.team.name}' declined.",
+                "status": "declined",
+            }
+        )
+
+
+@require_POST
+def artist_team_remove_member_view(request, team_id, member_id):
+    """
+    Allows a team owner to remove an active member from their team.
+    Prevent ordinary removal of the team owner.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    caller_artist = getattr(request.user, "artist_profile", None)
+    if not caller_artist or not caller_artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can manage team members."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, Notification
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    if team.owner_id != caller_artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can remove members."}, status=403
+        )
+
+    member = (
+        CollaborationTeamMember.objects.filter(id=member_id, team=team)
+        .select_related("artist", "artist__user")
+        .first()
+    )
+    if not member:
+        return JsonResponse({"error": "Team member not found."}, status=404)
+
+    if member.artist_id == team.owner_id:
+        return JsonResponse(
+            {
+                "error": "The team owner cannot be removed. To leave, transfer ownership or close the team."
+            },
+            status=400,
+        )
+
+    if member.status != CollaborationTeamMember.Status.ACTIVE:
+        return JsonResponse(
+            {"error": "This member is not currently an active member of the team."},
+            status=400,
+        )
+
+    with transaction.atomic():
+        member.status = CollaborationTeamMember.Status.REMOVED
+        member.save()
+
+        # Notify removed member
+        Notification.objects.create(
+            user=member.artist.user,
+            title=f"Removed from Team: {team.name}",
+            message=f"You have been removed from the collaboration team '{team.name}'.",
+            notification_type=Notification.NotificationType.GENERAL,
+        )
+
+    return JsonResponse(
+        {"message": f"{member.artist.stage_name} was removed from '{team.name}'."}
+    )
+
+
+@require_POST
+def artist_team_leave_view(request, team_id):
+    """
+    Allows an active member to leave a team.
+    Handles ownership transfer or safe team closure if the owner wants to leave.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    caller_artist = getattr(request.user, "artist_profile", None)
+    if not caller_artist or not caller_artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can leave a team."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, Notification
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    membership = CollaborationTeamMember.objects.filter(
+        team=team,
+        artist=caller_artist,
+        status=CollaborationTeamMember.Status.ACTIVE,
+    ).first()
+
+    if not membership:
+        return JsonResponse(
+            {"error": "You are not an active member of this team."}, status=400
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        body = {}
+
+    is_owner = team.owner_id == caller_artist.id
+
+    if is_owner:
+        other_active_members = list(
+            team.get_active_members().exclude(artist=caller_artist)
+        )
+        if not other_active_members:
+            # Owner is the only active member -> safely close and disband team
+            with transaction.atomic():
+                team.is_active = False
+                team.save()
+                membership.status = CollaborationTeamMember.Status.LEFT
+                membership.save()
+            return JsonResponse(
+                {"message": f"Team '{team.name}' has been closed and disbanded."}
+            )
+
+        # Other active members exist: must transfer ownership or explicitly close team
+        close_team = bool(body.get("close_team"))
+        new_owner_id = body.get("new_owner_id")
+
+        if close_team:
+            with transaction.atomic():
+                team.is_active = False
+                team.save()
+                membership.status = CollaborationTeamMember.Status.LEFT
+                membership.save()
+                for m in other_active_members:
+                    Notification.objects.create(
+                        user=m.artist.user,
+                        title=f"Team Closed: {team.name}",
+                        message=f"The team owner has disbanded the team '{team.name}'.",
+                        notification_type=Notification.NotificationType.GENERAL,
+                    )
+            return JsonResponse(
+                {"message": f"Team '{team.name}' has been disbanded."}
+            )
+
+        if not new_owner_id or not str(new_owner_id).isdigit():
+            return JsonResponse(
+                {
+                    "error": "As the team owner, you must transfer ownership to another active member (new_owner_id) or close the team (close_team=true)."
+                },
+                status=400,
+            )
+
+        new_owner_id = int(new_owner_id)
+        target_member = next(
+            (m for m in other_active_members if m.artist_id == new_owner_id), None
+        )
+        if not target_member:
+            return JsonResponse(
+                {"error": "The selected new owner is not an active member of this team."},
+                status=400,
+            )
+
+        with transaction.atomic():
+            team.owner = target_member.artist
+            team.save()
+            target_member.role = CollaborationTeamMember.Role.OWNER
+            target_member.save()
+
+            membership.status = CollaborationTeamMember.Status.LEFT
+            membership.save()
+
+            # Notify new owner
+            Notification.objects.create(
+                user=target_member.artist.user,
+                title=f"You are now Owner of {team.name}",
+                message=f"{caller_artist.stage_name} transferred ownership of team '{team.name}' to you.",
+                notification_type=Notification.NotificationType.GENERAL,
+            )
+
+        return JsonResponse(
+            {
+                "message": f"Ownership transferred to {target_member.artist.stage_name} and you have left '{team.name}'."
+            }
+        )
+
+    # Ordinary member leaving
+    with transaction.atomic():
+        membership.status = CollaborationTeamMember.Status.LEFT
+        membership.save()
+
+        # Notify owner
+        Notification.objects.create(
+            user=team.owner.user,
+            title=f"Member Left: {team.name}",
+            message=f"{caller_artist.stage_name} has left your team '{team.name}'.",
+            notification_type=Notification.NotificationType.GENERAL,
+        )
+
+    return JsonResponse({"message": f"You have left '{team.name}'."})
+
+
+@require_GET
+def artist_team_coverage_view(request, team_id):
+    """
+    Returns dynamically calculated shared service districts for a collaboration team.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access team coverage."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember
+    from .collaboration_service import (
+        calculate_team_shared_service_districts,
+        serialize_district_data,
+    )
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    is_associated = (
+        team.owner_id == artist.id
+        or CollaborationTeamMember.objects.filter(team=team, artist=artist).exists()
+    )
+    if not is_associated:
+        return JsonResponse(
+            {"error": "You do not have permission to view this team's coverage."},
+            status=403,
+        )
+
+    districts_qs, is_eligible, reason = calculate_team_shared_service_districts(team)
+    coverage = serialize_district_data(districts_qs)
+
+    return JsonResponse(
+        {
+            "team_id": team.id,
+            "team_name": team.name,
+            "shared_districts": coverage["districts"],
+            "shared_districts_count": coverage["count"],
+            "states": coverage["states"],
+            "states_count": coverage["states_count"],
+            "is_eligible_for_discovery": is_eligible,
+            "eligibility_reason": reason if not is_eligible else None,
+            "message": "No common service coverage" if coverage["count"] == 0 else "",
+        }
+    )
+
+
+# ==============================================================================
+# Collaboration Team Profile & Portfolio Views (Phase 5A)
+# ==============================================================================
+
+@require_http_methods(["POST", "PUT", "PATCH"])
+def artist_team_profile_update_view(request, team_id):
+    """
+    Update team profile details: name, description, category, profile_image,
+    cover_image, and public visibility toggle.
+    Owner-only operation.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can manage team profiles."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, Category
+    from .collaboration_service import serialize_team_detail
+    from PIL import Image
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    if team.owner_id != artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can edit the team profile."},
+            status=403,
+        )
+
+    # Handle multipart or JSON
+    if request.content_type and "multipart/form-data" in request.content_type:
+        data = request.POST
+    else:
+        try:
+            data = json.loads(request.body) if request.body else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = request.POST
+
+    if "name" in data:
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"error": "Team name cannot be empty."}, status=400)
+        if len(name) > 150:
+            return JsonResponse({"error": "Team name must not exceed 150 characters."}, status=400)
+        team.name = name
+
+    if "description" in data:
+        team.description = str(data.get("description") or "").strip()
+
+    if "category_id" in data:
+        cat_id = data.get("category_id")
+        if cat_id in ("", None, "null", 0, "0"):
+            team.category = None
+        else:
+            try:
+                category = Category.objects.filter(id=int(cat_id)).first()
+                if not category:
+                    return JsonResponse({"error": "Selected category does not exist."}, status=400)
+                team.category = category
+            except (ValueError, TypeError):
+                return JsonResponse({"error": "Invalid category ID."}, status=400)
+
+    if "is_publicly_visible" in data:
+        vis = data.get("is_publicly_visible")
+        if isinstance(vis, str):
+            team.is_publicly_visible = vis.lower() in ("true", "1", "yes")
+        else:
+            team.is_publicly_visible = bool(vis)
+
+    # Handle removal flags
+    if str(data.get("remove_profile_image", "")).lower() in ("true", "1", "yes"):
+        if team.profile_image:
+            team.profile_image.delete(save=False)
+            team.profile_image = None
+
+    if str(data.get("remove_cover_image", "")).lower() in ("true", "1", "yes"):
+        if team.cover_image:
+            team.cover_image.delete(save=False)
+            team.cover_image = None
+
+    # Handle image uploads (max 5MB each, validated with PIL)
+    MAX_IMG_SIZE = 5 * 1024 * 1024
+    if "profile_image" in request.FILES:
+        p_img = request.FILES["profile_image"]
+        if p_img.size > MAX_IMG_SIZE:
+            return JsonResponse({"error": "Profile logo exceeds the 5MB size limit."}, status=400)
+        try:
+            im = Image.open(p_img)
+            im.verify()
+            p_img.seek(0)
+        except Exception:
+            return JsonResponse({"error": "Uploaded profile image file is invalid or corrupted."}, status=400)
+        if team.profile_image:
+            team.profile_image.delete(save=False)
+        team.profile_image = p_img
+
+    if "cover_image" in request.FILES:
+        c_img = request.FILES["cover_image"]
+        if c_img.size > MAX_IMG_SIZE:
+            return JsonResponse({"error": "Cover image exceeds the 5MB size limit."}, status=400)
+        try:
+            im = Image.open(c_img)
+            im.verify()
+            c_img.seek(0)
+        except Exception:
+            return JsonResponse({"error": "Uploaded cover image file is invalid or corrupted."}, status=400)
+        if team.cover_image:
+            team.cover_image.delete(save=False)
+        team.cover_image = c_img
+
+    team.save()
+
+    return JsonResponse(
+        {
+            "message": "Team profile updated successfully.",
+            "team": serialize_team_detail(team, current_artist=artist),
+        }
+    )
+
+
+@require_http_methods(["GET", "POST"])
+def artist_team_portfolio_list_create_view(request, team_id):
+    """
+    GET: List all portfolio items for a team (accessible by active members and owner).
+    POST: Upload/add a new portfolio item (photo, video, or YouTube URL). Owner only.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access team portfolio."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, CollaborationTeamPortfolio
+    from .collaboration_service import serialize_team_portfolio_item
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    is_member_or_owner = (
+        team.owner_id == artist.id
+        or CollaborationTeamMember.objects.filter(
+            team=team, artist=artist, status=CollaborationTeamMember.Status.ACTIVE
+        ).exists()
+    )
+    if not is_member_or_owner:
+        return JsonResponse(
+            {"error": "You do not have permission to access this team's portfolio."},
+            status=403,
+        )
+
+    if request.method == "GET":
+        items = (
+            CollaborationTeamPortfolio.objects.filter(team=team)
+            .order_by("display_order", "-uploaded_at")
+        )
+        return JsonResponse(
+            {
+                "portfolio": [serialize_team_portfolio_item(p, request=request) for p in items],
+                "count": items.count(),
+            }
+        )
+
+    # POST: Owner only
+    if team.owner_id != artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can add portfolio items."},
+            status=403,
+        )
+
+    data = request.POST if request.FILES or request.POST else {}
+    if not data and request.body:
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            data = {}
+
+    item_type = str(data.get("item_type") or "photo").strip().lower()
+    title = str(data.get("title") or "").strip()
+    description = str(data.get("description") or "").strip()
+    is_public = str(data.get("is_public", "true")).lower() in ("true", "1", "yes")
+    is_featured = str(data.get("is_featured", "false")).lower() in ("true", "1", "yes")
+
+    valid_types = [
+        CollaborationTeamPortfolio.ItemType.PHOTO,
+        CollaborationTeamPortfolio.ItemType.VIDEO,
+        CollaborationTeamPortfolio.ItemType.YOUTUBE,
+    ]
+    if item_type not in valid_types:
+        return JsonResponse(
+            {"error": f"Invalid item type '{item_type}'. Must be photo, video, or youtube."},
+            status=400,
+        )
+
+    media_file = request.FILES.get("media_file") or request.FILES.get("file")
+    media_url = str(data.get("media_url") or "").strip()
+    youtube_url = str(data.get("youtube_url") or "").strip()
+    thumbnail_file = request.FILES.get("thumbnail")
+    thumbnail_url = ""
+    dimensions = ""
+    duration = str(data.get("duration") or "").strip()
+    file_size = ""
+    format_ext = ""
+
+    if item_type == CollaborationTeamPortfolio.ItemType.YOUTUBE:
+        target_url = youtube_url or media_url
+        if not target_url:
+            return JsonResponse({"error": "A valid YouTube URL is required."}, status=400)
+        yt_id = extract_youtube_id(target_url)
+        if not yt_id:
+            return JsonResponse({"error": "Please provide a valid YouTube video URL."}, status=400)
+        youtube_url = target_url
+        media_url = target_url
+        format_ext = "YOUTUBE"
+        thumbnail_url = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
+        if not title:
+            title = f"Team Performance ({yt_id})"
+    elif media_file:
+        max_bytes = 10 * 1024 * 1024 if item_type == CollaborationTeamPortfolio.ItemType.PHOTO else 100 * 1024 * 1024
+        if media_file.size > max_bytes:
+            limit_mb = 10 if item_type == CollaborationTeamPortfolio.ItemType.PHOTO else 100
+            return JsonResponse(
+                {"error": f"File size exceeds the {limit_mb}MB limit."},
+                status=400,
+            )
+
+        filename = media_file.name
+        ext = filename.split(".")[-1].upper() if "." in filename else ""
+        format_ext = ext
+        mb = media_file.size / (1024 * 1024)
+        file_size = f"{mb:.1f} MB" if mb >= 1 else f"{max(1, int(media_file.size / 1024))} KB"
+
+        if not title:
+            title = filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ")
+
+        if item_type == CollaborationTeamPortfolio.ItemType.PHOTO:
+            try:
+                from PIL import Image
+                im = Image.open(media_file)
+                dimensions = f"{im.width} × {im.height}"
+                media_file.seek(0)
+            except Exception:
+                dimensions = "1920 × 1080"
+        elif item_type == CollaborationTeamPortfolio.ItemType.VIDEO:
+            client_dim = str(data.get("dimensions") or "").strip()
+            dimensions = client_dim or "1920 × 1080"
+            if not duration:
+                duration = "03:00"
+    else:
+        if not media_url:
+            return JsonResponse(
+                {"error": "Please provide a media file or YouTube URL."},
+                status=400,
+            )
+        format_ext = "URL"
+        if not title:
+            title = "Team Portfolio Media"
+
+    last_order = (
+        CollaborationTeamPortfolio.objects.filter(team=team)
+        .aggregate(models.Max("display_order"))
+        .get("display_order__max")
+        or 0
+    )
+
+    if is_featured:
+        CollaborationTeamPortfolio.objects.filter(team=team).update(is_featured=False)
+
+    item = CollaborationTeamPortfolio.objects.create(
+        team=team,
+        title=title,
+        description=description,
+        item_type=item_type,
+        media_file=media_file if media_file else None,
+        media_url=media_url,
+        thumbnail=thumbnail_file if thumbnail_file else None,
+        thumbnail_url=thumbnail_url if item_type == CollaborationTeamPortfolio.ItemType.YOUTUBE else "",
+        youtube_url=youtube_url,
+        duration=duration,
+        dimensions=dimensions,
+        file_size=file_size,
+        format_ext=format_ext,
+        is_featured=is_featured,
+        is_public=is_public,
+        display_order=last_order + 1,
+    )
+
+    return JsonResponse(
+        {
+            "message": "Portfolio item added successfully.",
+            "item": serialize_team_portfolio_item(item, request=request),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+def artist_team_portfolio_item_view(request, team_id, item_id):
+    """
+    GET: Retrieve a single portfolio item.
+    PUT/PATCH: Update portfolio item title, description, is_public, is_featured, display_order. Owner only.
+    DELETE: Delete portfolio item. Owner only.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access portfolio items."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, CollaborationTeamPortfolio
+    from .collaboration_service import serialize_team_portfolio_item
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    item = CollaborationTeamPortfolio.objects.filter(id=item_id, team=team).first()
+    if not item:
+        return JsonResponse({"error": "Portfolio item not found."}, status=404)
+
+    if request.method == "GET":
+        is_member_or_owner = (
+            team.owner_id == artist.id
+            or CollaborationTeamMember.objects.filter(
+                team=team, artist=artist, status=CollaborationTeamMember.Status.ACTIVE
+            ).exists()
+        )
+        if not is_member_or_owner:
+            return JsonResponse({"error": "Permission denied."}, status=403)
+        return JsonResponse({"item": serialize_team_portfolio_item(item, request=request)})
+
+    # PUT/PATCH and DELETE are owner-only
+    if team.owner_id != artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can edit or delete portfolio items."},
+            status=403,
+        )
+
+    if request.method == "DELETE":
+        if item.media_file:
+            item.media_file.delete(save=False)
+        if item.thumbnail:
+            item.thumbnail.delete(save=False)
+        item.delete()
+        return JsonResponse({"message": "Portfolio item deleted successfully."})
+
+    # PUT / PATCH
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        data = request.POST
+
+    if "title" in data:
+        t = str(data.get("title") or "").strip()
+        if t:
+            item.title = t
+    if "description" in data:
+        item.description = str(data.get("description") or "").strip()
+    if "is_public" in data:
+        vis = data.get("is_public")
+        if isinstance(vis, str):
+            item.is_public = vis.lower() in ("true", "1", "yes")
+        else:
+            item.is_public = bool(vis)
+    if "is_featured" in data:
+        feat = data.get("is_featured")
+        is_feat = feat.lower() in ("true", "1", "yes") if isinstance(feat, str) else bool(feat)
+        if is_feat and not item.is_featured:
+            CollaborationTeamPortfolio.objects.filter(team=team).update(is_featured=False)
+        item.is_featured = is_feat
+    if "display_order" in data:
+        try:
+            item.display_order = int(data.get("display_order"))
+        except (ValueError, TypeError):
+            pass
+
+    if item.item_type == CollaborationTeamPortfolio.ItemType.YOUTUBE and "youtube_url" in data:
+        target_url = str(data.get("youtube_url") or "").strip()
+        if target_url:
+            yt_id = extract_youtube_id(target_url)
+            if not yt_id:
+                return JsonResponse({"error": "Please provide a valid YouTube URL."}, status=400)
+            item.youtube_url = target_url
+            item.media_url = target_url
+            item.thumbnail_url = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
+
+    item.save()
+    return JsonResponse(
+        {
+            "message": "Portfolio item updated successfully.",
+            "item": serialize_team_portfolio_item(item, request=request),
+        }
+    )
+
+
+@require_POST
+def artist_team_portfolio_reorder_view(request, team_id):
+    """
+    Reorder team portfolio items by receiving an array of item IDs.
+    Owner only.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can reorder portfolio items."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamPortfolio
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    if team.owner_id != artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can reorder portfolio items."},
+            status=403,
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    item_ids = body.get("item_ids")
+    if not isinstance(item_ids, list):
+        return JsonResponse({"error": "A list of 'item_ids' is required."}, status=400)
+
+    with transaction.atomic():
+        for order, item_id in enumerate(item_ids, start=1):
+            CollaborationTeamPortfolio.objects.filter(id=item_id, team=team).update(
+                display_order=order
+            )
+
+    return JsonResponse({"message": "Portfolio items reordered successfully."})
+
+
+@require_GET
+def public_team_detail_view(request, team_id):
+    """
+    Public team profile endpoint: returns public team details, active members,
+    shared service districts, and public portfolio items.
+    Checks team active status, visibility, and collaboration eligibility.
+    """
+    from .models import CollaborationTeam, CollaborationTeamMember
+    from .collaboration_service import (
+        serialize_team_public_profile,
+        calculate_team_shared_service_districts,
+    )
+
+    team = (
+        CollaborationTeam.objects.filter(id=team_id)
+        .select_related("owner", "owner__category", "owner__user", "category")
+        .first()
+    )
+    if not team or not team.is_active:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    # Check if caller is authenticated team owner or active member
+    is_owner_or_member = False
+    if request.user.is_authenticated:
+        artist = getattr(request.user, "artist_profile", None)
+        if artist:
+            is_owner_or_member = (
+                team.owner_id == artist.id
+                or CollaborationTeamMember.objects.filter(
+                    team=team, artist=artist, status=CollaborationTeamMember.Status.ACTIVE
+                ).exists()
+            )
+
+    # Visibility check: if team is not publicly visible, only owner/members can preview
+    if not team.is_publicly_visible and not is_owner_or_member:
+        return JsonResponse(
+            {"error": "This collaboration team's profile is set to private."},
+            status=404,
+        )
+
+    # Discovery eligibility check
+    districts_qs, is_eligible, reason = calculate_team_shared_service_districts(team)
+    if not is_eligible and not is_owner_or_member:
+        return JsonResponse(
+            {"error": "This collaboration team is currently not eligible for public display."},
+            status=404,
+        )
+
+    profile_data = serialize_team_public_profile(team, request=request)
+    profile_data["is_preview"] = not team.is_publicly_visible or not is_eligible
+
+    return JsonResponse(profile_data)
+
+
+
+

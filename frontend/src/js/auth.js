@@ -1081,5 +1081,271 @@ export async function calculateSharedCoverage(artistIds = []) {
     return data;
 }
 
+// ============================================================================
+// Collaboration Team Management APIs (Phase 4)
+// ============================================================================
+
+export async function fetchArtistTeams() {
+    const response = await fetch("/api/artist/teams/", {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load teams.");
+    }
+    return data;
+}
+
+export async function createArtistTeam({ name, description }) {
+    const token = await getCsrfToken();
+    const response = await fetch("/api/artist/teams/", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ name, description }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to create team.");
+    }
+    return data;
+}
+
+export async function fetchArtistTeamDetail(teamId) {
+    const response = await fetch(`/api/artist/teams/${teamId}/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team details.");
+    }
+    return data;
+}
+
+export async function inviteArtistToTeam(teamId, { artist_id, message }) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/invite/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ artist_id, message }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to send invitation.");
+    }
+    return data;
+}
+
+export async function fetchReceivedTeamInvitations() {
+    const response = await fetch("/api/artist/teams/invitations/", {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load invitations.");
+    }
+    return data;
+}
+
+export async function respondToTeamInvitation(invitationId, action) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/invitations/${invitationId}/respond/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ action }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to respond to invitation.");
+    }
+    return data;
+}
+
+export async function removeTeamMember(teamId, memberId) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/members/${memberId}/remove/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to remove member.");
+    }
+    return data;
+}
+
+export async function leaveTeam(teamId, payload = {}) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/leave/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to leave team.");
+    }
+    return data;
+}
+
+export async function fetchTeamSharedCoverage(teamId) {
+    const response = await fetch(`/api/artist/teams/${teamId}/coverage/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team coverage.");
+    }
+    return data;
+}
+
+export async function fetchPublicTeamDetail(teamId) {
+    const response = await fetch(`/api/teams/${teamId}/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team details.");
+    }
+    return data;
+}
+
+export async function updateTeamProfile(teamId, payload) {
+    const token = await getCsrfToken();
+    const isFormData = payload instanceof FormData;
+    const headers = {
+        "X-CSRFToken": token,
+    };
+    if (!isFormData) {
+        headers["Content-Type"] = "application/json";
+    }
+
+    const response = await fetch(`/api/artist/teams/${teamId}/profile/`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: isFormData ? payload : JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to update team profile.");
+    }
+    return data;
+}
+
+export async function fetchTeamPortfolio(teamId) {
+    const response = await fetch(`/api/artist/teams/${teamId}/portfolio/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team portfolio.");
+    }
+    return data;
+}
+
+export async function createTeamPortfolioItem(teamId, payload) {
+    const token = await getCsrfToken();
+    const isFormData = payload instanceof FormData;
+    const headers = {
+        "X-CSRFToken": token,
+    };
+    if (!isFormData) {
+        headers["Content-Type"] = "application/json";
+    }
+
+    const response = await fetch(`/api/artist/teams/${teamId}/portfolio/`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: isFormData ? payload : JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to create portfolio item.");
+    }
+    return data;
+}
+
+export async function updateTeamPortfolioItem(teamId, itemId, payload) {
+    const token = await getCsrfToken();
+    const headers = {
+        "Content-Type": "application/json",
+        "X-CSRFToken": token,
+    };
+    const response = await fetch(`/api/artist/teams/${teamId}/portfolio/${itemId}/`, {
+        method: "PUT",
+        credentials: "include",
+        headers,
+        body: JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to update portfolio item.");
+    }
+    return data;
+}
+
+export async function deleteTeamPortfolioItem(teamId, itemId) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/portfolio/${itemId}/`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+            "X-CSRFToken": token,
+        },
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to delete portfolio item.");
+    }
+    return data;
+}
+
+export async function reorderTeamPortfolioItems(teamId, itemIds) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/portfolio/reorder/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ item_ids: itemIds }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to reorder portfolio items.");
+    }
+    return data;
+}
+
+
+
 
 
