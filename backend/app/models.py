@@ -438,6 +438,15 @@ class Payment(models.Model):
         Booking,
         on_delete=models.PROTECT,
         related_name="payment",
+        null=True,
+        blank=True,
+    )
+    team_booking = models.OneToOneField(
+        "TeamBooking",
+        on_delete=models.PROTECT,
+        related_name="payment",
+        null=True,
+        blank=True,
     )
 
     # Full amount charged to the customer
@@ -1152,6 +1161,272 @@ class CollaborationTeamPortfolio(models.Model):
 
     def __str__(self):
         return f"Team #{self.team_id} ({self.team.name}) - {self.title} ({self.item_type})"
+
+
+class CollaborationPackage(models.Model):
+    """
+    Combined performance package offered by a CollaborationTeam (Phase 5B).
+    Specifies a structured performance offering with starting price, duration in minutes,
+    included features, requirements, and participating active team members.
+    """
+    team = models.ForeignKey(
+        CollaborationTeam,
+        on_delete=models.CASCADE,
+        related_name="packages",
+    )
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True, default="")
+    starting_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    duration_minutes = models.PositiveIntegerField(
+        default=60,
+        help_text="Performance duration in minutes",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="collaboration_packages",
+    )
+    included_services = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of included services or deliverables",
+    )
+    requirements = models.TextField(
+        blank=True,
+        default="",
+        help_text="Stage, sound, lighting, or technical requirements",
+    )
+    participating_members = models.ManyToManyField(
+        ArtistProfile,
+        related_name="collaboration_packages",
+        blank=True,
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["team", "is_active", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Package #{self.id}: {self.name} (Team: {self.team.name})"
+
+    @property
+    def duration_display(self):
+        minutes = self.duration_minutes
+        if not minutes:
+            return "Flexible"
+        if minutes < 60:
+            return f"{minutes} mins"
+        hours = minutes // 60
+        rem = minutes % 60
+        if rem == 0:
+            return f"{hours} hr" if hours == 1 else f"{hours} hrs"
+        return f"{hours} hr {rem} mins"
+
+
+class TeamBooking(models.Model):
+    """
+    Phase 6: Customer Team Booking (Owner + Member Confirmation).
+    Represents a customer's booking request for a collaboration team's package.
+    """
+    class Status(models.TextChoices):
+        PENDING_OWNER_REVIEW = "pending_owner_review", "Pending Owner Review"
+        PENDING_MEMBER_CONFIRMATIONS = "pending_member_confirmations", "Pending Member Confirmations"
+        AWAITING_PAYMENT = "awaiting_payment", "Awaiting Payment"
+        CONFIRMED = "confirmed", "Confirmed"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+        CANCELLED = "cancelled", "Cancelled"
+        COMPLETED = "completed", "Completed"
+
+    customer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="team_bookings",
+    )
+    team = models.ForeignKey(
+        CollaborationTeam,
+        on_delete=models.PROTECT,
+        related_name="bookings",
+    )
+    package = models.ForeignKey(
+        CollaborationPackage,
+        on_delete=models.PROTECT,
+        related_name="bookings",
+    )
+
+    # Immutable Snapshot of Package at booking time
+    package_name = models.CharField(max_length=150)
+    package_category = models.CharField(max_length=100, blank=True, default="")
+    package_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Agreed total price for the complete package at booking time (INR)",
+    )
+    package_duration_minutes = models.PositiveIntegerField(default=60)
+    package_duration_display = models.CharField(max_length=50, blank=True, default="")
+    package_inclusions = models.JSONField(default=list, blank=True)
+    package_requirements = models.TextField(blank=True, default="")
+    participating_members = models.ManyToManyField(
+        ArtistProfile,
+        related_name="team_bookings",
+    )
+    participating_members_snapshot = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Snapshot of artist details (id, stage_name, category) participating in this booking",
+    )
+
+    # Event Details
+    event_type = models.CharField(max_length=100)
+    event_date = models.DateTimeField()
+    event_day = models.DateField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Calendar date of the event in Asia/Kolkata timezone for date-level availability check",
+    )
+    event_location = models.CharField(max_length=200)
+    event_address = models.TextField(blank=True, default="")
+    venue_name = models.CharField(max_length=255, blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    state = models.CharField(max_length=100, blank=True, default="")
+    district = models.ForeignKey(
+        "District",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="team_bookings",
+    )
+    customer_phone = models.CharField(max_length=20, blank=True, default="")
+    expected_audience_size = models.PositiveIntegerField(null=True, blank=True)
+    performance_duration = models.CharField(max_length=50, blank=True, default="")
+    additional_requirements = models.TextField(blank=True, default="")
+    customer_message = models.TextField(blank=True, default="")
+
+    # Lifecycle & Audit
+    status = models.CharField(
+        max_length=40,
+        choices=Status.choices,
+        default=Status.PENDING_OWNER_REVIEW,
+        db_index=True,
+    )
+    owner_reviewed_at = models.DateTimeField(null=True, blank=True)
+    owner_response_message = models.TextField(blank=True, default="")
+    all_members_confirmed_at = models.DateTimeField(null=True, blank=True)
+    payment_deadline = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="24-hour payment deadline after all members confirm",
+    )
+    member_confirmation_deadline = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Response deadline for participating members to confirm",
+    )
+    rejection_reason = models.TextField(blank=True, default="")
+    declined_by_artist = models.ForeignKey(
+        ArtistProfile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="declined_team_bookings",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def expires_at(self):
+        """Returns the 24-hour payment deadline when awaiting payment."""
+        return self.payment_deadline
+
+    def save(self, *args, **kwargs):
+        if self.event_date:
+            from zoneinfo import ZoneInfo
+            from django.utils import timezone
+            kolkata_tz = ZoneInfo("Asia/Kolkata")
+            local_dt = timezone.localtime(self.event_date, timezone=kolkata_tz)
+            self.event_day = local_dt.date()
+            if kwargs.get("update_fields") is not None:
+                fields = set(kwargs["update_fields"])
+                fields.add("event_day")
+                kwargs["update_fields"] = list(fields)
+
+        super().save(*args, **kwargs)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["customer", "package", "event_day"],
+                condition=models.Q(status__in=[
+                    "pending_owner_review",
+                    "pending_member_confirmations",
+                    "awaiting_payment",
+                    "confirmed",
+                ]),
+                name="unique_active_customer_package_booking_per_day",
+            ),
+        ]
+
+    def __str__(self):
+        return f"TeamBooking #{self.id}: {self.customer.username} -> {self.team.name} ({self.status})"
+
+
+class TeamBookingMemberConfirmation(models.Model):
+    """
+    Phase 6: Confirmation record for each participating artist in a team booking.
+    """
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
+        EXPIRED = "expired", "Expired"
+
+    team_booking = models.ForeignKey(
+        TeamBooking,
+        on_delete=models.CASCADE,
+        related_name="member_confirmations",
+    )
+    artist = models.ForeignKey(
+        ArtistProfile,
+        on_delete=models.PROTECT,
+        related_name="team_booking_confirmations",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    responded_at = models.DateTimeField(null=True, blank=True)
+    response_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["team_booking", "artist"],
+                name="unique_team_booking_artist_confirmation",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Confirmation #{self.id}: TeamBooking #{self.team_booking_id} - {self.artist.stage_name} ({self.status})"
+
+
 
 
 

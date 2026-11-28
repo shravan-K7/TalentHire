@@ -33,6 +33,10 @@ import {
   ArrowDown,
   Play,
   Upload,
+  Clock,
+  Check,
+  DollarSign,
+  Package,
 } from "lucide-react";
 import {
   fetchCollaborationRecommendations,
@@ -50,6 +54,10 @@ import {
   updateTeamPortfolioItem,
   deleteTeamPortfolioItem,
   reorderTeamPortfolioItems,
+  fetchArtistTeamBookings,
+  respondToArtistTeamBooking,
+  fetchArtistMemberConfirmations,
+  respondToArtistMemberConfirmation,
 } from "../../js/auth";
 import "../../css/ArtistCollaboration.css";
 
@@ -122,6 +130,23 @@ export default function ArtistCollaborationTab({
   const [invitations, setInvitations] = useState([]);
   const [invitationsLoading, setInvitationsLoading] = useState(false);
   const [invitationsCount, setInvitationsCount] = useState(0);
+
+  // Team Bookings State (Phase 6 - Owner & Member View)
+  const [artistTeamBookings, setArtistTeamBookings] = useState([]);
+  const [artistTeamBookingsLoading, setArtistTeamBookingsLoading] = useState(false);
+  const [artistTeamBookingsError, setArtistTeamBookingsError] = useState("");
+  const [bookingResponseDialog, setBookingResponseDialog] = useState(null); // { booking, action: 'approve' | 'reject', message: '' }
+  const [bookingResponding, setBookingResponding] = useState(false);
+  const [bookingResponseError, setBookingResponseError] = useState("");
+
+  // Member Confirmations State (Phase 6 - Participating Artist Confirmation)
+  const [memberConfirmations, setMemberConfirmations] = useState([]);
+  const [memberConfirmationsLoading, setMemberConfirmationsLoading] = useState(false);
+  const [memberConfirmationsError, setMemberConfirmationsError] = useState("");
+  const [pendingConfirmationsCount, setPendingConfirmationsCount] = useState(0);
+  const [confirmationResponseDialog, setConfirmationResponseDialog] = useState(null); // { confirmation, action: 'accept' | 'decline', message: '' }
+  const [confirmationResponding, setConfirmationResponding] = useState(false);
+  const [confirmationResponseError, setConfirmationResponseError] = useState("");
 
   // Discovery / Collaborators State
   const [collaborators, setCollaborators] = useState([]);
@@ -330,16 +355,94 @@ export default function ArtistCollaborationTab({
     }
   }, []);
 
+  // Team Bookings & Member Confirmations Handlers (Phase 6)
+  const loadArtistTeamBookings = useCallback(async (teamId) => {
+    if (!teamId) return;
+    setArtistTeamBookingsLoading(true);
+    setArtistTeamBookingsError("");
+    try {
+      const res = await fetchArtistTeamBookings(teamId);
+      setArtistTeamBookings(res.team_bookings || []);
+    } catch (err) {
+      setArtistTeamBookingsError(err.message || "Failed to load team bookings.");
+    } finally {
+      setArtistTeamBookingsLoading(false);
+    }
+  }, []);
+
+  const loadArtistMemberConfirmations = useCallback(async () => {
+    setMemberConfirmationsLoading(true);
+    setMemberConfirmationsError("");
+    try {
+      const res = await fetchArtistMemberConfirmations();
+      const list = res.confirmations || [];
+      setMemberConfirmations(list);
+      setPendingConfirmationsCount(list.filter((c) => c.status === "pending" && c.can_respond).length);
+    } catch (err) {
+      setMemberConfirmationsError(err.message || "Failed to load confirmations.");
+    } finally {
+      setMemberConfirmationsLoading(false);
+    }
+  }, []);
+
+  async function handleConfirmBookingResponse() {
+    if (!bookingResponseDialog || !selectedTeamId) return;
+    setBookingResponding(true);
+    setBookingResponseError("");
+    try {
+      await respondToArtistTeamBooking(
+        selectedTeamId,
+        bookingResponseDialog.booking.id,
+        bookingResponseDialog.action,
+        bookingResponseDialog.message
+      );
+      setBookingResponseDialog(null);
+      await loadArtistTeamBookings(selectedTeamId);
+    } catch (err) {
+      setBookingResponseError(err.message || "Failed to respond to booking request.");
+    } finally {
+      setBookingResponding(false);
+    }
+  }
+
+  async function handleConfirmMemberConfirmation() {
+    if (!confirmationResponseDialog) return;
+    setConfirmationResponding(true);
+    setConfirmationResponseError("");
+    try {
+      await respondToArtistMemberConfirmation(
+        confirmationResponseDialog.confirmation.confirmation_id,
+        confirmationResponseDialog.action,
+        confirmationResponseDialog.message
+      );
+      setConfirmationResponseDialog(null);
+      await loadArtistMemberConfirmations();
+      if (selectedTeamId) {
+        await loadArtistTeamBookings(selectedTeamId);
+      }
+    } catch (err) {
+      setConfirmationResponseError(err.message || "Failed to respond to confirmation.");
+    } finally {
+      setConfirmationResponding(false);
+    }
+  }
+
+  useEffect(() => {
+    loadArtistMemberConfirmations();
+  }, [loadArtistMemberConfirmations]);
+
   useEffect(() => {
     if (selectedTeamId) {
       loadTeamDetail(selectedTeamId);
       loadTeamPortfolio(selectedTeamId);
+      loadArtistTeamBookings(selectedTeamId);
     } else {
       setTeamDetail(null);
       setTeamPortfolio([]);
+      setArtistTeamBookings([]);
       setTeamViewTab("overview");
     }
-  }, [selectedTeamId, loadTeamDetail, loadTeamPortfolio]);
+  }, [selectedTeamId, loadTeamDetail, loadTeamPortfolio, loadArtistTeamBookings]);
 
   useEffect(() => {
     if (teamDetail) {
@@ -722,6 +825,23 @@ export default function ArtistCollaborationTab({
           <Sparkles size={16} />
           <span>Find Collaborators</span>
         </button>
+
+        <button
+          type="button"
+          className={`collab-nav-pill ${activeSubTab === "confirmations" ? "active" : ""}`}
+          onClick={() => setActiveSubTab("confirmations")}
+        >
+          <Calendar size={16} />
+          <span>Booking Confirmations</span>
+          {pendingConfirmationsCount > 0 && (
+            <span
+              className="collab-nav-count-badge"
+              style={{ background: "#FF5722", color: "#fff" }}
+            >
+              {pendingConfirmationsCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* =====================================================================
@@ -897,6 +1017,33 @@ export default function ArtistCollaborationTab({
                 >
                   <Film size={16} />
                   <span>Team Portfolio ({teamPortfolio.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`collab-subnav-btn ${teamViewTab === "bookings" ? "active" : ""}`}
+                  onClick={() => {
+                    setTeamViewTab("bookings");
+                    loadArtistTeamBookings(selectedTeamId);
+                  }}
+                >
+                  <Calendar size={16} />
+                  <span>Bookings ({artistTeamBookings.length})</span>
+                  {artistTeamBookings.filter((b) => b.status === "pending_owner_review").length > 0 && (
+                    <span
+                      style={{
+                        background: "#FF5722",
+                        color: "#fff",
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        padding: "2px 7px",
+                        borderRadius: "10px",
+                        marginLeft: "6px",
+                      }}
+                    >
+                      {artistTeamBookings.filter((b) => b.status === "pending_owner_review").length}
+                    </span>
+                  )}
                 </button>
               </div>
 
@@ -1479,6 +1626,181 @@ export default function ArtistCollaborationTab({
                   )}
                 </div>
               )}
+
+              {/* TAB CONTENT 4: TEAM BOOKINGS (PHASE 6) */}
+              {teamViewTab === "bookings" && (
+                <div className="collab-team-detail-sections">
+                  <div className="collab-members-card">
+                    <div className="collab-members-card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <h3 className="collab-members-card-title">
+                        <Calendar size={18} color="#FF5722" />
+                        <span>Team Performance Bookings ({artistTeamBookings.length})</span>
+                      </h3>
+                      <button
+                        type="button"
+                        className="collab-btn-secondary"
+                        style={{ padding: "6px 12px", fontSize: "0.82rem" }}
+                        onClick={() => loadArtistTeamBookings(selectedTeamId)}
+                      >
+                        <RotateCcw size={14} />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+
+                    {artistTeamBookingsLoading ? (
+                      <div style={{ textAlign: "center", padding: "40px", color: "#888" }}>
+                        Loading team bookings...
+                      </div>
+                    ) : artistTeamBookingsError ? (
+                      <div style={{ padding: "20px", color: "#ef4444", background: "rgba(239, 68, 68, 0.1)", borderRadius: "8px" }}>
+                        {artistTeamBookingsError}
+                      </div>
+                    ) : artistTeamBookings.length === 0 ? (
+                      <div
+                        style={{
+                          padding: "40px 20px",
+                          textAlign: "center",
+                          background: "#141414",
+                          borderRadius: "10px",
+                          border: "1px dashed #333",
+                          color: "#888",
+                        }}
+                      >
+                        <Calendar size={36} color="#FF5722" style={{ marginBottom: "12px" }} />
+                        <h4 style={{ color: "#fff", margin: "0 0 6px" }}>No Bookings Yet</h4>
+                        <p style={{ fontSize: "0.88rem", margin: 0 }}>
+                          Client booking requests submitted from your public team page will appear here for review.
+                        </p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        {artistTeamBookings.map((b) => {
+                          const statusInfo = {
+                            pending_owner_review: { label: "Pending Owner Review", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.15)" },
+                            pending_member_confirmations: { label: "Awaiting Members", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.15)" },
+                            awaiting_payment: { label: "Awaiting Payment", color: "#8b5cf6", bg: "rgba(139, 92, 246, 0.15)" },
+                            confirmed: { label: "Confirmed", color: "#10b981", bg: "rgba(16, 185, 129, 0.15)" },
+                            rejected: { label: "Rejected", color: "#ef4444", bg: "rgba(239, 68, 68, 0.15)" },
+                            cancelled: { label: "Cancelled", color: "#6b7280", bg: "rgba(107, 114, 128, 0.15)" },
+                            expired: { label: "Expired", color: "#6b7280", bg: "rgba(107, 114, 128, 0.15)" },
+                          }[b.status] || { label: b.status, color: "#9ca3af", bg: "rgba(156, 163, 175, 0.15)" };
+
+                          return (
+                            <div
+                              key={b.id}
+                              style={{
+                                background: "#181818",
+                                border: "1px solid #2a2a2a",
+                                borderRadius: "10px",
+                                padding: "18px 20px",
+                              }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
+                                <div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                    <h4 style={{ margin: 0, color: "#fff", fontSize: "1.05rem" }}>
+                                      {b.event_type}
+                                    </h4>
+                                    <span
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "3px 9px",
+                                        borderRadius: "12px",
+                                        fontSize: "0.75rem",
+                                        fontWeight: 700,
+                                        color: statusInfo.color,
+                                        background: statusInfo.bg,
+                                      }}
+                                    >
+                                      {statusInfo.label}
+                                    </span>
+                                  </div>
+                                  <div style={{ color: "#FF5722", fontSize: "0.88rem", marginTop: "4px", fontWeight: 600 }}>
+                                    Package: {b.package_snapshot?.name || "Custom Package"} (₹{Number(b.package_snapshot?.price || 0).toLocaleString("en-IN")})
+                                  </div>
+                                </div>
+
+                                {b.is_owner && b.status === "pending_owner_review" && (
+                                  <div style={{ display: "flex", gap: "8px" }}>
+                                    <button
+                                      type="button"
+                                      className="collab-btn-primary"
+                                      style={{ padding: "7px 14px", fontSize: "0.82rem", background: "#10b981", borderColor: "#10b981" }}
+                                      onClick={() => setBookingResponseDialog({ booking: b, action: "approve", message: "" })}
+                                    >
+                                      <Check size={14} />
+                                      <span>Approve Request</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="collab-btn-secondary"
+                                      style={{ padding: "7px 14px", fontSize: "0.82rem", color: "#ef4444", borderColor: "#ef4444" }}
+                                      onClick={() => setBookingResponseDialog({ booking: b, action: "reject", message: "" })}
+                                    >
+                                      <X size={14} />
+                                      <span>Reject</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px", background: "#141414", padding: "12px", borderRadius: "8px", fontSize: "0.84rem", color: "#ccc", marginBottom: "14px" }}>
+                                <div><strong style={{ color: "#888" }}>Date:</strong> {b.event_date ? new Date(b.event_date).toLocaleDateString("en-IN", { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : "N/A"}</div>
+                                <div><strong style={{ color: "#888" }}>Location:</strong> {b.event_location || "N/A"}</div>
+                                <div><strong style={{ color: "#888" }}>Duration:</strong> {b.performance_duration ? `${b.performance_duration} min` : "N/A"}</div>
+                                <div><strong style={{ color: "#888" }}>Customer:</strong> {b.customer_name || "Client"} {b.contact_phone ? `(${b.contact_phone})` : ""}</div>
+                              </div>
+
+                              {b.additional_requirements && (
+                                <div style={{ fontSize: "0.83rem", color: "#9ca3af", marginBottom: "12px", background: "#1e1e1e", padding: "8px 12px", borderRadius: "6px" }}>
+                                  <strong style={{ color: "#fff" }}>Client Notes:</strong> {b.additional_requirements}
+                                </div>
+                              )}
+
+                              {/* Member Confirmation Checklist */}
+                              {b.member_confirmations && b.member_confirmations.length > 0 && (
+                                <div style={{ marginTop: "10px" }}>
+                                  <div style={{ fontSize: "0.8rem", color: "#888", marginBottom: "6px", fontWeight: 600 }}>
+                                    Participating Artist Confirmations:
+                                  </div>
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {b.member_confirmations.map((m) => (
+                                      <div
+                                        key={m.id}
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: "6px",
+                                          background: "#222",
+                                          padding: "4px 10px",
+                                          borderRadius: "6px",
+                                          fontSize: "0.78rem",
+                                          border: `1px solid ${m.status === "accepted" ? "rgba(16, 185, 129, 0.4)" : m.status === "declined" ? "rgba(239, 68, 68, 0.4)" : "#333"}`,
+                                        }}
+                                      >
+                                        <span style={{ color: "#fff", fontWeight: 600 }}>{m.artist_name}</span>
+                                        {m.is_owner && <span style={{ color: "#FF5722", fontSize: "0.7rem" }}>(Owner)</span>}
+                                        <span
+                                          style={{
+                                            color: m.status === "accepted" ? "#10b981" : m.status === "declined" ? "#ef4444" : "#f59e0b",
+                                            fontWeight: 700,
+                                          }}
+                                        >
+                                          • {m.status.toUpperCase()}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             /* TEAMS LIST VIEW */
@@ -1742,6 +2064,130 @@ export default function ArtistCollaborationTab({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =====================================================================
+          TAB 4: BOOKING CONFIRMATIONS (PHASE 6)
+          ===================================================================== */}
+      {activeSubTab === "confirmations" && (
+        <div className="collab-invitations-view">
+          <div className="collab-invitations-header">
+            <div>
+              <h2 className="collab-invitations-title">Member Performance Confirmations</h2>
+              <p className="collab-invitations-subtitle">
+                Review team booking invitations requesting your participation as a performing member.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="collab-btn-secondary"
+              onClick={loadArtistMemberConfirmations}
+            >
+              <RotateCcw size={14} />
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          {memberConfirmationsLoading ? (
+            <div style={{ textAlign: "center", padding: "60px", color: "#888" }}>
+              Loading confirmations...
+            </div>
+          ) : memberConfirmationsError ? (
+            <div className="collab-error-alert" style={{ margin: "20px 0" }}>
+              {memberConfirmationsError}
+            </div>
+          ) : memberConfirmations.length === 0 ? (
+            <div className="collab-empty-state">
+              <Calendar size={48} color="#FF5722" />
+              <h3>No Confirmation Requests</h3>
+              <p>You have no pending or past performance confirmation requests for your teams.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "20px" }}>
+              {memberConfirmations.map((c) => {
+                const confStatus = {
+                  pending: { label: "Pending Your Response", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.15)" },
+                  accepted: { label: "Accepted", color: "#10b981", bg: "rgba(16, 185, 129, 0.15)" },
+                  declined: { label: "Declined", color: "#ef4444", bg: "rgba(239, 68, 68, 0.15)" },
+                }[c.status] || { label: c.status, color: "#9ca3af", bg: "rgba(156, 163, 175, 0.15)" };
+
+                return (
+                  <div
+                    key={c.confirmation_id}
+                    style={{
+                      background: "#181818",
+                      border: "1px solid #2a2a2a",
+                      borderRadius: "10px",
+                      padding: "20px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "12px" }}>
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <h3 style={{ margin: 0, color: "#fff", fontSize: "1.1rem" }}>
+                            {c.event_type} • {c.team_name}
+                          </h3>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              padding: "3px 10px",
+                              borderRadius: "12px",
+                              fontSize: "0.76rem",
+                              fontWeight: 700,
+                              color: confStatus.color,
+                              background: confStatus.bg,
+                            }}
+                          >
+                            {confStatus.label}
+                          </span>
+                        </div>
+                        <div style={{ color: "#FF5722", fontSize: "0.9rem", marginTop: "4px", fontWeight: 600 }}>
+                          Package: {c.package_name}
+                        </div>
+                      </div>
+
+                      {c.can_respond && c.status === "pending" && (
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            className="collab-btn-primary"
+                            style={{ padding: "8px 16px", fontSize: "0.84rem", background: "#10b981", borderColor: "#10b981" }}
+                            onClick={() => setConfirmationResponseDialog({ confirmation: c, action: "accept", message: "" })}
+                          >
+                            <Check size={15} />
+                            <span>Accept</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="collab-btn-secondary"
+                            style={{ padding: "8px 16px", fontSize: "0.84rem", color: "#ef4444", borderColor: "#ef4444" }}
+                            onClick={() => setConfirmationResponseDialog({ confirmation: c, action: "decline", message: "" })}
+                          >
+                            <X size={15} />
+                            <span>Decline</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px", background: "#141414", padding: "14px", borderRadius: "8px", fontSize: "0.85rem", color: "#ccc", marginBottom: "12px" }}>
+                      <div><strong style={{ color: "#888" }}>Date:</strong> {c.event_date ? new Date(c.event_date).toLocaleDateString("en-IN", { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : "N/A"}</div>
+                      <div><strong style={{ color: "#888" }}>Venue / Location:</strong> {c.event_location || "N/A"}</div>
+                      <div><strong style={{ color: "#888" }}>Starting Price:</strong> ₹{Number(c.package_price || 0).toLocaleString("en-IN")}</div>
+                      <div><strong style={{ color: "#888" }}>Overall Booking Status:</strong> <span style={{ textTransform: "capitalize", color: "#FF5722" }}>{c.booking_status?.replace(/_/g, " ")}</span></div>
+                    </div>
+
+                    {c.additional_requirements && (
+                      <div style={{ fontSize: "0.84rem", color: "#a1a1aa", background: "#1f1f1f", padding: "10px 14px", borderRadius: "6px" }}>
+                        <strong style={{ color: "#fff" }}>Client Notes:</strong> {c.additional_requirements}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -2738,6 +3184,158 @@ export default function ArtistCollaborationTab({
                 {activePreviewMedia.description}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Booking Response Modal (Owner Approve/Reject) */}
+      {bookingResponseDialog && (
+        <div className="collab-coverage-modal-backdrop" onClick={() => setBookingResponseDialog(null)}>
+          <div className="collab-coverage-modal-card" style={{ maxWidth: "480px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="collab-modal-header">
+              <h3>
+                {bookingResponseDialog.action === "approve" ? "Approve Team Booking" : "Reject Team Booking"}
+              </h3>
+              <button
+                type="button"
+                className="collab-modal-close"
+                onClick={() => setBookingResponseDialog(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: "16px 0", fontSize: "0.9rem", color: "#ccc" }}>
+              {bookingResponseDialog.action === "approve" ? (
+                <p style={{ margin: "0 0 14px", lineHeight: 1.5 }}>
+                  Approving this booking request will automatically notify all participating team members to confirm their availability.
+                </p>
+              ) : (
+                <p style={{ margin: "0 0 14px", color: "#ef4444", lineHeight: 1.5 }}>
+                  Rejecting this booking will immediately decline the client request and release all participating members.
+                </p>
+              )}
+
+              <div style={{ background: "#161616", padding: "12px", borderRadius: "8px", marginBottom: "16px", fontSize: "0.85rem", border: "1px solid #282828" }}>
+                <div><strong>Event:</strong> {bookingResponseDialog.booking?.event_type}</div>
+                <div><strong>Client:</strong> {bookingResponseDialog.booking?.customer_name}</div>
+                <div><strong>Date:</strong> {bookingResponseDialog.booking?.event_date ? new Date(bookingResponseDialog.booking.event_date).toLocaleDateString() : "N/A"}</div>
+              </div>
+
+              <div className="collab-form-group">
+                <label style={{ display: "block", marginBottom: "6px", fontSize: "0.84rem", color: "#aaa" }}>
+                  Optional Note {bookingResponseDialog.action === "reject" ? "(Reason for rejection)" : ""}
+                </label>
+                <textarea
+                  className="collab-input"
+                  rows={3}
+                  placeholder={bookingResponseDialog.action === "approve" ? "Add notes for the client or team..." : "Reason for declining..."}
+                  value={bookingResponseDialog.message}
+                  onChange={(e) => setBookingResponseDialog({ ...bookingResponseDialog, message: e.target.value })}
+                />
+              </div>
+
+              {bookingResponseError && (
+                <div style={{ color: "#ef4444", fontSize: "0.85rem", marginTop: "10px" }}>
+                  {bookingResponseError}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "14px" }}>
+              <button
+                type="button"
+                className="collab-btn-secondary"
+                onClick={() => setBookingResponseDialog(null)}
+                disabled={bookingResponding}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="collab-btn-primary"
+                style={{
+                  background: bookingResponseDialog.action === "approve" ? "#10b981" : "#ef4444",
+                  borderColor: bookingResponseDialog.action === "approve" ? "#10b981" : "#ef4444",
+                }}
+                onClick={handleConfirmBookingResponse}
+                disabled={bookingResponding}
+              >
+                {bookingResponding ? "Processing..." : bookingResponseDialog.action === "approve" ? "Confirm Approval" : "Confirm Rejection"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Member Confirmation Response Modal (Accept/Decline) */}
+      {confirmationResponseDialog && (
+        <div className="collab-coverage-modal-backdrop" onClick={() => setConfirmationResponseDialog(null)}>
+          <div className="collab-coverage-modal-card" style={{ maxWidth: "480px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="collab-modal-header">
+              <h3>
+                {confirmationResponseDialog.action === "accept" ? "Accept Performance Request" : "Decline Performance Request"}
+              </h3>
+              <button
+                type="button"
+                className="collab-modal-close"
+                onClick={() => setConfirmationResponseDialog(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: "16px 0", fontSize: "0.9rem", color: "#ccc" }}>
+              {confirmationResponseDialog.action === "accept" ? (
+                <p style={{ margin: "0 0 14px", lineHeight: 1.5 }}>
+                  Confirm your participation for <strong>{confirmationResponseDialog.confirmation?.event_type}</strong> with <strong>{confirmationResponseDialog.confirmation?.team_name}</strong>.
+                </p>
+              ) : (
+                <p style={{ margin: "0 0 14px", color: "#ef4444", lineHeight: 1.5 }}>
+                  Declining this performance will cancel this booking request for the entire team and client.
+                </p>
+              )}
+
+              <div className="collab-form-group">
+                <label style={{ display: "block", marginBottom: "6px", fontSize: "0.84rem", color: "#aaa" }}>Optional Note</label>
+                <textarea
+                  className="collab-input"
+                  rows={3}
+                  placeholder={confirmationResponseDialog.action === "accept" ? "Add notes..." : "Reason for declining..."}
+                  value={confirmationResponseDialog.message}
+                  onChange={(e) => setConfirmationResponseDialog({ ...confirmationResponseDialog, message: e.target.value })}
+                />
+              </div>
+
+              {confirmationResponseError && (
+                <div style={{ color: "#ef4444", fontSize: "0.85rem", marginTop: "10px" }}>
+                  {confirmationResponseError}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "14px" }}>
+              <button
+                type="button"
+                className="collab-btn-secondary"
+                onClick={() => setConfirmationResponseDialog(null)}
+                disabled={confirmationResponding}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="collab-btn-primary"
+                style={{
+                  background: confirmationResponseDialog.action === "accept" ? "#10b981" : "#ef4444",
+                  borderColor: confirmationResponseDialog.action === "accept" ? "#10b981" : "#ef4444",
+                }}
+                onClick={handleConfirmMemberConfirmation}
+                disabled={confirmationResponding}
+              >
+                {confirmationResponding ? "Processing..." : confirmationResponseDialog.action === "accept" ? "Confirm Accept" : "Confirm Decline"}
+              </button>
+            </div>
           </div>
         </div>
       )}

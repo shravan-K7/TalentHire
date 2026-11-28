@@ -1611,4 +1611,63 @@
   border-color: rgba(239, 68, 68, 0.4);
 }
 
+/* Artist Autocomplete Suggestions Dropdown */
+.collab-autocomplete-container {
+  position: relative;
+  width: 100%;
+}
+
+.collab-suggestions-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #191919;
+  border: 1px solid #333333;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75);
+  max-height: 270px;
+  overflow-y: auto;
+  z-index: 100;
+  padding: 6px;
+}
+
+.collab-suggestion-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+}
+
+.collab-suggestion-item:hover,
+.collab-suggestion-item.active {
+  background: rgba(255, 87, 34, 0.14);
+}
+
+.collab-suggestion-item.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.collab-mini-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 87, 34, 0.3);
+  border-top-color: #ff5722;
+  border-radius: 50%;
+  animation: collab-spin 0.6s linear infinite;
+}
+
+@keyframes collab-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
 

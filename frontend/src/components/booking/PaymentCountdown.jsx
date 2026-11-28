@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 
 /**
- * React hook for live 1-second interval countdown against backend deadline.
+ * Hook for live 1-second interval countdown against backend deadline.
  */
-export function usePaymentCountdown(deadlineIso, onExpire) {
+function usePaymentCountdown(deadlineIso, onExpire) {
   const [now, setNow] = useState(() => Date.now());
   const hasTriggeredRef = useRef(false);
 
@@ -19,18 +19,21 @@ export function usePaymentCountdown(deadlineIso, onExpire) {
   }, [deadlineIso]);
 
   const target = deadlineIso ? new Date(deadlineIso).getTime() : NaN;
-  if (!deadlineIso || isNaN(target)) {
+  const isInvalid = !deadlineIso || isNaN(target);
+  const diffMs = isInvalid ? null : target - now;
+
+  useEffect(() => {
+    if (diffMs !== null && diffMs <= 0 && onExpire && !hasTriggeredRef.current) {
+      hasTriggeredRef.current = true;
+      onExpire();
+    }
+  }, [diffMs, onExpire]);
+
+  if (isInvalid) {
     return { isExpired: false, diffMs: null, text: "" };
   }
 
-  const diffMs = target - now;
   if (diffMs <= 0) {
-    if (onExpire && !hasTriggeredRef.current) {
-      hasTriggeredRef.current = true;
-      setTimeout(() => {
-        onExpire();
-      }, 0);
-    }
     return {
       isExpired: true,
       diffMs: 0,

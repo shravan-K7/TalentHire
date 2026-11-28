@@ -1,11 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { MapPin, Loader2 } from "lucide-react";
+import {
+  MapPin,
+  Loader2,
+  Users,
+  Package,
+  Calendar,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  ExternalLink,
+  CreditCard,
+  Ban,
+} from "lucide-react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import BookingCalendarPicker from "../components/BookingCalendarPicker";
 import CustomerBookingsDashboard from "../components/booking/CustomerBookingsDashboard";
 import CustomerBookingDetail from "../components/booking/CustomerBookingDetail";
 import CustomerPaymentHistory from "../components/booking/CustomerPaymentHistory";
+import CustomerTeamBookingsDashboard from "../components/booking/CustomerTeamBookingsDashboard";
 import { autocompleteLocations } from "../services/locationService";
 import {
   fetchCustomerDashboard,
@@ -26,6 +40,9 @@ import {
   createPaymentOrder,
   verifyPayment,
   checkBookingExpiry,
+  fetchCustomerTeamBookings,
+  cancelCustomerTeamBooking,
+  createRazorpayOrderTeamBooking,
 } from "../js/auth";
 import "../css/CustomerDashboard.css";
 
@@ -263,6 +280,99 @@ function CustomerDashboard({
   const [cancelReason, setCancelReason] = useState("");
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
   const [cancelError, setCancelError] = useState("");
+
+  // Phase 6: Collaboration Team Bookings State
+  const [customerTeamBookings, setCustomerTeamBookings] = useState([]);
+  const [teamBookingsLoading, setTeamBookingsLoading] = useState(false);
+  const [teamBookingsError, setTeamBookingsError] = useState("");
+
+  const loadCustomerTeamBookings = useCallback(async () => {
+    setTeamBookingsLoading(true);
+    setTeamBookingsError("");
+    try {
+      const res = await fetchCustomerTeamBookings();
+      setCustomerTeamBookings(res.team_bookings || []);
+    } catch (err) {
+      setTeamBookingsError(err.message || "Failed to load team bookings.");
+    } finally {
+      setTeamBookingsLoading(false);
+    }
+  }, []);
+
+  async function handlePayTeamBooking(tb) {
+    if (paymentLoadingId) return;
+    const deadline = tb.payment_deadline;
+    if (
+      tb.status === "expired" ||
+      (deadline && new Date(deadline).getTime() <= Date.now())
+    ) {
+      showToast("Payment deadline expired. This reservation is no longer available.");
+      loadCustomerTeamBookings();
+      return;
+    }
+
+    setPaymentLoadingId(`team-${tb.id}`);
+    try {
+      const order = await createRazorpayOrderTeamBooking(tb.id);
+      if (!window.Razorpay) {
+        throw new Error("Razorpay Checkout failed to load. Please refresh the page.");
+      }
+
+      const options = {
+        key: order.key,
+        amount: order.amount,
+        currency: order.currency,
+        name: "TalentHire",
+        description: `Team Booking - ${tb.package.name}`,
+        order_id: order.order_id,
+        prefill: {
+          name: order.customer_name || user?.username || "",
+          email: order.customer_email || user?.email || "",
+          contact: tb.customer?.phone || "",
+        },
+        theme: {
+          color: "#FF5722",
+        },
+        handler: async function (response) {
+          const payload = {
+            razorpay_order_id: response.razorpay_order_id,
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_signature: response.razorpay_signature,
+          };
+          try {
+            await verifyPayment(payload);
+            showToast("Payment successful! Your team booking is confirmed.");
+            await loadCustomerTeamBookings();
+          } catch (err) {
+            showToast(err.message || "Payment verification failed.");
+          } finally {
+            setPaymentLoadingId(null);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setPaymentLoadingId(null);
+          },
+        },
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.on("payment.failed", function (response) {
+        showToast(response.error?.description || "Payment failed. Please try again.");
+        setPaymentLoadingId(null);
+      });
+      razorpay.open();
+    } catch (err) {
+      showToast(err.message || "Unable to start team booking payment.");
+      setPaymentLoadingId(null);
+    }
+  }
+
+  async function handleCancelTeamBooking(bookingId, reason = "") {
+    await cancelCustomerTeamBooking(bookingId, reason);
+    showToast("Team booking request cancelled.");
+    await loadCustomerTeamBookings();
+  }
 
   // Phase 6: Rescheduling Modal State
   const [rescheduleModalBooking, setRescheduleModalBooking] = useState(null);
@@ -574,10 +684,11 @@ function CustomerDashboard({
     }
 
     init();
+    loadCustomerTeamBookings();
     return () => {
       ignore = true;
     };
-  }, [user]);
+  }, [user, loadCustomerTeamBookings]);
 
   function showToast(msg) {
     setToastMsg(msg);
@@ -1098,6 +1209,7 @@ function CustomerDashboard({
   let screenTitle = "Customer Profile Page";
   if (activeTab === "edit-profile") screenTitle = "Edit Profile Page";
   else if (activeTab === "bookings") screenTitle = "My Bookings Page";
+  else if (activeTab === "team-bookings") screenTitle = "Collaboration Team Bookings";
   else if (activeTab === "booking-detail") screenTitle = "Booking Details Page";
   else if (activeTab === "payments") screenTitle = "Payment History Page";
   else if (activeTab === "settings") screenTitle = "Account Settings";
@@ -1208,6 +1320,36 @@ function CustomerDashboard({
               <span>My Bookings</span>
               {bookings.length > 0 && (
                 <span className="cd-sidebar-badge">{bookings.length}</span>
+              )}
+            </button>
+
+            {/* 2b. Team Bookings (Phase 6) */}
+            <button
+              type="button"
+              className={`cd-sidebar-item ${activeTab === "team-bookings" ? "active" : ""}`}
+              onClick={() => {
+                setSelectedBooking(null);
+                switchTab("team-bookings");
+              }}
+            >
+              <Users className="cd-sidebar-icon" width="18" height="18" />
+              <span>Team Bookings</span>
+              {customerTeamBookings.filter(
+                (b) =>
+                  b.status === "awaiting_payment" ||
+                  b.status === "pending_owner_review" ||
+                  b.status === "pending_member_confirmations"
+              ).length > 0 && (
+                <span className="cd-sidebar-badge" style={{ background: "#FF5722" }}>
+                  {
+                    customerTeamBookings.filter(
+                      (b) =>
+                        b.status === "awaiting_payment" ||
+                        b.status === "pending_owner_review" ||
+                        b.status === "pending_member_confirmations"
+                    ).length
+                  }
+                </span>
               )}
             </button>
 
@@ -1852,6 +1994,21 @@ function CustomerDashboard({
               onOpenReceipt={(b) => handleOpenReceipt(b)}
               onContactSupport={() => switchTab("support")}
               navigate={navigate}
+              paymentLoadingId={paymentLoadingId}
+            />
+          )}
+
+          {/* =======================================================================
+              SCREEN 3B: COLLABORATION TEAM BOOKINGS (Phase 6)
+              ======================================================================= */}
+          {activeTab === "team-bookings" && (
+            <CustomerTeamBookingsDashboard
+              teamBookings={customerTeamBookings}
+              loading={teamBookingsLoading}
+              error={teamBookingsError}
+              onRefresh={loadCustomerTeamBookings}
+              onPayNow={(tb) => handlePayTeamBooking(tb)}
+              onCancelBooking={(id, reason) => handleCancelTeamBooking(id, reason)}
               paymentLoadingId={paymentLoadingId}
             />
           )}

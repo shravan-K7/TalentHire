@@ -668,6 +668,15 @@ def serialize_team_public_profile(team, request=None):
     districts_qs, is_eligible, reason = calculate_team_shared_service_districts(team)
     cov = serialize_district_data(districts_qs)
 
+    # 4. Active performance packages ONLY (Phase 5B)
+    from .models import CollaborationPackage
+    packages_qs = (
+        CollaborationPackage.objects.filter(team=team, is_active=True)
+        .prefetch_related("participating_members__category")
+        .order_by("-created_at")
+    )
+    packages_data = [serialize_team_package(p, request=request) for p in packages_qs]
+
     logo_url = None
     if getattr(team, "profile_image", None):
         try:
@@ -714,6 +723,8 @@ def serialize_team_public_profile(team, request=None):
         "members_count": len(members_data),
         "portfolio": portfolio_data,
         "portfolio_count": len(portfolio_data),
+        "packages": packages_data,
+        "packages_count": len(packages_data),
         "shared_coverage": {
             "districts": cov["districts"],
             "count": cov["count"],
@@ -723,4 +734,300 @@ def serialize_team_public_profile(team, request=None):
         "is_eligible_for_discovery": is_eligible,
         "eligibility_reason": reason if not is_eligible else None,
     }
+
+
+def serialize_team_card(team, request=None, precalculated_coverage=None):
+    """
+    Serializes a team card for the public Explore Performers / Collaboration Discovery page.
+    Includes:
+    - id, name, description, category
+    - profile_image, cover_image
+    - active_members_count
+    - base_location (from owner or primary active members)
+    - shared_districts_count, shared_states_count, shared_states
+    - portfolio_previews (up to 4 public items for preview thumbnails)
+    - created_at
+    - owner basic summary (safe public data only)
+    Zero leakage of private member information.
+    """
+    owner = team.owner
+    logo_url = None
+    if getattr(team, "profile_image", None):
+        try:
+            logo_url = request.build_absolute_uri(team.profile_image.url) if request else team.profile_image.url
+        except Exception:
+            logo_url = None
+
+    cover_url = None
+    if getattr(team, "cover_image", None):
+        try:
+            cover_url = request.build_absolute_uri(team.cover_image.url) if request else team.cover_image.url
+        except Exception:
+            cover_url = None
+
+    base_loc = owner.location or (
+        f"{owner.district.name}, {owner.state.name}"
+        if owner.district and owner.state
+        else "India"
+    )
+
+    if precalculated_coverage is not None:
+        coverage_data = precalculated_coverage
+    else:
+        districts_qs, _, _ = calculate_team_shared_service_districts(team)
+        coverage_data = serialize_district_data(districts_qs)
+
+    # Public portfolio preview items (up to 4)
+    from .models import CollaborationTeamPortfolio
+    portfolio_qs = CollaborationTeamPortfolio.objects.filter(
+        team=team, is_public=True
+    ).order_by("display_order", "-uploaded_at")[:4]
+
+    previews = [serialize_team_portfolio_item(p, request=request) for p in portfolio_qs]
+    total_portfolio_count = CollaborationTeamPortfolio.objects.filter(
+        team=team, is_public=True
+    ).count()
+
+    active_members_count = team.get_active_members().count()
+
+    return {
+        "id": team.id,
+        "name": team.name,
+        "description": team.description or "",
+        "category": {
+            "id": team.category_id,
+            "name": team.category.name,
+        } if getattr(team, "category", None) else None,
+        "category_name": team.category.name if getattr(team, "category", None) else (owner.category.name if owner.category else ""),
+        "profile_image": logo_url,
+        "cover_image": cover_url,
+        "active_members_count": active_members_count,
+        "base_location": base_loc,
+        "shared_districts_count": coverage_data["count"],
+        "shared_states_count": coverage_data["states_count"],
+        "shared_states": [st["name"] for st in coverage_data.get("states", [])],
+        "portfolio_count": total_portfolio_count,
+        "portfolio_previews": previews,
+        "created_at": team.created_at.strftime("%b %d, %Y") if team.created_at else "",
+        "owner": {
+            "id": owner.id,
+            "stage_name": owner.stage_name,
+            "category_name": owner.category.name if owner.category else "",
+        },
+    }
+
+
+def serialize_team_package(pkg, request=None):
+    """
+    Serializes a CollaborationPackage into a JSON-friendly dict (Phase 5B).
+    Includes participating members (active stage name, category, profile photo).
+    Zero leakage of private member information.
+    """
+    members_data = []
+    for artist in pkg.participating_members.select_related("category").all():
+        p_img = None
+        if artist.profile_image:
+            try:
+                p_img = request.build_absolute_uri(artist.profile_image.url) if request else artist.profile_image.url
+            except Exception:
+                p_img = None
+        members_data.append({
+            "id": artist.id,
+            "artist_id": artist.id,
+            "stage_name": artist.stage_name,
+            "category_name": artist.category.name if artist.category else "",
+            "profile_image": p_img,
+        })
+
+    services = pkg.included_services
+    if isinstance(services, str):
+        try:
+            services = json.loads(services)
+        except Exception:
+            services = [s.strip() for s in services.split("\n") if s.strip()]
+
+    return {
+        "id": pkg.id,
+        "team_id": pkg.team_id,
+        "name": pkg.name,
+        "description": pkg.description,
+        "starting_price": float(pkg.starting_price),
+        "duration_minutes": pkg.duration_minutes,
+        "duration_display": pkg.duration_display,
+        "category": pkg.category.name if getattr(pkg, "category", None) else "",
+        "category_id": pkg.category_id,
+        "category_name": pkg.category.name if getattr(pkg, "category", None) else "",
+        "included_services": services if isinstance(services, list) else [],
+        "requirements": pkg.requirements,
+        "is_active": pkg.is_active,
+        "participating_members": members_data,
+        "participating_members_count": len(members_data),
+        "created_at": pkg.created_at.strftime("%b %d, %Y") if pkg.created_at else "",
+        "updated_at": pkg.updated_at.strftime("%b %d, %Y") if pkg.updated_at else "",
+    }
+
+
+def serialize_team_booking(tb, current_user=None, request=None):
+    """
+    Phase 6: Serializes a TeamBooking with audit timestamps, package snapshots,
+    member confirmation progress, and payment status.
+    Protects private customer data (phone) except for owner and the customer themselves.
+    """
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    local_event_date = timezone.localtime(tb.event_date, timezone=kolkata_tz) if tb.event_date else None
+
+    # Determine caller roles
+    is_customer = bool(current_user and current_user.id == tb.customer_id)
+    caller_artist = getattr(current_user, "artist_profile", None) if current_user else None
+    is_owner = bool(caller_artist and caller_artist.id == tb.team.owner_id)
+    is_participating = bool(caller_artist and tb.participating_members.filter(id=caller_artist.id).exists())
+
+    # Build member confirmations list
+    confirmations_data = []
+    accepted_count = 0
+    pending_count = 0
+    declined_count = 0
+    caller_confirmation_id = None
+    caller_can_confirm = False
+
+    for conf in tb.member_confirmations.select_related("artist", "artist__category").all():
+        if conf.status == "accepted":
+            accepted_count += 1
+        elif conf.status == "pending":
+            pending_count += 1
+        elif conf.status == "declined":
+            declined_count += 1
+
+        if caller_artist and conf.artist_id == caller_artist.id:
+            caller_confirmation_id = conf.id
+            if conf.status == "pending" and tb.status == tb.Status.PENDING_MEMBER_CONFIRMATIONS:
+                caller_can_confirm = True
+
+        img = None
+        if conf.artist.profile_image:
+            try:
+                img = request.build_absolute_uri(conf.artist.profile_image.url) if request else conf.artist.profile_image.url
+            except Exception:
+                img = conf.artist.profile_image.url
+
+        confirmations_data.append({
+            "id": conf.id,
+            "artist_id": conf.artist_id,
+            "stage_name": conf.artist.stage_name,
+            "category_name": conf.artist.category.name if conf.artist.category else "",
+            "profile_image": img,
+            "status": conf.status,
+            "responded_at": conf.responded_at.isoformat() if conf.responded_at else None,
+            "response_message": conf.response_message,
+        })
+
+    # Payment details (if created)
+    payment_data = None
+    payment = getattr(tb, "payment", None)
+    if payment:
+        payment_data = {
+            "id": payment.id,
+            "status": payment.status,
+            "amount": float(payment.amount),
+            "commission_amount": float(payment.commission_amount),
+            "artist_amount": float(payment.artist_amount),
+            "razorpay_order_id": payment.razorpay_order_id,
+            "transaction_id": payment.transaction_id,
+        }
+
+    # Team image
+    team_image = None
+    if tb.team.profile_image:
+        try:
+            team_image = request.build_absolute_uri(tb.team.profile_image.url) if request else tb.team.profile_image.url
+        except Exception:
+            team_image = tb.team.profile_image.url
+
+    # Check expiration
+    now = timezone.now()
+    is_expired = False
+    if tb.status == tb.Status.AWAITING_PAYMENT and tb.payment_deadline and now > tb.payment_deadline:
+        is_expired = True
+    elif tb.status == tb.Status.PENDING_MEMBER_CONFIRMATIONS and tb.member_confirmation_deadline and now > tb.member_confirmation_deadline:
+        is_expired = True
+
+    can_pay = bool(is_customer and tb.status == tb.Status.AWAITING_PAYMENT and not is_expired)
+    can_owner_approve = bool(is_owner and tb.status == tb.Status.PENDING_OWNER_REVIEW)
+    can_cancel = bool(is_customer and tb.status in [tb.Status.PENDING_OWNER_REVIEW, tb.Status.PENDING_MEMBER_CONFIRMATIONS, tb.Status.AWAITING_PAYMENT])
+
+    return {
+        "id": tb.id,
+        "team": {
+            "id": tb.team_id,
+            "name": tb.team.name,
+            "profile_image": team_image,
+            "owner_id": tb.team.owner_id,
+            "owner_name": tb.team.owner.stage_name if tb.team.owner else "",
+        },
+        "package": {
+            "id": tb.package_id,
+            "name": tb.package_name,
+            "category": tb.package_category,
+            "price": float(tb.package_price),
+            "duration_minutes": tb.package_duration_minutes,
+            "duration_display": tb.package_duration_display,
+            "included_services": tb.package_inclusions,
+            "requirements": tb.package_requirements,
+        },
+        "customer": {
+            "id": tb.customer_id,
+            "username": tb.customer.username,
+            "full_name": f"{tb.customer.first_name} {tb.customer.last_name}".strip() or tb.customer.username,
+            "phone": tb.customer_phone if (is_customer or is_owner) else "",
+        },
+        "event": {
+            "type": tb.event_type,
+            "date": tb.event_date.isoformat() if tb.event_date else None,
+            "date_display": local_event_date.strftime("%b %d, %Y at %I:%M %p") if local_event_date else "",
+            "day": tb.event_day.isoformat() if tb.event_day else None,
+            "location": tb.event_location,
+            "address": tb.event_address,
+            "venue_name": tb.venue_name,
+            "city": tb.city,
+            "state": tb.state,
+            "district_id": tb.district_id,
+            "district_name": tb.district.name if tb.district else "",
+            "expected_audience_size": tb.expected_audience_size,
+            "performance_duration": tb.performance_duration,
+            "additional_requirements": tb.additional_requirements,
+            "customer_message": tb.customer_message,
+        },
+        "status": tb.status,
+        "status_display": tb.get_status_display(),
+        "is_expired": is_expired,
+        "owner_reviewed_at": tb.owner_reviewed_at.isoformat() if tb.owner_reviewed_at else None,
+        "owner_response_message": tb.owner_response_message,
+        "all_members_confirmed_at": tb.all_members_confirmed_at.isoformat() if tb.all_members_confirmed_at else None,
+        "payment_deadline": tb.payment_deadline.isoformat() if tb.payment_deadline else None,
+        "member_confirmation_deadline": tb.member_confirmation_deadline.isoformat() if tb.member_confirmation_deadline else None,
+        "rejection_reason": tb.rejection_reason,
+        "declined_by_artist_name": tb.declined_by_artist.stage_name if tb.declined_by_artist else None,
+        "member_confirmations": confirmations_data,
+        "confirmations_summary": {
+            "total": len(confirmations_data),
+            "accepted": accepted_count,
+            "pending": pending_count,
+            "declined": declined_count,
+        },
+        "payment": payment_data,
+        "permissions": {
+            "is_customer": is_customer,
+            "is_owner": is_owner,
+            "is_participating": is_participating,
+            "can_owner_approve": can_owner_approve,
+            "can_confirm": caller_can_confirm,
+            "confirmation_id": caller_confirmation_id,
+            "can_pay": can_pay,
+            "can_cancel": can_cancel,
+        },
+        "created_at": tb.created_at.isoformat() if tb.created_at else None,
+        "updated_at": tb.updated_at.isoformat() if tb.updated_at else None,
+    }
+
 

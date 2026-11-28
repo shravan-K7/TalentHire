@@ -1185,23 +1185,23 @@ def public_upcoming_performances_view(request):
     return JsonResponse({"upcoming_performances": shows})
 
 
-def is_artist_date_occupied(artist, calendar_date, exclude_booking_id=None):
+def is_artist_date_occupied(artist, calendar_date, exclude_booking_id=None, exclude_team_booking_id=None):
     """
     Determines whether an artist is occupied on a specific Asia/Kolkata calendar date.
     Returns: (is_occupied: bool, reason: str, conflicting_obj)
 
     Occupied conditions:
       1. Manually blocked by the artist (ArtistAvailability where is_available=False).
-      2. Completed booking (Booking status COMPLETED).
-      3. Confirmed booking with successful payment (Booking status ACCEPTED, Payment status SUCCESS).
+      2. Completed individual booking (Booking status COMPLETED).
+      3. Confirmed individual booking with successful payment (Booking status ACCEPTED, Payment status SUCCESS).
       4. Active accepted reservation (Booking status ACCEPTED, unpaid, within 24 hours of accepted_at).
-         - For legacy accepted bookings where accepted_at is NULL, treats them conservatively as active
-           to avoid prematurely releasing dates.
+      5. Confirmed or completed team booking (TeamBooking status CONFIRMED or COMPLETED).
+      6. Active team booking reservation awaiting payment (TeamBooking status AWAITING_PAYMENT, before payment_deadline).
 
     Unoccupied conditions:
-      - Ordinary pending inquiries (Booking status PENDING).
-      - Cancelled or rejected bookings.
-      - Expired unpaid reservations (Booking status ACCEPTED, unpaid, past 24-hour deadline).
+      - Ordinary pending inquiries / pending owner reviews.
+      - Cancelled, rejected or expired bookings.
+      - Expired unpaid reservations (past 24-hour deadline).
     """
     from datetime import datetime, time, timedelta
     from zoneinfo import ZoneInfo
@@ -1256,14 +1256,41 @@ def is_artist_date_occupied(artist, calendar_date, exclude_booking_id=None):
                 if accepted_at:
                     if accepted_at + timedelta(hours=24) > now_tz:
                         return True, "an active accepted reservation is awaiting payment for this date.", b
-                    # If accepted_at + 24 hours <= now_tz, it has expired and does NOT occupy the date.
                 else:
-                    # Legacy fallback for existing pre-migration records without accepted_at
                     legacy_ts = payment.updated_at if payment else b.created_at
                     if legacy_ts and (legacy_ts + timedelta(hours=24) > now_tz):
                         return True, "an active accepted reservation is awaiting payment for this date.", b
                     elif not legacy_ts:
                         return True, "an accepted reservation occupies this date.", b
+
+    # 3. Query TeamBookings where this artist is a participating member
+    from .models import TeamBooking
+    team_bookings_qs = (
+        TeamBooking.objects.filter(
+            participating_members=artist,
+            status__in=[
+                TeamBooking.Status.CONFIRMED,
+                TeamBooking.Status.COMPLETED,
+                TeamBooking.Status.AWAITING_PAYMENT,
+            ],
+            event_date__gte=day_start - timedelta(days=1),
+            event_date__lt=day_end + timedelta(days=1),
+        )
+        .select_related("team", "payment")
+    )
+    if exclude_team_booking_id:
+        team_bookings_qs = team_bookings_qs.exclude(id=exclude_team_booking_id)
+
+    for tb in team_bookings_qs:
+        tb_date = timezone.localtime(tb.event_date, timezone=kolkata_tz).date()
+        if tb_date == calendar_date:
+            if tb.status == TeamBooking.Status.COMPLETED:
+                return True, f"a completed team performance ({tb.team.name}) already exists on this date.", tb
+            if tb.status == TeamBooking.Status.CONFIRMED:
+                return True, f"a confirmed team booking ({tb.team.name}) already exists on this date.", tb
+            if tb.status == TeamBooking.Status.AWAITING_PAYMENT:
+                if tb.payment_deadline and tb.payment_deadline > now_tz:
+                    return True, f"an active team reservation ({tb.team.name}) is awaiting payment for this date.", tb
 
     return False, "", None
 
@@ -1275,6 +1302,7 @@ def get_occupied_artist_ids_for_date(calendar_date):
     """
     from datetime import datetime, time, timedelta
     from zoneinfo import ZoneInfo
+    from .models import TeamBooking
     kolkata_tz = ZoneInfo("Asia/Kolkata")
 
     manual_block_ids = set(
@@ -1295,8 +1323,20 @@ def get_occupied_artist_ids_for_date(calendar_date):
         ).values_list("artist_id", flat=True)
     )
 
+    potential_team_booking_ids = set(
+        TeamBooking.objects.filter(
+            status__in=[
+                TeamBooking.Status.CONFIRMED,
+                TeamBooking.Status.COMPLETED,
+                TeamBooking.Status.AWAITING_PAYMENT,
+            ],
+            event_date__gte=day_start - timedelta(days=1),
+            event_date__lt=day_end + timedelta(days=1),
+        ).values_list("participating_members", flat=True)
+    )
+
     occupied_ids = set(manual_block_ids)
-    candidates_to_check = potential_booking_ids - occupied_ids
+    candidates_to_check = (potential_booking_ids | potential_team_booking_ids) - occupied_ids
     if candidates_to_check:
         artists_qs = ArtistProfile.objects.filter(id__in=candidates_to_check)
         for a in artists_qs:
@@ -6213,19 +6253,25 @@ def verify_razorpay_payment_view(request):
             status=400,
         )
 
-    # Find the payment through the customer's own booking.
+    # Find the payment through the customer's own booking or team booking.
     payment = (
         Payment.objects
-        .select_related("booking", "booking__artist", "booking__customer")
+        .select_related(
+            "booking", "booking__artist", "booking__customer",
+            "team_booking", "team_booking__team", "team_booking__customer", "team_booking__team__owner"
+        )
+        .filter(razorpay_order_id=order_id)
         .filter(
-            razorpay_order_id=order_id,
-            booking__customer=request.user,
+            models.Q(booking__customer=request.user) | models.Q(team_booking__customer=request.user)
         )
         .first()
     )
 
     if not payment:
         return JsonResponse({"error": "Payment order not found."}, status=404)
+
+    if payment.team_booking_id:
+        return _verify_team_booking_payment(payment, payment_id, order_id, signature, request)
 
     # Idempotent return if already verified with the same payment_id
     if payment.status == Payment.Status.SUCCESS:
@@ -6604,12 +6650,15 @@ def razorpay_webhook_view(request):
 
         pay_info = (
             Payment.objects.filter(razorpay_order_id=order_id)
-            .values("id", "booking_id", "booking__artist_id")
+            .values("id", "booking_id", "booking__artist_id", "team_booking_id")
             .first()
         )
         if not pay_info:
             logger.warning("Payment record not found for webhook order %s", order_id)
             return JsonResponse({"error": "Payment order not found."}, status=404)
+
+        if pay_info.get("team_booking_id"):
+            return _handle_team_booking_webhook(pay_info, payment_entity, event_id)
 
         refund_needed = False
         refund_reason = ""
@@ -7693,6 +7742,118 @@ def artist_team_detail_view(request, team_id):
     return JsonResponse({"team": serialize_team_detail(team, current_artist=artist)})
 
 
+@require_GET
+def artist_candidate_suggestions_view(request, team_id=None):
+    """
+    Returns candidate artist suggestions as user types stage name or artist ID.
+    Enforces:
+    - User must be authenticated and active performing artist.
+    - Excludes the caller artist (cannot invite self).
+    - Only suggests verified, active artists.
+    - Annotates whether candidate is already a member or has a pending invitation for the team.
+    - Prioritizes stage names that start with the typed query, then contains.
+    - Limits to 10 results.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    caller_artist = getattr(request.user, "artist_profile", None)
+    if not caller_artist or not caller_artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can search collaborators."},
+            status=403,
+        )
+
+    from django.db.models import Case, When, Value, IntegerField
+    from .models import ArtistProfile, CollaborationTeam, CollaborationTeamMember
+
+    resolved_team_id = team_id or request.GET.get("team_id")
+    team = None
+    active_member_ids = set()
+    pending_member_ids = set()
+
+    if resolved_team_id:
+        try:
+            team = CollaborationTeam.objects.filter(id=int(resolved_team_id), is_active=True).first()
+            if team:
+                active_member_ids = set(team.get_active_members().values_list("artist_id", flat=True))
+                pending_member_ids = set(
+                    CollaborationTeamMember.objects.filter(
+                        team=team, status=CollaborationTeamMember.Status.PENDING
+                    ).values_list("artist_id", flat=True)
+                )
+        except (ValueError, TypeError):
+            pass
+
+    query = request.GET.get("q", "").strip()
+
+    qs = (
+        ArtistProfile.objects.filter(is_active=True, is_verified=True, user__is_active=True)
+        .exclude(id=caller_artist.id)
+        .select_related("category", "district", "state", "user")
+    )
+
+    if query:
+        if query.isdigit():
+            filter_q = (
+                models.Q(id=int(query))
+                | models.Q(stage_name__icontains=query)
+                | models.Q(user__username__icontains=query)
+            )
+        else:
+            filter_q = (
+                models.Q(stage_name__icontains=query)
+                | models.Q(user__username__icontains=query)
+            )
+        qs = qs.filter(filter_q)
+
+        # Prioritize prefix match on stage name, then username, then substring
+        qs = qs.annotate(
+            match_priority=Case(
+                When(stage_name__istartswith=query, then=Value(1)),
+                When(user__username__istartswith=query, then=Value(2)),
+                When(stage_name__icontains=query, then=Value(3)),
+                default=Value(4),
+                output_field=IntegerField(),
+            )
+        ).order_by("match_priority", "stage_name")
+    else:
+        qs = qs.order_by("stage_name")
+
+    candidates = qs[:10]
+
+    results = []
+    for art in candidates:
+        profile_img = None
+        if art.profile_image:
+            try:
+                profile_img = request.build_absolute_uri(art.profile_image.url)
+            except Exception:
+                profile_img = art.profile_image.url
+
+        location_parts = []
+        if art.district:
+            location_parts.append(art.district.name)
+        if art.state:
+            location_parts.append(art.state.name)
+        location = ", ".join(location_parts)
+
+        results.append(
+            {
+                "id": art.id,
+                "stage_name": art.stage_name,
+                "username": art.user.username,
+                "category_name": art.category.name if art.category else "",
+                "profile_image": profile_img,
+                "location": location,
+                "is_already_member": art.id in active_member_ids,
+                "has_pending_invitation": art.id in pending_member_ids,
+            }
+        )
+
+    return JsonResponse({"candidates": results, "count": len(results)})
+
+
 @require_POST
 def artist_team_invite_view(request, team_id):
     """
@@ -7749,6 +7910,17 @@ def artist_team_invite_view(request, team_id):
             .select_related("user", "category")
             .first()
         )
+        # If matching caller themselves, check if it was intended as another artist's user_id
+        if target_artist and target_artist.id == caller_artist.id:
+            user_artist_match = (
+                ArtistProfile.objects.filter(user_id=numeric_id)
+                .exclude(id=caller_artist.id)
+                .select_related("user", "category")
+                .first()
+            )
+            if user_artist_match:
+                target_artist = user_artist_match
+
         # 2. Secondary check: User PK (prevents confusing User ID with ArtistProfile ID)
         if not target_artist:
             target_artist = (
@@ -8812,6 +8984,1717 @@ def public_team_detail_view(request, team_id):
     profile_data["is_preview"] = not team.is_publicly_visible or not is_eligible
 
     return JsonResponse(profile_data)
+
+
+@require_GET
+def public_teams_list_view(request):
+    """
+    Public collaboration discovery endpoint (Phase 5C).
+    Returns paginated database-driven team cards with:
+    - logo, cover image, name, category, description, active members count, base location,
+      shared districts count, portfolio previews, and owner credit.
+    - Filters:
+      - search: matches name, description, category, or active member stage names
+      - category: filter by team category ID or name
+      - state_id / state: filter by teams covering at least one district in this state
+      - district_id / district: filter by teams covering this specific district
+      - sort: recent (default), name, members, coverage
+    - Strictly excludes inactive (is_active=False), private (is_publicly_visible=False),
+      and ineligible teams (any active member inactive or unverified).
+    - Zero private member data leakage (no emails, phone numbers, customer/artist user IDs, pending invites).
+    """
+    from .models import CollaborationTeam, CollaborationTeamMember, Category
+    from .collaboration_service import (
+        calculate_team_shared_service_districts,
+        serialize_district_data,
+        serialize_team_card,
+    )
+
+    qs = (
+        CollaborationTeam.objects.filter(is_active=True, is_publicly_visible=True)
+        .select_related("owner", "owner__category", "owner__district", "owner__state", "owner__user", "category")
+        .prefetch_related(
+            "memberships__artist__category",
+            "memberships__artist__district",
+            "memberships__artist__state",
+            "memberships__artist__user",
+            "memberships__artist__service_districts__district__state",
+        )
+        .distinct()
+    )
+
+    # 1. Search filter
+    search = str(request.GET.get("search") or "").strip()
+    if search:
+        active_member_team_ids = CollaborationTeamMember.objects.filter(
+            status=CollaborationTeamMember.Status.ACTIVE,
+            artist__stage_name__icontains=search,
+        ).values_list("team_id", flat=True)
+
+        qs = qs.filter(
+            models.Q(name__icontains=search)
+            | models.Q(description__icontains=search)
+            | models.Q(category__name__icontains=search)
+            | models.Q(owner__stage_name__icontains=search)
+            | models.Q(id__in=active_member_team_ids)
+        ).distinct()
+
+    # 2. Category filter
+    category = str(request.GET.get("category") or "").strip()
+    if category and category.lower() != "all":
+        if category.isdigit():
+            qs = qs.filter(category_id=int(category))
+        else:
+            qs = qs.filter(category__name__icontains=category)
+
+    # 3. Location filters (state & district)
+    state_param = str(request.GET.get("state_id") or request.GET.get("state") or "").strip()
+    district_param = str(request.GET.get("district_id") or request.GET.get("district") or "").strip()
+
+    sort = str(request.GET.get("sort") or "recent").strip().lower()
+
+    # Pre-filter candidate teams and compute dynamic eligibility & coverage
+    eligible_teams_with_cov = []
+    for team in qs:
+        # Check eligibility (owner & all active members must be active and verified)
+        is_eligible, _ = team.check_eligibility()
+        if not is_eligible:
+            continue
+
+        # Dynamic shared coverage intersection
+        districts_qs, _, _ = calculate_team_shared_service_districts(team)
+
+        # State filter check
+        if state_param:
+            if state_param.isdigit():
+                state_match = districts_qs.filter(state_id=int(state_param)).exists()
+            else:
+                state_match = districts_qs.filter(state__name__iexact=state_param).exists()
+            if not state_match:
+                continue
+
+        # District filter check
+        if district_param:
+            if district_param.isdigit():
+                district_match = districts_qs.filter(id=int(district_param)).exists()
+            else:
+                district_match = districts_qs.filter(name__iexact=district_param).exists()
+            if not district_match:
+                continue
+
+        cov_data = serialize_district_data(districts_qs)
+        active_count = len(list(team.get_active_members()))
+        eligible_teams_with_cov.append((team, cov_data, active_count))
+
+    # 4. Sorting
+    if sort == "name":
+        eligible_teams_with_cov.sort(key=lambda x: x[0].name.lower())
+    elif sort == "members":
+        eligible_teams_with_cov.sort(key=lambda x: (x[2], x[0].created_at or timezone.now()), reverse=True)
+    elif sort == "coverage":
+        eligible_teams_with_cov.sort(key=lambda x: (x[1]["count"], x[0].created_at or timezone.now()), reverse=True)
+    else:
+        # 'recent' or 'featured': newest first
+        eligible_teams_with_cov.sort(key=lambda x: x[0].created_at or timezone.now(), reverse=True)
+
+    # 5. Pagination
+    total_count = len(eligible_teams_with_cov)
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+
+    try:
+        page_size = max(1, min(50, int(request.GET.get("page_size", 8))))
+    except (ValueError, TypeError):
+        page_size = 8
+
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_slice = eligible_teams_with_cov[start:end]
+    has_more = end < total_count
+
+    teams_data = [
+        serialize_team_card(t, request=request, precalculated_coverage=cov)
+        for t, cov, _ in page_slice
+    ]
+
+    # Categories list for filter dropdown
+    categories_qs = Category.objects.filter(collaboration_teams__is_active=True, collaboration_teams__is_publicly_visible=True).distinct().order_by("name")
+    categories_data = [{"id": c.id, "name": c.name} for c in categories_qs]
+
+    return JsonResponse(
+        {
+            "teams": teams_data,
+            "total_count": total_count,
+            "count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "has_more": has_more,
+            "categories": categories_data,
+        }
+    )
+
+
+# ==============================================================================
+# Collaboration Team Performance Packages Views (Phase 5B)
+# ==============================================================================
+
+@require_http_methods(["GET", "POST"])
+def artist_team_packages_view(request, team_id):
+    """
+    GET: List all packages for a team (accessible by active members and owner).
+    POST: Create a new performance package (Owner only).
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access team packages."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, CollaborationPackage, Category, ArtistProfile
+    from .collaboration_service import serialize_team_package
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    is_member_or_owner = (
+        team.owner_id == artist.id
+        or CollaborationTeamMember.objects.filter(
+            team=team, artist=artist, status=CollaborationTeamMember.Status.ACTIVE
+        ).exists()
+    )
+    if not is_member_or_owner:
+        return JsonResponse(
+            {"error": "You do not have permission to view this team's packages."},
+            status=403,
+        )
+
+    if request.method == "GET":
+        packages_qs = (
+            CollaborationPackage.objects.filter(team=team)
+            .prefetch_related("participating_members__category")
+            .order_by("-created_at")
+        )
+        return JsonResponse(
+            {
+                "packages": [serialize_team_package(p, request=request) for p in packages_qs],
+                "count": packages_qs.count(),
+            }
+        )
+
+    # POST: Owner only
+    if team.owner_id != artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can create performance packages."},
+            status=403,
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"error": "Package name is required."}, status=400)
+    if len(name) > 150:
+        return JsonResponse({"error": "Package name must not exceed 150 characters."}, status=400)
+
+    description = str(body.get("description") or "").strip()
+
+    # Price validation
+    raw_price = body.get("starting_price")
+    try:
+        price = Decimal(str(raw_price or "0.00").strip())
+        if price < 0:
+            return JsonResponse({"error": "Starting price cannot be negative."}, status=400)
+    except Exception:
+        return JsonResponse({"error": "Invalid starting price format."}, status=400)
+
+    # Duration validation
+    raw_duration = body.get("duration_minutes")
+    if raw_duration is None or raw_duration == "":
+        duration = 60
+    else:
+        try:
+            duration = int(raw_duration)
+            if duration <= 0:
+                return JsonResponse({"error": "Performance duration must be greater than 0 minutes."}, status=400)
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Invalid duration value."}, status=400)
+
+    # Category validation
+    category_id = body.get("category_id")
+    category_val = body.get("category")
+    category = None
+    if category_id not in ("", None, "null", 0, "0"):
+        try:
+            category = Category.objects.filter(id=int(category_id)).first()
+            if not category:
+                return JsonResponse({"error": "Selected category does not exist."}, status=400)
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Invalid category ID."}, status=400)
+    elif category_val:
+        if isinstance(category_val, int) or (isinstance(category_val, str) and category_val.isdigit()):
+            category = Category.objects.filter(id=int(category_val)).first()
+        else:
+            category = Category.objects.filter(name__iexact=str(category_val).strip()).first()
+
+    # Included services
+    raw_services = body.get("included_services")
+    included_services = []
+    if isinstance(raw_services, list):
+        included_services = [str(s).strip() for s in raw_services if str(s).strip()]
+    elif isinstance(raw_services, str):
+        included_services = [s.strip() for s in raw_services.split("\n") if s.strip()]
+
+    requirements = str(body.get("requirements") or "").strip()
+    is_active = bool(body.get("is_active", True))
+
+    # Participating members validation
+    # Rule: Only active, accepted members of the team can participate. Prevent duplicate assignments.
+    active_member_artist_ids = set(
+        team.get_active_members().values_list("artist_id", flat=True)
+    )
+
+    raw_member_ids = body.get("participating_member_ids", [])
+    if not isinstance(raw_member_ids, list):
+        return JsonResponse({"error": "participating_member_ids must be a list of artist IDs."}, status=400)
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped_member_ids = []
+    for mid in raw_member_ids:
+        try:
+            mid_int = int(mid)
+            if mid_int not in seen:
+                seen.add(mid_int)
+                deduped_member_ids.append(mid_int)
+        except (ValueError, TypeError):
+            return JsonResponse({"error": f"Invalid member ID: {mid}"}, status=400)
+
+    for mid in deduped_member_ids:
+        if mid not in active_member_artist_ids:
+            return JsonResponse(
+                {"error": f"Artist ID {mid} is not an active accepted member of this team."},
+                status=400,
+            )
+
+    with transaction.atomic():
+        pkg = CollaborationPackage.objects.create(
+            team=team,
+            name=name,
+            description=description,
+            starting_price=price,
+            duration_minutes=duration,
+            category=category,
+            included_services=included_services,
+            requirements=requirements,
+            is_active=is_active,
+        )
+        if deduped_member_ids:
+            participating_artists = ArtistProfile.objects.filter(id__in=deduped_member_ids)
+            pkg.participating_members.set(participating_artists)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "message": "Performance package created successfully.",
+            "package": serialize_team_package(pkg, request=request),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["GET", "PUT", "PATCH", "DELETE"])
+def artist_team_package_detail_view(request, team_id, package_id):
+    """
+    GET: View single package details.
+    PUT/PATCH: Update package details (Owner only).
+    DELETE: Delete package (Owner only).
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist or not artist.is_active or not request.user.is_active:
+        return JsonResponse(
+            {"error": "Only active performing artists can access team packages."},
+            status=403,
+        )
+
+    from .models import CollaborationTeam, CollaborationTeamMember, CollaborationPackage, Category, ArtistProfile
+    from .collaboration_service import serialize_team_package
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    pkg = CollaborationPackage.objects.filter(id=package_id, team=team).first()
+    if not pkg:
+        return JsonResponse({"error": "Performance package not found."}, status=404)
+
+    is_member_or_owner = (
+        team.owner_id == artist.id
+        or CollaborationTeamMember.objects.filter(
+            team=team, artist=artist, status=CollaborationTeamMember.Status.ACTIVE
+        ).exists()
+    )
+    if not is_member_or_owner:
+        return JsonResponse(
+            {"error": "You do not have permission to access this package."},
+            status=403,
+        )
+
+    if request.method == "GET":
+        return JsonResponse({"package": serialize_team_package(pkg, request=request)})
+
+    # PUT/PATCH and DELETE are owner only
+    if team.owner_id != artist.id:
+        return JsonResponse(
+            {"error": "Only the team owner can edit or delete performance packages."},
+            status=403,
+        )
+
+    if request.method == "DELETE":
+        pkg.delete()
+        return JsonResponse({"message": "Performance package deleted successfully."})
+
+    # PUT / PATCH
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    if "name" in body:
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return JsonResponse({"error": "Package name cannot be empty."}, status=400)
+        if len(name) > 150:
+            return JsonResponse({"error": "Package name must not exceed 150 characters."}, status=400)
+        pkg.name = name
+
+    if "description" in body:
+        pkg.description = str(body.get("description") or "").strip()
+
+    if "starting_price" in body:
+        try:
+            price = Decimal(str(body.get("starting_price") or "0.00").strip())
+            if price < 0:
+                return JsonResponse({"error": "Starting price cannot be negative."}, status=400)
+            pkg.starting_price = price
+        except Exception:
+            return JsonResponse({"error": "Invalid starting price format."}, status=400)
+
+    if "duration_minutes" in body:
+        raw_duration = body.get("duration_minutes")
+        try:
+            duration = int(raw_duration)
+            if duration <= 0:
+                return JsonResponse({"error": "Performance duration must be greater than 0 minutes."}, status=400)
+            pkg.duration_minutes = duration
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Invalid duration value."}, status=400)
+
+    if "category_id" in body or "category" in body:
+        cat_id = body.get("category_id")
+        cat_val = body.get("category")
+        if cat_id in ("", None, "null", 0, "0") and not cat_val:
+            pkg.category = None
+        elif cat_id not in ("", None, "null", 0, "0"):
+            try:
+                category = Category.objects.filter(id=int(cat_id)).first()
+                if not category:
+                    return JsonResponse({"error": "Selected category does not exist."}, status=400)
+                pkg.category = category
+            except (ValueError, TypeError):
+                return JsonResponse({"error": "Invalid category ID."}, status=400)
+        elif cat_val:
+            if isinstance(cat_val, int) or (isinstance(cat_val, str) and cat_val.isdigit()):
+                category = Category.objects.filter(id=int(cat_val)).first()
+            else:
+                category = Category.objects.filter(name__iexact=str(cat_val).strip()).first()
+            pkg.category = category
+
+    if "included_services" in body:
+        raw_services = body.get("included_services")
+        if isinstance(raw_services, list):
+            pkg.included_services = [str(s).strip() for s in raw_services if str(s).strip()]
+        elif isinstance(raw_services, str):
+            pkg.included_services = [s.strip() for s in raw_services.split("\n") if s.strip()]
+
+    if "requirements" in body:
+        pkg.requirements = str(body.get("requirements") or "").strip()
+
+    if "is_active" in body:
+        vis = body.get("is_active")
+        pkg.is_active = vis.lower() in ("true", "1", "yes") if isinstance(vis, str) else bool(vis)
+
+    if "participating_member_ids" in body:
+        active_member_artist_ids = set(
+            team.get_active_members().values_list("artist_id", flat=True)
+        )
+        raw_member_ids = body.get("participating_member_ids", [])
+        if not isinstance(raw_member_ids, list):
+            return JsonResponse({"error": "participating_member_ids must be a list."}, status=400)
+
+        seen = set()
+        deduped = []
+        for mid in raw_member_ids:
+            try:
+                mid_int = int(mid)
+                if mid_int not in seen:
+                    seen.add(mid_int)
+                    deduped.append(mid_int)
+            except (ValueError, TypeError):
+                return JsonResponse({"error": f"Invalid member ID: {mid}"}, status=400)
+
+        for mid in deduped:
+            if mid not in active_member_artist_ids:
+                return JsonResponse(
+                    {"error": f"Artist ID {mid} is not an active accepted member of this team."},
+                    status=400,
+                )
+
+        participating_artists = ArtistProfile.objects.filter(id__in=deduped)
+        pkg.participating_members.set(participating_artists)
+
+    pkg.save()
+
+    return JsonResponse(
+        {
+            "message": "Performance package updated successfully.",
+            "package": serialize_team_package(pkg, request=request),
+        }
+    )
+
+
+# ==============================================================================
+# Collaboration Team Booking & Payments Views (Phase 6)
+# ==============================================================================
+
+def check_and_expire_team_reservations(team_booking=None, team=None, customer=None, artist=None):
+    """
+    Checks team bookings for:
+    1. AWAITING_PAYMENT with payment_deadline < now -> transition to EXPIRED.
+    2. PENDING_MEMBER_CONFIRMATIONS with member_confirmation_deadline < now -> transition to EXPIRED.
+    Releases all artist date reservations and dispatches notifications.
+    """
+    from .models import TeamBooking, Payment, Notification
+    now = timezone.now()
+    qs = TeamBooking.objects.all()
+    if team_booking:
+        qs = qs.filter(id=team_booking.id)
+    if team:
+        qs = qs.filter(team=team)
+    if customer:
+        qs = qs.filter(customer=customer)
+    if artist:
+        qs = qs.filter(models.Q(team__owner=artist) | models.Q(participating_members=artist)).distinct()
+
+    # Expire awaiting payment bookings
+    awaiting_expired = qs.filter(
+        status=TeamBooking.Status.AWAITING_PAYMENT,
+        payment_deadline__isnull=False,
+        payment_deadline__lt=now,
+    ).select_related("team", "team__owner", "customer")
+
+    for tb in awaiting_expired:
+        tb.status = TeamBooking.Status.EXPIRED
+        tb.rejection_reason = "Payment deadline of 24 hours expired. Reservation released."
+        tb.save(update_fields=["status", "rejection_reason", "updated_at"])
+
+        payment = getattr(tb, "payment", None)
+        if payment and payment.status == Payment.Status.PENDING:
+            payment.status = Payment.Status.FAILED
+            payment.save(update_fields=["status", "updated_at"])
+
+        send_notification_once(
+            user=tb.customer,
+            title="Team Booking Reservation Expired",
+            message=f"The 24-hour payment deadline for your booking with '{tb.team.name}' ({tb.package_name}) has expired. The date has been released.",
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        )
+        if tb.team.owner and tb.team.owner.user:
+            send_notification_once(
+                user=tb.team.owner.user,
+                title="Team Booking Expired (Unpaid)",
+                message=f"The booking for '{tb.package_name}' on {tb.event_day} expired due to non-payment within 24 hours.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+    # Expire pending member confirmations
+    members_expired = qs.filter(
+        status=TeamBooking.Status.PENDING_MEMBER_CONFIRMATIONS,
+        member_confirmation_deadline__isnull=False,
+        member_confirmation_deadline__lt=now,
+    ).select_related("team", "team__owner", "customer")
+
+    for tb in members_expired:
+        tb.status = TeamBooking.Status.EXPIRED
+        tb.rejection_reason = "Member confirmation deadline expired before all artists confirmed."
+        tb.save(update_fields=["status", "rejection_reason", "updated_at"])
+        tb.member_confirmations.filter(status="pending").update(status="expired")
+
+        send_notification_once(
+            user=tb.customer,
+            title="Team Booking Request Expired",
+            message=f"Your booking request with '{tb.team.name}' ({tb.package_name}) expired because not all team members confirmed in time.",
+            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+        )
+        if tb.team.owner and tb.team.owner.user:
+            send_notification_once(
+                user=tb.team.owner.user,
+                title="Team Member Confirmation Expired",
+                message=f"The confirmation window for '{tb.package_name}' on {tb.event_day} has expired.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+
+def _verify_team_booking_payment(payment, payment_id, order_id, signature, request):
+    """
+    Subroutine of verify_razorpay_payment_view for team bookings.
+    Verifies signature, verifies gateway amount, acquires DB locks in strict order,
+    re-checks availability of every participating artist, updates payment to SUCCESS
+    and team booking to CONFIRMED, and dispatches notifications.
+    """
+    from .models import TeamBooking, ArtistProfile, Payment, Notification
+    tb = payment.team_booking
+
+    try:
+        client = razorpay.Client(
+            auth=(
+                settings.RAZORPAY_KEY_ID,
+                settings.RAZORPAY_KEY_SECRET,
+            )
+        )
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": order_id,
+            "razorpay_payment_id": payment_id,
+            "razorpay_signature": signature,
+        })
+        razorpay_payment = client.payment.fetch(payment_id)
+
+        if razorpay_payment.get("order_id") != order_id:
+            return JsonResponse({"error": "Payment does not belong to this order."}, status=400)
+
+        expected_amount = int(payment.amount * 100)
+        if razorpay_payment.get("amount") != expected_amount:
+            return JsonResponse({"error": "Payment amount does not match the team package price."}, status=400)
+
+        if razorpay_payment.get("currency") != "INR":
+            return JsonResponse({"error": "Invalid payment currency."}, status=400)
+
+        if razorpay_payment.get("status") != "captured":
+            return JsonResponse(
+                {"error": "Payment has not been captured yet.", "payment_status": razorpay_payment.get("status")},
+                status=409,
+            )
+    except razorpay.errors.SignatureVerificationError:
+        logger.warning("Invalid Razorpay signature for team booking order %s", order_id)
+        return JsonResponse({"error": "Payment signature verification failed."}, status=400)
+    except RAZORPAY_API_ERRORS:
+        logger.exception("Razorpay payment verification API error for team booking.")
+        return JsonResponse({"error": "Unable to verify payment with Razorpay."}, status=502)
+    except Exception:
+        logger.exception("Unexpected payment verification error for team booking.")
+        return JsonResponse({"error": "Something went wrong during payment verification."}, status=500)
+
+    refund_needed = False
+    refund_reason = ""
+
+    with transaction.atomic():
+        # Lock TeamBooking
+        tb_locked = (
+            TeamBooking.objects.select_for_update()
+            .select_related("team", "team__owner", "customer")
+            .get(id=tb.id)
+        )
+        locked_payment = Payment.objects.select_for_update().get(id=payment.id)
+
+        # Idempotency check
+        if locked_payment.status == Payment.Status.SUCCESS:
+            if locked_payment.transaction_id == payment_id:
+                return JsonResponse({
+                    "message": "Payment already verified.",
+                    "status": locked_payment.status,
+                    "transaction_id": locked_payment.transaction_id,
+                    "amount": str(locked_payment.amount),
+                    "commission_amount": str(locked_payment.commission_amount),
+                    "artist_amount": str(locked_payment.artist_amount),
+                })
+            logger.critical("Security Alert: Different payment ID %s for already-paid team booking %s", payment_id, tb.id)
+            return JsonResponse({"error": "This team booking has already been paid with a different payment ID."}, status=400)
+
+        # Lock all participating artists in canonical order
+        member_ids = list(tb_locked.participating_members.order_by("id").values_list("id", flat=True))
+        locked_artists = list(ArtistProfile.objects.filter(id__in=member_ids).order_by("id").select_for_update())
+
+        # Validate gateway capture timestamp
+        val_res = validate_gateway_capture_timestamp(
+            razorpay_payment.get("created_at"),
+            tb_locked.payment_deadline,
+        )
+
+        if not val_res.is_valid:
+            logger.warning("Payment %s capture timestamp past payment deadline for team booking %s", payment_id, tb.id)
+            locked_payment.status = Payment.Status.FAILED
+            locked_payment.transaction_id = payment_id
+            locked_payment.save(update_fields=["status", "transaction_id", "updated_at"])
+            refund_needed = True
+            refund_reason = "Captured after 24-hour payment deadline"
+        else:
+            # Re-check date availability for every participating artist
+            occupied_artist = None
+            for art in locked_artists:
+                occupied, occ_reason, _ = is_artist_date_occupied(art, tb_locked.event_day, exclude_team_booking_id=tb_locked.id)
+                if occupied:
+                    occupied_artist = art
+                    break
+
+            if occupied_artist:
+                logger.critical("Team booking %s artist %s occupied before payment verification", tb_locked.id, occupied_artist.stage_name)
+                locked_payment.status = Payment.Status.FAILED
+                locked_payment.transaction_id = payment_id
+                locked_payment.save(update_fields=["status", "transaction_id", "updated_at"])
+                refund_needed = True
+                refund_reason = f"Artist {occupied_artist.stage_name} was booked for another event before payment completion."
+            else:
+                total, commission, artist_amount = calculate_commission(tb_locked.package_price)
+                locked_payment.status = Payment.Status.SUCCESS
+                locked_payment.transaction_id = payment_id
+                locked_payment.amount = total
+                locked_payment.commission_percentage = Decimal("8.00")
+                locked_payment.commission_amount = commission
+                locked_payment.artist_amount = artist_amount
+                locked_payment.save(update_fields=[
+                    "status",
+                    "transaction_id",
+                    "amount",
+                    "commission_percentage",
+                    "commission_amount",
+                    "artist_amount",
+                    "updated_at",
+                ])
+
+                tb_locked.status = TeamBooking.Status.CONFIRMED
+                tb_locked.save(update_fields=["status", "updated_at"])
+
+                # Dispatches notifications to Customer, Team Owner, and All Participating Artists
+                send_notification_once(
+                    user=tb_locked.customer,
+                    title="Team Booking Confirmed!",
+                    message=f"Payment received! Your team booking with '{tb_locked.team.name}' for '{tb_locked.package_name}' on {tb_locked.event_day} is confirmed.",
+                    notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                )
+                if tb_locked.team.owner and tb_locked.team.owner.user:
+                    send_notification_once(
+                        user=tb_locked.team.owner.user,
+                        title="Team Booking Confirmed & Paid",
+                        message=f"Customer {tb_locked.customer.get_full_name() or tb_locked.customer.username} completed payment for '{tb_locked.package_name}' on {tb_locked.event_day}. Booking is confirmed!",
+                        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                    )
+                for art in locked_artists:
+                    if art.user and (not tb_locked.team.owner or art.id != tb_locked.team.owner_id):
+                        send_notification_once(
+                            user=art.user,
+                            title="Team Performance Confirmed",
+                            message=f"Team booking with '{tb_locked.team.name}' for '{tb_locked.package_name}' on {tb_locked.event_day} is confirmed and paid.",
+                            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                        )
+
+    if refund_needed:
+        initiate_payment_refund(
+            payment=locked_payment,
+            reason=refund_reason,
+            amount=locked_payment.amount,
+        )
+        return JsonResponse(
+            {
+                "error": f"Payment captured after reservation deadline or artist became unavailable. A full refund has been initiated ({refund_reason}).",
+                "refund_initiated": True,
+            },
+            status=409,
+        )
+
+    return JsonResponse({
+        "message": "Team booking payment verified and confirmed successfully.",
+        "status": locked_payment.status,
+        "transaction_id": locked_payment.transaction_id,
+        "amount": str(locked_payment.amount),
+        "commission_amount": str(locked_payment.commission_amount),
+        "artist_amount": str(locked_payment.artist_amount),
+        "team_booking_id": tb.id,
+    })
+
+
+def _handle_team_booking_webhook(pay_info, payment_entity, event_id):
+    """
+    Subroutine of razorpay_webhook_view for payment.captured events linked to a TeamBooking.
+    """
+    from .models import TeamBooking, ArtistProfile, Payment, Notification, ProcessedWebhookEvent
+    tb_id = pay_info["team_booking_id"]
+    order_id = payment_entity.get("order_id")
+    payment_id = payment_entity.get("id")
+
+    with transaction.atomic():
+        if ProcessedWebhookEvent.objects.filter(event_id=event_id).exists():
+            return JsonResponse({"status": "ignored", "message": "Payment already captured.", "event_id": event_id})
+
+        tb_locked = TeamBooking.objects.select_for_update().select_related("team", "team__owner", "customer").get(id=tb_id)
+        payment = Payment.objects.select_for_update().get(id=pay_info["id"])
+
+        if payment.status == Payment.Status.SUCCESS:
+            ProcessedWebhookEvent.objects.create(event_id=event_id, event_type="payment.captured")
+            return JsonResponse({"status": "ignored", "message": "Payment already successful.", "event_id": event_id})
+
+        member_ids = list(tb_locked.participating_members.order_by("id").values_list("id", flat=True))
+        locked_artists = list(ArtistProfile.objects.filter(id__in=member_ids).order_by("id").select_for_update())
+
+        refund_needed = False
+        refund_reason = ""
+
+        val_res = validate_gateway_capture_timestamp(payment_entity.get("created_at"), tb_locked.payment_deadline)
+        if not val_res.is_valid:
+            payment.status = Payment.Status.FAILED
+            payment.transaction_id = payment_id
+            payment.save(update_fields=["status", "transaction_id", "updated_at"])
+            refund_needed = True
+            refund_reason = "Webhook: Captured after payment deadline"
+        else:
+            occupied_artist = None
+            for art in locked_artists:
+                occupied, occ_reason, _ = is_artist_date_occupied(art, tb_locked.event_day, exclude_team_booking_id=tb_locked.id)
+                if occupied:
+                    occupied_artist = art
+                    break
+
+            if occupied_artist:
+                payment.status = Payment.Status.FAILED
+                payment.transaction_id = payment_id
+                payment.save(update_fields=["status", "transaction_id", "updated_at"])
+                refund_needed = True
+                refund_reason = f"Webhook: Artist {occupied_artist.stage_name} already occupied on {tb_locked.event_day}."
+            else:
+                total, commission, artist_amount = calculate_commission(tb_locked.package_price)
+                payment.status = Payment.Status.SUCCESS
+                payment.transaction_id = payment_id
+                payment.amount = total
+                payment.commission_percentage = Decimal("8.00")
+                payment.commission_amount = commission
+                payment.artist_amount = artist_amount
+                payment.save(update_fields=[
+                    "status", "transaction_id", "amount", "commission_percentage", "commission_amount", "artist_amount", "updated_at"
+                ])
+                tb_locked.status = TeamBooking.Status.CONFIRMED
+                tb_locked.save(update_fields=["status", "updated_at"])
+
+                send_notification_once(
+                    user=tb_locked.customer,
+                    title="Team Booking Confirmed!",
+                    message=f"Payment received! Your team booking with '{tb_locked.team.name}' for '{tb_locked.package_name}' on {tb_locked.event_day} is confirmed.",
+                    notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                )
+                if tb_locked.team.owner and tb_locked.team.owner.user:
+                    send_notification_once(
+                        user=tb_locked.team.owner.user,
+                        title="Team Booking Confirmed & Paid",
+                        message=f"Customer {tb_locked.customer.get_full_name() or tb_locked.customer.username} completed payment for '{tb_locked.package_name}' on {tb_locked.event_day}. Booking is confirmed!",
+                        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                    )
+                for art in locked_artists:
+                    if art.user and (not tb_locked.team.owner or art.id != tb_locked.team.owner_id):
+                        send_notification_once(
+                            user=art.user,
+                            title="Team Performance Confirmed",
+                            message=f"Team booking with '{tb_locked.team.name}' for '{tb_locked.package_name}' on {tb_locked.event_day} is confirmed and paid.",
+                            notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                        )
+
+        ProcessedWebhookEvent.objects.create(event_id=event_id, event_type="payment.captured")
+
+    if refund_needed:
+        initiate_payment_refund(payment=payment, reason=refund_reason, amount=payment.amount)
+
+    return JsonResponse({"status": "success", "event_id": event_id})
+
+
+@require_POST
+def customer_create_team_booking_view(request, team_id, package_id):
+    """
+    POST: Customer initiates a team booking request for an active performance package.
+    Only customers (non-artists) can book.
+    Validates package, participating members, and checks date availability.
+    Status starts at PENDING_OWNER_REVIEW and notifies team owner.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required. Please sign in as a customer."}, status=401)
+
+    # Enforce role: Only customers can book teams
+    if getattr(request.user, "artist_profile", None) is not None:
+        return JsonResponse({"error": "Only customer accounts can book collaboration teams."}, status=403)
+    if request.user.is_staff or request.user.is_superuser:
+        return JsonResponse({"error": "Staff/Admin accounts cannot create customer bookings."}, status=403)
+
+    from .models import CollaborationTeam, CollaborationPackage, TeamBooking, District, Notification
+    from .collaboration_service import serialize_team_booking
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).select_related("owner", "owner__user").first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found or is inactive."}, status=404)
+
+    pkg = (
+        CollaborationPackage.objects.filter(id=package_id, team=team, is_active=True)
+        .select_related("category")
+        .prefetch_related("participating_members", "participating_members__category")
+        .first()
+    )
+    if not pkg:
+        return JsonResponse({"error": "Performance package not found or is currently inactive."}, status=404)
+
+    # Verify participating members
+    active_member_artist_ids = set(team.get_active_members().values_list("artist_id", flat=True))
+    participating_members = list(pkg.participating_members.all())
+    if not participating_members:
+        return JsonResponse({"error": "This package currently has no participating members assigned."}, status=400)
+
+    for art in participating_members:
+        if art.id not in active_member_artist_ids:
+            return JsonResponse(
+                {"error": f"Participating member '{art.stage_name}' is no longer an active member of this team."},
+                status=400,
+            )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    event_type = str(body.get("event_type") or "").strip()
+    if not event_type:
+        return JsonResponse({"error": "Event type is required."}, status=400)
+
+    raw_event_date = body.get("event_date")
+    if not raw_event_date:
+        return JsonResponse({"error": "Event date and time are required."}, status=400)
+
+    # Parse event date
+    from datetime import datetime as dt_cls
+    from zoneinfo import ZoneInfo
+    kolkata_tz = ZoneInfo("Asia/Kolkata")
+    try:
+        clean_date_str = str(raw_event_date).replace("Z", "+00:00")
+        parsed_dt = dt_cls.fromisoformat(clean_date_str)
+        if timezone.is_naive(parsed_dt):
+            event_date = timezone.make_aware(parsed_dt, kolkata_tz)
+        else:
+            event_date = timezone.localtime(parsed_dt, kolkata_tz)
+    except Exception:
+        return JsonResponse({"error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM)."}, status=400)
+
+    if event_date <= timezone.now():
+        return JsonResponse({"error": "Event date must be in the future."}, status=400)
+
+    event_day = event_date.date()
+
+    # Location details
+    event_location = str(body.get("event_location") or "").strip()
+    venue_name = str(body.get("venue_name") or "").strip()
+    event_address = str(body.get("event_address") or "").strip()
+    city = str(body.get("city") or "").strip()
+    state = str(body.get("state") or "").strip()
+
+    district = None
+    district_id = body.get("district_id")
+    if district_id:
+        district = District.objects.filter(id=district_id).first()
+
+    customer_phone = str(body.get("customer_phone") or "").strip()
+    if not customer_phone and hasattr(request.user, "customer_profile") and request.user.customer_profile:
+        customer_phone = request.user.customer_profile.phone or ""
+
+    expected_audience_size = body.get("expected_audience_size")
+    if expected_audience_size:
+        try:
+            expected_audience_size = int(expected_audience_size)
+            if expected_audience_size < 1:
+                return JsonResponse({"error": "Expected audience size must be at least 1."}, status=400)
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Invalid audience size format."}, status=400)
+    else:
+        expected_audience_size = None
+
+    performance_duration = str(body.get("performance_duration") or pkg.duration_display).strip()
+    additional_requirements = str(body.get("additional_requirements") or "").strip()
+    customer_message = str(body.get("customer_message") or "").strip()
+
+    # Pre-check availability for all participating members on event_day
+    occupied_artists = []
+    for art in participating_members:
+        occupied, reason, _ = is_artist_date_occupied(art, event_day)
+        if occupied:
+            occupied_artists.append(f"{art.stage_name} ({reason or 'already booked'})")
+
+    if occupied_artists:
+        return JsonResponse(
+            {
+                "error": f"One or more team members are unavailable on {event_day.strftime('%b %d, %Y')}: {', '.join(occupied_artists)}."
+            },
+            status=400,
+        )
+
+    # Atomic creation with canonical locking
+    with transaction.atomic():
+        locked_artists = list(
+            ArtistProfile.objects.filter(id__in=[a.id for a in participating_members])
+            .order_by("id")
+            .select_for_update()
+        )
+
+        for art in locked_artists:
+            occupied, reason, _ = is_artist_date_occupied(art, event_day)
+            if occupied:
+                return JsonResponse(
+                    {"error": f"Artist '{art.stage_name}' became unavailable on {event_day.strftime('%b %d, %Y')}."},
+                    status=400,
+                )
+
+        members_snapshot = [
+            {
+                "id": a.id,
+                "stage_name": a.stage_name,
+                "category": a.category.name if a.category else "",
+            }
+            for a in locked_artists
+        ]
+
+        tb = TeamBooking.objects.create(
+            customer=request.user,
+            team=team,
+            package=pkg,
+            package_name=pkg.name,
+            package_category=pkg.category.name if pkg.category else "",
+            package_price=pkg.starting_price,
+            package_duration_minutes=pkg.duration_minutes,
+            package_duration_display=pkg.duration_display,
+            package_inclusions=pkg.included_services,
+            package_requirements=pkg.requirements,
+            participating_members_snapshot=members_snapshot,
+            event_type=event_type,
+            event_date=event_date,
+            event_day=event_day,
+            event_location=event_location or venue_name or "TBD",
+            event_address=event_address,
+            venue_name=venue_name,
+            city=city,
+            state=state,
+            district=district,
+            customer_phone=customer_phone,
+            expected_audience_size=expected_audience_size,
+            performance_duration=performance_duration,
+            additional_requirements=additional_requirements,
+            customer_message=customer_message,
+            status=TeamBooking.Status.PENDING_OWNER_REVIEW,
+        )
+        tb.participating_members.set(locked_artists)
+
+        if team.owner and team.owner.user:
+            send_notification_once(
+                user=team.owner.user,
+                title=f"New Team Booking Request: {pkg.name}",
+                message=f"Customer '{request.user.get_full_name() or request.user.username}' requested to book '{pkg.name}' for {event_day.strftime('%b %d, %Y')}.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+    return JsonResponse(
+        {
+            "message": "Team booking request submitted successfully. Awaiting team owner review.",
+            "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+        },
+        status=201,
+    )
+
+
+@require_GET
+def customer_team_bookings_list_view(request):
+    """
+    GET: List all team bookings submitted by the currently authenticated customer.
+    Auto-expires any pending reservation whose deadline has passed.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    from .models import TeamBooking
+    from .collaboration_service import serialize_team_booking
+
+    check_and_expire_team_reservations(customer=request.user)
+
+    bookings_qs = (
+        TeamBooking.objects.filter(customer=request.user)
+        .select_related("team", "team__owner", "package", "district", "payment")
+        .prefetch_related(
+            "participating_members",
+            "participating_members__category",
+            "member_confirmations",
+            "member_confirmations__artist",
+            "member_confirmations__artist__category",
+        )
+        .order_by("-created_at")
+    )
+
+    return JsonResponse(
+        {
+            "team_bookings": [serialize_team_booking(tb, current_user=request.user, request=request) for tb in bookings_qs],
+            "count": bookings_qs.count(),
+        }
+    )
+
+
+@require_GET
+def customer_team_booking_detail_view(request, booking_id):
+    """
+    GET: Detailed information about a single team booking.
+    Accessible by the booking customer, team owner, or participating team members.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    from .models import TeamBooking
+    from .collaboration_service import serialize_team_booking
+
+    check_and_expire_team_reservations()
+
+    tb = (
+        TeamBooking.objects.filter(id=booking_id)
+        .select_related("team", "team__owner", "customer", "package", "district", "payment", "declined_by_artist")
+        .prefetch_related(
+            "participating_members",
+            "participating_members__category",
+            "member_confirmations",
+            "member_confirmations__artist",
+            "member_confirmations__artist__category",
+        )
+        .first()
+    )
+    if not tb:
+        return JsonResponse({"error": "Team booking not found."}, status=404)
+
+    caller_artist = getattr(request.user, "artist_profile", None)
+    is_customer = tb.customer_id == request.user.id
+    is_owner = bool(caller_artist and caller_artist.id == tb.team.owner_id)
+    is_participating = bool(caller_artist and tb.participating_members.filter(id=caller_artist.id).exists())
+
+    if not (is_customer or is_owner or is_participating or request.user.is_staff):
+        return JsonResponse({"error": "You do not have permission to view this team booking."}, status=403)
+
+    return JsonResponse(
+        {
+            "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+        }
+    )
+
+
+@require_POST
+def customer_team_booking_cancel_view(request, booking_id):
+    """
+    POST: Customer cancels a pending or awaiting-payment team booking.
+    Releases all reservations.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    from .models import TeamBooking, Payment, Notification
+    from .collaboration_service import serialize_team_booking
+
+    tb = (
+        TeamBooking.objects.filter(id=booking_id, customer=request.user)
+        .select_related("team", "team__owner", "customer")
+        .first()
+    )
+    if not tb:
+        return JsonResponse({"error": "Team booking not found."}, status=404)
+
+    if tb.status not in [
+        TeamBooking.Status.PENDING_OWNER_REVIEW,
+        TeamBooking.Status.PENDING_MEMBER_CONFIRMATIONS,
+        TeamBooking.Status.AWAITING_PAYMENT,
+    ]:
+        return JsonResponse(
+            {"error": f"Cannot cancel booking with current status: {tb.get_status_display()}."},
+            status=400,
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        body = {}
+
+    reason = str(body.get("reason") or "Cancelled by customer").strip()
+
+    with transaction.atomic():
+        tb.status = TeamBooking.Status.CANCELLED
+        tb.rejection_reason = reason
+        tb.save(update_fields=["status", "rejection_reason", "updated_at"])
+
+        payment = getattr(tb, "payment", None)
+        if payment and payment.status == Payment.Status.PENDING:
+            payment.status = Payment.Status.FAILED
+            payment.save(update_fields=["status", "updated_at"])
+
+        if tb.team.owner and tb.team.owner.user:
+            send_notification_once(
+                user=tb.team.owner.user,
+                title="Team Booking Cancelled",
+                message=f"Customer '{request.user.get_full_name() or request.user.username}' cancelled the booking for '{tb.package_name}' on {tb.event_day}.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+    return JsonResponse(
+        {
+            "message": "Team booking cancelled successfully.",
+            "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+        }
+    )
+
+
+@require_GET
+def artist_team_bookings_list_view(request, team_id):
+    """
+    GET: List team bookings for a specific team.
+    Accessible by the team owner or active team members.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Only artists can access team bookings."}, status=403)
+
+    from .models import CollaborationTeam, CollaborationTeamMember, TeamBooking
+    from .collaboration_service import serialize_team_booking
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    is_member = (
+        team.owner_id == artist.id
+        or CollaborationTeamMember.objects.filter(
+            team=team, artist=artist, status=CollaborationTeamMember.Status.ACTIVE
+        ).exists()
+    )
+    if not is_member:
+        return JsonResponse({"error": "You are not a member of this team."}, status=403)
+
+    check_and_expire_team_reservations(team=team)
+
+    bookings_qs = (
+        TeamBooking.objects.filter(team=team)
+        .select_related("team", "team__owner", "customer", "package", "district", "payment", "declined_by_artist")
+        .prefetch_related(
+            "participating_members",
+            "participating_members__category",
+            "member_confirmations",
+            "member_confirmations__artist",
+            "member_confirmations__artist__category",
+        )
+        .order_by("-created_at")
+    )
+
+    return JsonResponse(
+        {
+            "team_bookings": [serialize_team_booking(tb, current_user=request.user, request=request) for tb in bookings_qs],
+            "count": bookings_qs.count(),
+        }
+    )
+
+
+@require_POST
+def artist_team_booking_respond_view(request, team_id, booking_id):
+    """
+    POST: Team owner approves or rejects a team booking request.
+    If rejected: Status becomes REJECTED and customer is notified.
+    If approved:
+      1. Verifies date availability for every participating member.
+      2. Creates a TeamBookingMemberConfirmation for every participating member.
+      3. Automatically sets owner's confirmation to accepted.
+      4. If all members are accepted (e.g. owner is the sole member), transitions directly to AWAITING_PAYMENT.
+      5. Otherwise, transitions to PENDING_MEMBER_CONFIRMATIONS and notifies other participating members.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Only artists can respond to team bookings."}, status=403)
+
+    from .models import CollaborationTeam, TeamBooking, TeamBookingMemberConfirmation, Payment, Notification
+    from .collaboration_service import serialize_team_booking
+
+    team = CollaborationTeam.objects.filter(id=team_id, is_active=True).first()
+    if not team:
+        return JsonResponse({"error": "Collaboration team not found."}, status=404)
+
+    if team.owner_id != artist.id:
+        return JsonResponse({"error": "Only the team owner can approve or reject team bookings."}, status=403)
+
+    tb = (
+        TeamBooking.objects.filter(id=booking_id, team=team)
+        .select_related("team", "team__owner", "customer", "package")
+        .prefetch_related("participating_members")
+        .first()
+    )
+    if not tb:
+        return JsonResponse({"error": "Team booking request not found."}, status=404)
+
+    if tb.status != TeamBooking.Status.PENDING_OWNER_REVIEW:
+        return JsonResponse(
+            {"error": f"Cannot respond to booking with status: {tb.get_status_display()}."},
+            status=400,
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    action = str(body.get("action") or "").strip().lower()
+    message = str(body.get("message") or "").strip()
+
+    if action not in ["approve", "reject"]:
+        return JsonResponse({"error": "Action must be either 'approve' or 'reject'."}, status=400)
+
+    now = timezone.now()
+
+    if action == "reject":
+        with transaction.atomic():
+            tb.status = TeamBooking.Status.REJECTED
+            tb.owner_reviewed_at = now
+            tb.owner_response_message = message
+            tb.rejection_reason = message or "Declined by team owner."
+            tb.save(update_fields=["status", "owner_reviewed_at", "owner_response_message", "rejection_reason", "updated_at"])
+
+            send_notification_once(
+                user=tb.customer,
+                title="Team Booking Declined by Owner",
+                message=f"The team owner of '{team.name}' has declined your booking request for '{tb.package_name}'.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+        return JsonResponse(
+            {
+                "message": "Team booking request rejected.",
+                "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+            }
+        )
+
+    # Action is APPROVE
+    participating_artists = list(tb.participating_members.all())
+    if not participating_artists:
+        return JsonResponse({"error": "This package has no participating members."}, status=400)
+
+    # Verify all members are still available
+    occupied_members = []
+    for art in participating_artists:
+        occupied, reason, _ = is_artist_date_occupied(art, tb.event_day, exclude_team_booking_id=tb.id)
+        if occupied:
+            occupied_members.append(f"{art.stage_name} ({reason or 'booked'})")
+
+    if occupied_members:
+        return JsonResponse(
+            {
+                "error": f"Cannot approve booking. The following members are no longer available on {tb.event_day}: {', '.join(occupied_members)}."
+            },
+            status=400,
+        )
+
+    with transaction.atomic():
+        tb.owner_reviewed_at = now
+        tb.owner_response_message = message
+        tb.member_confirmation_deadline = now + datetime.timedelta(hours=48)
+
+        # Create confirmation records for all participating members
+        for art in participating_artists:
+            conf, created = TeamBookingMemberConfirmation.objects.get_or_create(
+                team_booking=tb,
+                artist=art,
+                defaults={"status": "pending"},
+            )
+            if art.id == team.owner_id:
+                # Owner automatically confirms their own participation upon approval
+                conf.status = "accepted"
+                conf.responded_at = now
+                conf.response_message = message or "Approved as team owner."
+                conf.save(update_fields=["status", "responded_at", "response_message"])
+            else:
+                if art.user:
+                    send_notification_once(
+                        user=art.user,
+                        title=f"Collaboration Booking Confirmation Request: {team.name}",
+                        message=f"Team owner approved booking for '{tb.package_name}' on {tb.event_day}. Please confirm your availability.",
+                        notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                    )
+
+        # Check if ALL participating members have already confirmed
+        pending_confs = tb.member_confirmations.filter(status="pending").exists()
+
+        if not pending_confs:
+            # All members (e.g. sole owner member) confirmed! Move straight to AWAITING_PAYMENT
+            tb.status = TeamBooking.Status.AWAITING_PAYMENT
+            tb.all_members_confirmed_at = now
+            tb.payment_deadline = now + datetime.timedelta(hours=24)
+            tb.save(update_fields=[
+                "status", "owner_reviewed_at", "owner_response_message",
+                "member_confirmation_deadline", "all_members_confirmed_at", "payment_deadline", "updated_at"
+            ])
+
+            # Prepare payment record
+            total, comm, art_share = calculate_commission(tb.package_price)
+            Payment.objects.get_or_create(
+                team_booking=tb,
+                defaults={
+                    "amount": tb.package_price,
+                    "commission_percentage": Decimal("8.00"),
+                    "commission_amount": comm,
+                    "artist_amount": art_share,
+                    "status": Payment.Status.PENDING,
+                },
+            )
+
+            send_notification_once(
+                user=tb.customer,
+                title="All Team Members Confirmed! Payment Required",
+                message=f"All members of '{team.name}' confirmed your booking for '{tb.package_name}'. Please complete payment within 24 hours.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+        else:
+            tb.status = TeamBooking.Status.PENDING_MEMBER_CONFIRMATIONS
+            tb.save(update_fields=[
+                "status", "owner_reviewed_at", "owner_response_message",
+                "member_confirmation_deadline", "updated_at"
+            ])
+
+            send_notification_once(
+                user=tb.customer,
+                title="Team Booking Approved by Owner",
+                message=f"The team owner approved your booking request for '{tb.package_name}'. Now awaiting individual confirmations from team members.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+
+    return JsonResponse(
+        {
+            "message": "Team booking approved successfully.",
+            "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+        }
+    )
+
+
+@require_GET
+def artist_member_confirmations_list_view(request):
+    """
+    GET: List team booking confirmation requests for the currently authenticated artist.
+    Includes pending and responded requests.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Only artists can access member confirmations."}, status=403)
+
+    from .models import TeamBookingMemberConfirmation, TeamBooking
+    from .collaboration_service import serialize_team_booking
+
+    check_and_expire_team_reservations(artist=artist)
+
+    confs_qs = (
+        TeamBookingMemberConfirmation.objects.filter(artist=artist)
+        .select_related("team_booking", "team_booking__team", "team_booking__team__owner", "team_booking__customer", "team_booking__package")
+        .order_by("-created_at")
+    )
+
+    confirmations = []
+    for c in confs_qs:
+        tb = c.team_booking
+        confirmations.append({
+            "confirmation_id": c.id,
+            "status": c.status,
+            "responded_at": c.responded_at.isoformat() if c.responded_at else None,
+            "response_message": c.response_message,
+            "can_respond": c.status == "pending" and tb.status == TeamBooking.Status.PENDING_MEMBER_CONFIRMATIONS,
+            "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+        })
+
+    return JsonResponse(
+        {
+            "confirmations": confirmations,
+            "count": len(confirmations),
+        }
+    )
+
+
+@require_POST
+def artist_member_confirmation_respond_view(request, confirmation_id):
+    """
+    POST: Participating artist accepts or declines their team booking confirmation.
+    - If DECLINED: The ENTIRE team booking is REJECTED. Customer and owner are notified.
+    - If ACCEPTED:
+      - Validates artist availability on event date.
+      - Checks if all participating members have confirmed.
+      - If all confirmed: transitions booking to AWAITING_PAYMENT, sets 24h deadline,
+        creates Payment record, and notifies customer to pay.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required."}, status=401)
+
+    artist = getattr(request.user, "artist_profile", None)
+    if not artist:
+        return JsonResponse({"error": "Only artists can respond to member confirmations."}, status=403)
+
+    from .models import TeamBookingMemberConfirmation, TeamBooking, Payment, Notification
+    from .collaboration_service import serialize_team_booking
+
+    conf = (
+        TeamBookingMemberConfirmation.objects.filter(id=confirmation_id)
+        .select_related("team_booking", "team_booking__team", "team_booking__team__owner", "team_booking__customer", "artist")
+        .first()
+    )
+    if not conf:
+        return JsonResponse({"error": "Confirmation request not found."}, status=404)
+
+    if conf.artist_id != artist.id:
+        return JsonResponse({"error": "You do not have permission to respond to this confirmation request."}, status=403)
+
+    tb = conf.team_booking
+
+    if tb.status != TeamBooking.Status.PENDING_MEMBER_CONFIRMATIONS:
+        return JsonResponse(
+            {"error": f"This team booking is no longer awaiting member confirmations (status: {tb.get_status_display()})."},
+            status=400,
+        )
+
+    if conf.status != "pending":
+        return JsonResponse(
+            {"error": f"You have already {conf.status} this confirmation request."},
+            status=400,
+        )
+
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON format."}, status=400)
+
+    action = str(body.get("action") or "").strip().lower()
+    message = str(body.get("message") or "").strip()
+
+    if action not in ["accept", "decline"]:
+        return JsonResponse({"error": "Action must be either 'accept' or 'decline'."}, status=400)
+
+    now = timezone.now()
+
+    if action == "decline":
+        with transaction.atomic():
+            conf.status = "declined"
+            conf.responded_at = now
+            conf.response_message = message
+            conf.save(update_fields=["status", "responded_at", "response_message"])
+
+            # Rule: If ANY artist declines, entire team booking is REJECTED
+            tb.status = TeamBooking.Status.REJECTED
+            tb.declined_by_artist = artist
+            tb.rejection_reason = f"Declined by team member '{artist.stage_name}': {message or 'Unavailable'}."
+            tb.save(update_fields=["status", "declined_by_artist", "rejection_reason", "updated_at"])
+
+            send_notification_once(
+                user=tb.customer,
+                title="Team Booking Declined",
+                message=f"Team booking with '{tb.team.name}' for '{tb.package_name}' on {tb.event_day} was declined by {artist.stage_name}.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+            if tb.team.owner and tb.team.owner.user and tb.team.owner_id != artist.id:
+                send_notification_once(
+                    user=tb.team.owner.user,
+                    title="Team Member Declined Booking",
+                    message=f"Team member '{artist.stage_name}' declined booking for '{tb.package_name}' on {tb.event_day}. The booking has been marked rejected.",
+                    notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                )
+
+        return JsonResponse(
+            {
+                "message": "You declined this team booking request.",
+                "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+            }
+        )
+
+    # Action is ACCEPT
+    occupied, reason, _ = is_artist_date_occupied(artist, tb.event_day, exclude_team_booking_id=tb.id)
+    if occupied:
+        return JsonResponse(
+            {"error": f"You are already booked on {tb.event_day} ({reason or 'occupied'}). Cannot accept."},
+            status=400,
+        )
+
+    with transaction.atomic():
+        conf.status = "accepted"
+        conf.responded_at = now
+        conf.response_message = message
+        conf.save(update_fields=["status", "responded_at", "response_message"])
+
+        # Check if ALL participating members have now accepted
+        unconfirmed = tb.member_confirmations.exclude(status="accepted").exists()
+
+        if not unconfirmed:
+            # All members accepted!
+            tb.status = TeamBooking.Status.AWAITING_PAYMENT
+            tb.all_members_confirmed_at = now
+            tb.payment_deadline = now + datetime.timedelta(hours=24)
+            tb.save(update_fields=["status", "all_members_confirmed_at", "payment_deadline", "updated_at"])
+
+            total, comm, art_share = calculate_commission(tb.package_price)
+            Payment.objects.get_or_create(
+                team_booking=tb,
+                defaults={
+                    "amount": tb.package_price,
+                    "commission_percentage": Decimal("8.00"),
+                    "commission_amount": comm,
+                    "artist_amount": art_share,
+                    "status": Payment.Status.PENDING,
+                },
+            )
+
+            send_notification_once(
+                user=tb.customer,
+                title="All Team Members Confirmed! Payment Required",
+                message=f"All members of '{tb.team.name}' confirmed your booking for '{tb.package_name}'. Please complete payment within 24 hours to secure your date.",
+                notification_type=Notification.NotificationType.BOOKING_UPDATE,
+            )
+            if tb.team.owner and tb.team.owner.user:
+                send_notification_once(
+                    user=tb.team.owner.user,
+                    title="All Team Members Confirmed",
+                    message=f"All members for '{tb.package_name}' on {tb.event_day} have accepted! Booking is now awaiting customer payment.",
+                    notification_type=Notification.NotificationType.BOOKING_UPDATE,
+                )
+
+    return JsonResponse(
+        {
+            "message": "You confirmed your availability for this team booking.",
+            "booking": serialize_team_booking(tb, current_user=request.user, request=request),
+        }
+    )
+
+
+@csrf_protect
+@require_POST
+def create_razorpay_order_team_booking_view(request, booking_id):
+    """
+    POST: Customer initiates Razorpay checkout for a team booking with status AWAITING_PAYMENT.
+    Enforces 24-hour payment deadline and verifies all participating artists are still available.
+    Returns Razorpay order ID and key for the frontend checkout modal.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Please sign in."}, status=401)
+
+    from .models import TeamBooking, Payment
+
+    check_and_expire_team_reservations()
+
+    tb = (
+        TeamBooking.objects.filter(id=booking_id, customer=request.user)
+        .select_related("team", "team__owner", "customer")
+        .prefetch_related("participating_members")
+        .first()
+    )
+    if not tb:
+        return JsonResponse({"error": "Team booking not found."}, status=404)
+
+    if tb.status == TeamBooking.Status.EXPIRED:
+        return JsonResponse({"error": "This team booking reservation has expired. The date has been released."}, status=409)
+
+    now = timezone.now()
+    if tb.payment_deadline and now > tb.payment_deadline:
+        check_and_expire_team_reservations(team_booking=tb)
+        return JsonResponse({"error": "The 24-hour payment deadline for this team booking has expired."}, status=409)
+
+    if tb.status != TeamBooking.Status.AWAITING_PAYMENT:
+        return JsonResponse(
+            {"error": f"Booking is not awaiting payment (current status: {tb.get_status_display()})."},
+            status=400,
+        )
+
+    # Check availability for all participating members
+    for art in tb.participating_members.all():
+        occupied, reason, _ = is_artist_date_occupied(art, tb.event_day, exclude_team_booking_id=tb.id)
+        if occupied:
+            return JsonResponse(
+                {"error": f"Artist '{art.stage_name}' is no longer available on {tb.event_day} ({reason or 'booked'})."},
+                status=409,
+            )
+
+    # Get or create Payment record
+    total, comm, art_share = calculate_commission(tb.package_price)
+    payment, _ = Payment.objects.get_or_create(
+        team_booking=tb,
+        defaults={
+            "amount": tb.package_price,
+            "commission_percentage": Decimal("8.00"),
+            "commission_amount": comm,
+            "artist_amount": art_share,
+            "status": Payment.Status.PENDING,
+        },
+    )
+
+    amount_paise = int(tb.package_price * 100)
+
+    try:
+        client = razorpay.Client(
+            auth=(
+                settings.RAZORPAY_KEY_ID,
+                settings.RAZORPAY_KEY_SECRET,
+            )
+        )
+        order_data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"tb_{tb.id}",
+            "notes": {
+                "team_booking_id": tb.id,
+                "team_id": tb.team_id,
+                "package_id": tb.package_id,
+                "customer_id": request.user.id,
+            },
+        }
+        rp_order = client.order.create(data=order_data)
+        payment.razorpay_order_id = rp_order["id"]
+        payment.save(update_fields=["razorpay_order_id", "updated_at"])
+
+        return JsonResponse({
+            "order_id": rp_order["id"],
+            "amount": amount_paise,
+            "currency": "INR",
+            "key": settings.RAZORPAY_KEY_ID,
+            "team_booking_id": tb.id,
+            "package_name": tb.package_name,
+            "team_name": tb.team.name,
+            "customer_name": request.user.get_full_name() or request.user.username,
+            "customer_email": request.user.email,
+        })
+    except RAZORPAY_API_ERRORS:
+        logger.exception("Failed to create Razorpay order for team booking %s", tb.id)
+        return JsonResponse({"error": "Unable to initialize payment with Razorpay."}, status=502)
+    except Exception:
+        logger.exception("Unexpected error creating Razorpay order for team booking %s", tb.id)
+        return JsonResponse({"error": "Something went wrong while setting up the payment."}, status=500)
+
+
+
+
 
 
 

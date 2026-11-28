@@ -68,6 +68,8 @@ urlpatterns = [
     path("artist/teams/invitations/<int:invitation_id>/respond/", views.artist_respond_invitation_view, name="artist_respond_invitation"),
     path("artist/teams/<int:team_id>/", views.artist_team_detail_view, name="artist_team_detail"),
     path("artist/teams/<int:team_id>/invite/", views.artist_team_invite_view, name="artist_team_invite"),
+    path("artist/teams/<int:team_id>/candidates/", views.artist_candidate_suggestions_view, name="artist_team_candidates"),
+    path("artist/candidates/", views.artist_candidate_suggestions_view, name="artist_candidates"),
     path("artist/teams/<int:team_id>/members/<int:member_id>/remove/", views.artist_team_remove_member_view, name="artist_team_remove_member"),
     path("artist/teams/<int:team_id>/leave/", views.artist_team_leave_view, name="artist_team_leave"),
     path("artist/teams/<int:team_id>/coverage/", views.artist_team_coverage_view, name="artist_team_coverage"),
@@ -75,8 +77,23 @@ urlpatterns = [
     path("artist/teams/<int:team_id>/portfolio/", views.artist_team_portfolio_list_create_view, name="artist_team_portfolio_list_create"),
     path("artist/teams/<int:team_id>/portfolio/<int:item_id>/", views.artist_team_portfolio_item_view, name="artist_team_portfolio_item"),
     path("artist/teams/<int:team_id>/portfolio/reorder/", views.artist_team_portfolio_reorder_view, name="artist_team_portfolio_reorder"),
+    path("artist/teams/<int:team_id>/packages/", views.artist_team_packages_view, name="artist_team_packages"),
+    path("artist/teams/<int:team_id>/packages/<int:package_id>/", views.artist_team_package_detail_view, name="artist_team_package_detail"),
+    path("teams/", views.public_teams_list_view, name="public_teams_list"),
     path("teams/<int:team_id>/", views.public_team_detail_view, name="public_team_detail"),
+    path("teams/<int:team_id>/packages/<int:package_id>/book/", views.customer_create_team_booking_view, name="customer_create_team_booking"),
+
+    path("customer/team-bookings/", views.customer_team_bookings_list_view, name="customer_team_bookings_list"),
+    path("customer/team-bookings/<int:booking_id>/", views.customer_team_booking_detail_view, name="customer_team_booking_detail"),
+    path("customer/team-bookings/<int:booking_id>/cancel/", views.customer_team_booking_cancel_view, name="customer_team_booking_cancel"),
+
+    path("artist/teams/<int:team_id>/bookings/", views.artist_team_bookings_list_view, name="artist_team_bookings_list"),
+    path("artist/teams/<int:team_id>/bookings/<int:booking_id>/respond/", views.artist_team_booking_respond_view, name="artist_team_booking_respond"),
+    path("artist/team-bookings/confirmations/", views.artist_member_confirmations_list_view, name="artist_member_confirmations_list"),
+    path("artist/team-bookings/confirmations/<int:confirmation_id>/respond/", views.artist_member_confirmation_respond_view, name="artist_member_confirmation_respond"),
 
     path("bookings/<int:booking_id>/create-order/", views.create_razorpay_order_view, name="create_razorpay_order"),
     path("bookings/<int:booking_id>/refund/retry/", views.retry_booking_refund_view, name="retry_booking_refund"),
+    path("payments/team-bookings/<int:booking_id>/create-order/", views.create_razorpay_order_team_booking_view, name="create_razorpay_order_team_booking"),
+    path("team-bookings/<int:booking_id>/create-order/", views.create_razorpay_order_team_booking_view, name="api_create_razorpay_order_team_booking"),
 ]

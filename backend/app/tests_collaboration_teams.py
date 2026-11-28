@@ -340,15 +340,31 @@ class CollaborationTeamManagementTests(TestCase):
             team=team, artist=self.a_singer, role="owner", status="active"
         )
 
-        # 1. Invite Dancer using Dancer's User ID (self.u_dancer.id) instead of ArtistProfile ID
+        # 1. Invite an artist using their User ID instead of ArtistProfile ID
+        u_target = User.objects.create_user(
+            username="target_artist_user", email="target_res@example.com", password="password123"
+        )
+        a_target = ArtistProfile.objects.create(
+            user=u_target,
+            stage_name="Target Resolution Artist",
+            category=self.cat_dancer,
+            country=self.india,
+            state=self.kerala,
+            district=self.d_kozhikode,
+            location="Kozhikode, Kerala",
+            starting_price=Decimal("18000.00"),
+            is_verified=True,
+            is_active=True,
+        )
+
         res_by_user_id = self.client.post(
             f"/api/artist/teams/{team.id}/invite/",
-            data=json.dumps({"artist_id": self.u_dancer.id, "message": "Inviting via user PK"}),
+            data=json.dumps({"artist_id": u_target.id, "message": "Inviting via user PK"}),
             content_type="application/json",
         )
         self.assertEqual(res_by_user_id.status_code, 201)
         # Verify mapped to ArtistProfile, NOT confused with User ID
-        self.assertEqual(res_by_user_id.json()["artist_id"], self.a_dancer.id)
+        self.assertEqual(res_by_user_id.json()["artist_id"], a_target.id)
 
         # 2. Invite DJ using Stage Name "DJ Rex"
         res_by_name = self.client.post(
@@ -545,3 +561,60 @@ class CollaborationTeamManagementTests(TestCase):
         self.assertEqual(team.owner_id, self.a_dancer.id)
         dancer_mem = CollaborationTeamMember.objects.get(team=team, artist=self.a_dancer)
         self.assertEqual(dancer_mem.role, "owner")
+
+    def test_artist_candidate_suggestions_by_letters(self):
+        """User types letters and receives matching verified artist suggestions."""
+        self.client.force_login(self.u_singer)
+
+        # Search for letter 'd'
+        res = self.client.get("/api/artist/candidates/?q=d")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue("candidates" in data)
+        stage_names = [c["stage_name"] for c in data["candidates"]]
+
+        # Should find dancer and DJ
+        self.assertIn("Dancer Maya", stage_names)
+        self.assertIn("DJ Rex", stage_names)
+        # Should not include self
+        self.assertNotIn("Singer Soul", stage_names)
+
+        # Search specifically for 'dan'
+        res_dan = self.client.get("/api/artist/candidates/?q=dan")
+        self.assertEqual(res_dan.status_code, 200)
+        dan_names = [c["stage_name"] for c in res_dan.json()["candidates"]]
+        self.assertIn("Dancer Maya", dan_names)
+        self.assertNotIn("DJ Rex", dan_names)
+
+    def test_artist_candidate_suggestions_membership_flag(self):
+        """Candidates are correctly flagged if already member or pending invitation."""
+        team = CollaborationTeam.objects.create(name="Flag Team", owner=self.a_singer)
+        CollaborationTeamMember.objects.create(
+            team=team, artist=self.a_singer, role="owner", status="active"
+        )
+        # Dancer is already an active member
+        CollaborationTeamMember.objects.create(
+            team=team, artist=self.a_dancer, role="member", status="active"
+        )
+        # DJ has a pending invitation
+        CollaborationTeamMember.objects.create(
+            team=team, artist=self.a_dj, role="member", status="pending", invited_by=self.a_singer
+        )
+
+        self.client.force_login(self.u_singer)
+        res = self.client.get(f"/api/artist/teams/{team.id}/candidates/?q=d")
+        self.assertEqual(res.status_code, 200)
+
+        candidates = {c["id"]: c for c in res.json()["candidates"]}
+        self.assertTrue(candidates[self.a_dancer.id]["is_already_member"])
+        self.assertFalse(candidates[self.a_dancer.id]["has_pending_invitation"])
+
+        self.assertFalse(candidates[self.a_dj.id]["is_already_member"])
+        self.assertTrue(candidates[self.a_dj.id]["has_pending_invitation"])
+
+    def test_artist_candidate_suggestions_unauthenticated(self):
+        """Unauthenticated requests are rejected."""
+        self.client.logout()
+        res = self.client.get("/api/artist/candidates/?q=a")
+        self.assertEqual(res.status_code, 401)
+

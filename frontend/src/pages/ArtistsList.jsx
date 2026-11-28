@@ -1,7 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Users,
+  User,
+  MapPin,
+  Layers,
+  Film,
+  Play,
+  ArrowRight,
+  RotateCcw,
+  Search,
+  X,
+} from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import { fetchArtists, fetchArtistCategoriesSummary } from '../js/auth';
+import { fetchArtists, fetchArtistCategoriesSummary, fetchPublicTeams } from '../js/auth';
 import { fetchIndianStates, fetchDistrictsByState } from '../services/locationService';
 import '../css/Artists.css';
 
@@ -93,6 +105,29 @@ function ArtistsList({ user, onLogout, navigate }) {
   const [gender, setGender] = useState('all');
   const [artistType, setArtistType] = useState('all');
   const [sort, setSort] = useState('featured');
+
+  // Top Tabs: 'artists' | 'teams'
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tab') === 'teams' ? 'teams' : 'artists';
+  });
+
+  // Collaboration Teams State
+  const [teams, setTeams] = useState([]);
+  const [teamsTotalCount, setTeamsTotalCount] = useState(0);
+  const [teamsPage, setTeamsPage] = useState(1);
+  const [teamsHasMore, setTeamsHasMore] = useState(false);
+  const [teamsLoading, setTeamsLoading] = useState(false);
+  const [teamsLoadingMore, setTeamsLoadingMore] = useState(false);
+  const [teamsError, setTeamsError] = useState('');
+
+  // Teams Filters State
+  const [teamSearch, setTeamSearch] = useState('');
+  const [teamCategory, setTeamCategory] = useState('all');
+  const [teamState, setTeamState] = useState('');
+  const [teamDistrict, setTeamDistrict] = useState('');
+  const [teamDistricts, setTeamDistricts] = useState([]);
+  const [teamSort, setTeamSort] = useState('recent');
 
   const todayIso = useMemo(() => {
     const d = new Date();
@@ -328,6 +363,123 @@ function ArtistsList({ user, onLogout, navigate }) {
     }
   }
 
+  // Load districts whenever teamState changes
+  useEffect(() => {
+    let active = true;
+    if (!teamState) {
+      setTeamDistricts([]);
+      setTeamDistrict('');
+      return;
+    }
+    async function loadDistricts() {
+      try {
+        const res = await fetchDistrictsByState(teamState);
+        if (active && res.districts) {
+          setTeamDistricts(res.districts);
+          setTeamDistrict((prev) => {
+            if (!prev) return '';
+            const exists = (res.districts || []).some((d) => String(d.id) === String(prev));
+            return exists ? prev : '';
+          });
+        }
+      } catch (err) {
+        console.warn('Could not load team districts:', err);
+      }
+    }
+    loadDistricts();
+    return () => {
+      active = false;
+    };
+  }, [teamState]);
+
+  // Fetch first page of collaboration teams
+  const fetchFirstPageTeams = useCallback(async () => {
+    setTeamsLoading(true);
+    setTeamsError('');
+    setTeamsPage(1);
+
+    try {
+      const data = await fetchPublicTeams({
+        search: teamSearch.trim(),
+        category: teamCategory === 'all' ? '' : teamCategory,
+        state_id: teamState || '',
+        district_id: teamDistrict || '',
+        sort: teamSort,
+        page: 1,
+        page_size: 8,
+      });
+
+      setTeams(data.teams || []);
+      setTeamsTotalCount(data.total_count ?? data.count ?? (data.teams || []).length);
+      setTeamsHasMore(Boolean(data.has_more));
+    } catch (err) {
+      setTeamsError(err.message || 'Failed to load collaboration teams.');
+    } finally {
+      setTeamsLoading(false);
+    }
+  }, [teamSearch, teamCategory, teamState, teamDistrict, teamSort]);
+
+  // Debounced load for teams
+  useEffect(() => {
+    if (activeTab === 'teams') {
+      const timer = setTimeout(() => {
+        fetchFirstPageTeams();
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, fetchFirstPageTeams]);
+
+  // Load More handler for teams
+  async function handleLoadMoreTeams() {
+    if (teamsLoadingMore || !teamsHasMore) return;
+    setTeamsLoadingMore(true);
+    const nextPage = teamsPage + 1;
+
+    try {
+      const data = await fetchPublicTeams({
+        search: teamSearch.trim(),
+        category: teamCategory === 'all' ? '' : teamCategory,
+        state_id: teamState || '',
+        district_id: teamDistrict || '',
+        sort: teamSort,
+        page: nextPage,
+        page_size: 8,
+      });
+
+      setTeams((prev) => [...prev, ...(data.teams || [])]);
+      setTeamsPage(nextPage);
+      setTeamsHasMore(Boolean(data.has_more));
+    } catch (err) {
+      console.warn('Could not load more teams:', err);
+    } finally {
+      setTeamsLoadingMore(false);
+    }
+  }
+
+  function handleResetTeamFilters() {
+    setTeamSearch('');
+    setTeamCategory('all');
+    setTeamState('');
+    setTeamDistrict('');
+    setTeamDistricts([]);
+    setTeamSort('recent');
+  }
+
+  function handleViewTeam(teamId) {
+    if (navigate) {
+      navigate(`/teams/${teamId}`);
+    } else {
+      window.location.assign(`/teams/${teamId}`);
+    }
+  }
+
+  function handleTabSwitch(tab) {
+    setActiveTab(tab);
+    const url = new URL(window.location);
+    url.searchParams.set('tab', tab);
+    window.history.replaceState(null, '', url.pathname + url.search);
+  }
+
   // Navigation handlers
   function handleCardClick(artistId) {
     if (navigate) {
@@ -399,14 +551,47 @@ function ArtistsList({ user, onLogout, navigate }) {
         <div className="artists-content-wrapper">
           {/* 1. Page Header */}
           <header className="explore-header-section">
-            <h1 className="explore-page-title">Explore artists</h1>
+            <h1 className="explore-page-title">
+              {activeTab === 'teams' ? 'Explore Collaboration Teams' : 'Explore artists'}
+            </h1>
             <p className="explore-page-subtitle">
-              {overallTotal || totalCount || 14} artists ready to book for your next event.
+              {activeTab === 'teams'
+                ? `${teamsTotalCount} verified performing teams ready to book across shared service coverage.`
+                : `${overallTotal || totalCount || 14} artists ready to book for your next event.`}
             </p>
+
+            {/* Top Tabs: Individual Artists vs Collaboration Teams */}
+            <div className="explore-tabs-container" role="tablist" aria-label="Performer Types">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'artists'}
+                className={`explore-tab-btn ${activeTab === 'artists' ? 'active' : ''}`}
+                onClick={() => handleTabSwitch('artists')}
+              >
+                <User size={16} />
+                <span>Individual Artists</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'teams'}
+                className={`explore-tab-btn ${activeTab === 'teams' ? 'active' : ''}`}
+                onClick={() => handleTabSwitch('teams')}
+              >
+                <Users size={16} />
+                <span>Collaboration Teams</span>
+              </button>
+            </div>
           </header>
 
-          {/* 2. Search and Filter Bar */}
-          <section className="explore-filter-bar" aria-label="Search and Filter Controls">
+          {/* ================================================================
+              TAB 1: INDIVIDUAL ARTISTS
+              ================================================================ */}
+          {activeTab === 'artists' && (
+            <>
+              {/* 2. Search and Filter Bar */}
+              <section className="explore-filter-bar" aria-label="Search and Filter Controls">
             {/* Search Input with Icon */}
             <div className="explore-search-box">
               <span className="explore-search-icon" aria-hidden="true">
@@ -814,6 +999,300 @@ function ArtistsList({ user, onLogout, navigate }) {
                 </button>
               )}
             </footer>
+          )}
+            </>
+          )}
+
+          {/* ================================================================
+              TAB 2: COLLABORATION TEAMS (PHASE 5C)
+              ================================================================ */}
+          {activeTab === 'teams' && (
+            <div className="explore-teams-section">
+              {/* Team Filter Bar */}
+              <section className="explore-filter-bar" aria-label="Team Search and Filter Controls">
+                {/* Team Search Input */}
+                <div className="explore-search-box">
+                  <span className="explore-search-icon" aria-hidden="true">
+                    <Search size={17} />
+                  </span>
+                  <input
+                    type="text"
+                    className="explore-search-input"
+                    value={teamSearch}
+                    onChange={(e) => setTeamSearch(e.target.value)}
+                    placeholder="Search teams, members or styles"
+                    aria-label="Search teams, members or styles"
+                  />
+                  {teamSearch && (
+                    <button
+                      type="button"
+                      className="explore-search-clear"
+                      onClick={() => setTeamSearch('')}
+                      title="Clear search"
+                      aria-label="Clear search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Team Category Select */}
+                <div className="explore-select-wrapper">
+                  <select
+                    className="explore-select"
+                    value={teamCategory}
+                    onChange={(e) => setTeamCategory(e.target.value)}
+                    aria-label="Filter by Team Category"
+                  >
+                    <option value="all">Category: All Categories</option>
+                    {orderedCategories.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Team State Select */}
+                <div className="explore-select-wrapper location-select-wrapper">
+                  <select
+                    className="explore-select"
+                    value={teamState}
+                    onChange={(e) => setTeamState(e.target.value)}
+                    aria-label="Filter teams by State"
+                  >
+                    <option value="">State: All States / UTs</option>
+                    {states.map((s) => (
+                      <option key={s.id} value={String(s.id)}>
+                        {s.name}{s.is_union_territory ? ' (UT)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Team District Select */}
+                <div className="explore-select-wrapper location-select-wrapper">
+                  <select
+                    className="explore-select"
+                    value={teamDistrict}
+                    onChange={(e) => setTeamDistrict(e.target.value)}
+                    disabled={!teamState || teamDistricts.length === 0}
+                    aria-label="Filter teams by District"
+                  >
+                    <option value="">District: {teamState ? 'All Districts' : 'Select State First'}</option>
+                    {teamDistricts.map((d) => (
+                      <option key={d.id} value={String(d.id)}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Team Sort Select */}
+                <div className="explore-select-wrapper sort-select-wrapper">
+                  <select
+                    className="explore-select"
+                    value={teamSort}
+                    onChange={(e) => setTeamSort(e.target.value)}
+                    aria-label="Sort Collaboration Teams"
+                  >
+                    <option value="recent">Sort: Featured / Recent</option>
+                    <option value="name">Sort: Team Name (A-Z)</option>
+                    <option value="members">Sort: Most Members</option>
+                    <option value="coverage">Sort: Most Coverage</option>
+                  </select>
+                </div>
+
+                {/* Reset Filters Button */}
+                {(teamSearch || teamCategory !== 'all' || teamState || teamDistrict || teamSort !== 'recent') && (
+                  <button
+                    type="button"
+                    className="explore-reset-btn"
+                    onClick={handleResetTeamFilters}
+                    title="Reset all team filters"
+                    aria-label="Reset all team filters"
+                  >
+                    <RotateCcw size={14} />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </section>
+
+              {/* Error Message */}
+              {teamsError && (
+                <div className="explore-error-alert" role="alert">
+                  <p>{teamsError}</p>
+                </div>
+              )}
+
+              {/* Loading State */}
+              {teamsLoading && (
+                <div className="explore-loading-grid" aria-live="polite">
+                  <div className="explore-spinner" />
+                  <p>Discovering collaboration teams...</p>
+                </div>
+              )}
+
+              {/* Teams Grid */}
+              {!teamsLoading && teams.length > 0 && (
+                <section className="teams-grid-container" aria-label="Collaboration Teams List">
+                  {teams.map((t) => (
+                    <article
+                      key={t.id}
+                      className="team-card"
+                      onClick={() => handleViewTeam(t.id)}
+                    >
+                      {/* Banner Cover Image */}
+                      <div
+                        className="team-card-banner"
+                        style={
+                          t.cover_image
+                            ? { backgroundImage: `url(${t.cover_image})` }
+                            : { background: 'linear-gradient(135deg, #1f2432 0%, #11141c 100%)' }
+                        }
+                      >
+                        <div className="team-card-banner-overlay" />
+                        <span className="team-card-category-badge">
+                          {t.category_name || 'Collaboration Team'}
+                        </span>
+
+                        {/* Avatar */}
+                        <div className="team-card-avatar-wrap">
+                          {t.profile_image ? (
+                            <img
+                              src={t.profile_image}
+                              alt={t.name}
+                              className="team-card-avatar"
+                            />
+                          ) : (
+                            <div className="team-card-avatar-placeholder">
+                              {t.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Body */}
+                      <div className="team-card-body">
+                        <div className="team-card-title-row">
+                          <h3 className="team-card-name">{t.name}</h3>
+                        </div>
+
+                        <div className="team-card-location">
+                          <MapPin size={14} color="#FF5722" />
+                          <span>{t.base_location}</span>
+                        </div>
+
+                        <p className="team-card-desc">
+                          {t.description || 'Verified performing collaboration team across shared districts.'}
+                        </p>
+
+                        {/* Metrics Pills */}
+                        <div className="team-card-metrics-row">
+                          <span className="team-metric-pill">
+                            <Users size={13} color="#FF5722" />
+                            <span>{t.active_members_count} Active Member{t.active_members_count === 1 ? '' : 's'}</span>
+                          </span>
+
+                          <span className="team-metric-pill coverage">
+                            <Layers size={13} color="#4ade80" />
+                            <span>{t.shared_districts_count} Shared District{t.shared_districts_count === 1 ? '' : 's'}</span>
+                          </span>
+                        </div>
+
+                        {/* Portfolio Previews Strip */}
+                        {t.portfolio_previews && t.portfolio_previews.length > 0 && (
+                          <div className="team-card-portfolio-strip">
+                            {t.portfolio_previews.slice(0, 3).map((p) => (
+                              <div key={p.id} className="team-portfolio-thumb">
+                                {p.thumbnail_url || (p.item_type === 'photo' && p.media_url) ? (
+                                  <img
+                                    src={p.thumbnail_url || p.media_url}
+                                    alt={p.title || 'Team Media'}
+                                  />
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
+                                    <Film size={18} />
+                                  </div>
+                                )}
+                                {(p.item_type === 'video' || p.item_type === 'youtube') && (
+                                  <div className="team-portfolio-thumb-play">
+                                    <Play size={12} fill="#fff" />
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                            {t.portfolio_count > 3 && (
+                              <div className="team-portfolio-more-badge">
+                                +{t.portfolio_count - 3}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Footer */}
+                        <div className="team-card-footer">
+                          <div className="team-card-owner-info">
+                            <span>Founded by <strong>{t.owner?.stage_name}</strong></span>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="team-card-btn-view"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewTeam(t.id);
+                            }}
+                          >
+                            <span>View Team</span>
+                            <ArrowRight size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              )}
+
+              {/* Empty State */}
+              {!teamsLoading && teams.length === 0 && !teamsError && (
+                <section className="explore-empty-state" aria-label="No teams found">
+                  <div className="empty-state-icon-wrap" aria-hidden="true">
+                    <Users size={32} color="#FF5722" />
+                  </div>
+                  <h3 className="empty-state-title">No collaboration teams found</h3>
+                  <p className="empty-state-desc">
+                    We couldn&apos;t find any active collaboration teams matching your search criteria or shared location coverage.
+                  </p>
+                  <button
+                    type="button"
+                    className="empty-state-reset-btn"
+                    onClick={handleResetTeamFilters}
+                  >
+                    Reset team filters
+                  </button>
+                </section>
+              )}
+
+              {/* Pagination / Load More Footer */}
+              {!teamsLoading && teams.length > 0 && (
+                <footer className="explore-pagination-footer">
+                  <p className="pagination-count-text">
+                    Showing {teams.length} of {teamsTotalCount} collaboration teams
+                  </p>
+                  {teamsHasMore && (
+                    <button
+                      type="button"
+                      className="btn-load-more"
+                      onClick={handleLoadMoreTeams}
+                      disabled={teamsLoadingMore}
+                    >
+                      {teamsLoadingMore ? 'Loading teams...' : 'Load more teams'}
+                    </button>
+                  )}
+                </footer>
+              )}
+            </div>
           )}
         </div>
       </main>

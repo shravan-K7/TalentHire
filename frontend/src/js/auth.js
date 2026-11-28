@@ -1234,6 +1234,25 @@ export async function fetchPublicTeamDetail(teamId) {
     return data;
 }
 
+export async function fetchPublicTeams(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== "") {
+            query.append(key, val);
+        }
+    });
+    const qs = query.toString() ? `?${query.toString()}` : "";
+    const response = await fetch(`/api/teams/${qs}`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load collaboration teams.");
+    }
+    return data;
+}
+
 export async function updateTeamProfile(teamId, payload) {
     const token = await getCsrfToken();
     const isFormData = payload instanceof FormData;
@@ -1344,6 +1363,229 @@ export async function reorderTeamPortfolioItems(teamId, itemIds) {
     }
     return data;
 }
+
+export async function fetchTeamPackages(teamId) {
+    const response = await fetch(`/api/artist/teams/${teamId}/packages/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch team packages.");
+    }
+    return data;
+}
+
+export async function createTeamPackage(teamId, payload) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/packages/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to create team package.");
+    }
+    return data;
+}
+
+export async function updateTeamPackage(teamId, packageId, payload) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/packages/${packageId}/`, {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to update team package.");
+    }
+    return data;
+}
+
+export async function deleteTeamPackage(teamId, packageId) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/packages/${packageId}/`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+            "X-CSRFToken": token,
+        },
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to delete team package.");
+    }
+    return data;
+}
+
+export async function fetchArtistCandidateSuggestions(query = "", teamId = null) {
+    const params = new URLSearchParams();
+    if (query) params.append("q", query);
+    if (teamId) params.append("team_id", teamId);
+    const response = await fetch(`/api/artist/candidates/?${params.toString()}`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch artist suggestions.");
+    }
+    return data;
+}
+
+// ==============================================================================
+// Collaboration Team Booking & Payments APIs (Phase 6)
+// ==============================================================================
+
+export async function createTeamBooking(teamId, packageId, payload) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/teams/${teamId}/packages/${packageId}/book/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify(payload),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to submit team booking request.");
+    }
+    return data;
+}
+
+export async function fetchCustomerTeamBookings() {
+    const response = await fetch("/api/customer/team-bookings/", {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team bookings.");
+    }
+    return data;
+}
+
+export async function fetchCustomerTeamBookingDetail(bookingId) {
+    const response = await fetch(`/api/customer/team-bookings/${bookingId}/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team booking detail.");
+    }
+    return data;
+}
+
+export async function cancelCustomerTeamBooking(bookingId, reason = "") {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/customer/team-bookings/${bookingId}/cancel/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ reason }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to cancel team booking.");
+    }
+    return data;
+}
+
+export async function fetchArtistTeamBookings(teamId) {
+    const response = await fetch(`/api/artist/teams/${teamId}/bookings/`, {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load team bookings.");
+    }
+    return data;
+}
+
+export async function respondToArtistTeamBooking(teamId, bookingId, action, message = "") {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/teams/${teamId}/bookings/${bookingId}/respond/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ action, message }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to respond to team booking.");
+    }
+    return data;
+}
+
+export async function fetchArtistMemberConfirmations() {
+    const response = await fetch("/api/artist/team-bookings/confirmations/", {
+        method: "GET",
+        credentials: "include",
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to load member confirmations.");
+    }
+    return data;
+}
+
+export async function respondToArtistMemberConfirmation(confirmationId, action, message = "") {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/artist/team-bookings/confirmations/${confirmationId}/respond/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+        body: JSON.stringify({ action, message }),
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to respond to confirmation request.");
+    }
+    return data;
+}
+
+export async function createRazorpayOrderTeamBooking(bookingId) {
+    const token = await getCsrfToken();
+    const response = await fetch(`/api/team-bookings/${bookingId}/create-order/`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": token,
+        },
+    });
+    const data = await readResponse(response);
+    if (!response.ok) {
+        throw new Error(data.error || "Failed to initialize payment for team booking.");
+    }
+    return data;
+}
+
+
+
 
 
 

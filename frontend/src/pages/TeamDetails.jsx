@@ -1,22 +1,26 @@
 import { useState, useEffect } from "react";
 import {
   Users,
-  MapPin,
   Layers,
   Film,
   Play,
-  ImageIcon,
   Video,
   AlertTriangle,
   ArrowLeft,
   ExternalLink,
   ShieldCheck,
-  Calendar,
   X,
   ChevronLeft,
   ChevronRight,
+  Package,
+  Clock,
+  CheckCircle2,
+  Calendar,
+  MapPin,
+  Send,
+  AlertCircle,
 } from "lucide-react";
-import { fetchPublicTeamDetail } from "../js/auth";
+import { fetchPublicTeamDetail, createTeamBooking } from "../js/auth";
 import "../css/ArtistDetails.css";
 import "../css/ArtistCollaboration.css";
 
@@ -35,6 +39,91 @@ export default function TeamDetails({
   const [activeVideo, setActiveVideo] = useState(null);
   const [showPhotoLightbox, setShowPhotoLightbox] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Team Booking Modal State (Phase 6)
+  const [selectedPackageForBooking, setSelectedPackageForBooking] = useState(null);
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+  const [bookingError, setBookingError] = useState("");
+  const [bookingSuccessData, setBookingSuccessData] = useState(null);
+  const [bookingForm, setBookingForm] = useState({
+    event_type: "Wedding",
+    event_date: "",
+    venue_name: "",
+    event_location: "",
+    event_address: "",
+    city: "",
+    state: "",
+    expected_audience_size: "",
+    customer_phone: "",
+    performance_duration: "",
+    additional_requirements: "",
+    customer_message: "",
+  });
+
+  function handleOpenBookingModal(pkg) {
+    setSelectedPackageForBooking(pkg);
+    setBookingError("");
+    setBookingSuccessData(null);
+    setBookingForm({
+      event_type: "Wedding",
+      event_date: "",
+      venue_name: "",
+      event_location: "",
+      event_address: "",
+      city: "",
+      state: "",
+      expected_audience_size: "",
+      customer_phone: user?.customer_profile?.phone || user?.phone || "",
+      performance_duration: pkg.duration_display || `${pkg.duration_minutes} mins`,
+      additional_requirements: "",
+      customer_message: "",
+    });
+  }
+
+  function handleCloseBookingModal() {
+    setSelectedPackageForBooking(null);
+    setBookingError("");
+    setBookingSuccessData(null);
+  }
+
+  async function handleSubmitTeamBooking(e) {
+    e.preventDefault();
+    if (!user) {
+      setBookingError("Please sign in with a customer account to book this package.");
+      return;
+    }
+    if (user.is_artist || user.role === "artist") {
+      setBookingError("Artist accounts cannot book teams. Please use a customer account.");
+      return;
+    }
+    if (!bookingForm.event_type) {
+      setBookingError("Please specify an event type.");
+      return;
+    }
+    if (!bookingForm.event_date) {
+      setBookingError("Please select the event date and time.");
+      return;
+    }
+    const chosenDate = new Date(bookingForm.event_date);
+    if (chosenDate <= new Date()) {
+      setBookingError("Event date and time must be in the future.");
+      return;
+    }
+
+    setBookingSubmitting(true);
+    setBookingError("");
+    try {
+      const res = await createTeamBooking(team.id, selectedPackageForBooking.id, {
+        ...bookingForm,
+        event_location: bookingForm.event_location || bookingForm.venue_name || "TBD",
+      });
+      setBookingSuccessData(res.booking);
+    } catch (err) {
+      setBookingError(err.message || "Failed to submit booking request.");
+    } finally {
+      setBookingSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     let isCancelled = false;
@@ -236,6 +325,15 @@ export default function TeamDetails({
                     <Layers size={15} color="#4ade80" />
                     <strong>{team.shared_coverage?.count || 0} Shared District{team.shared_coverage?.count === 1 ? "" : "s"}</strong>
                   </span>
+                  {team.packages_count > 0 && (
+                    <>
+                      <span>·</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <Package size={15} color="#ff9800" />
+                        <strong>{team.packages_count} Package{team.packages_count === 1 ? "" : "s"}</strong>
+                      </span>
+                    </>
+                  )}
                   {team.owner && (
                     <>
                       <span>·</span>
@@ -434,7 +532,188 @@ export default function TeamDetails({
           )}
         </section>
 
-        {/* Section 3: Team Portfolio & Media */}
+        {/* Section 3: Combined Performance Packages (Phase 5B) */}
+        <section style={{ background: "#181818", border: "1px solid #282828", borderRadius: "12px", padding: "24px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "10px" }}>
+            <div>
+              <h2 style={{ fontSize: "1.3rem", fontWeight: 700, color: "#fff", margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                <Package size={20} color="#FF5722" />
+                <span>Performance Packages ({team.packages?.length || 0})</span>
+              </h2>
+              <p style={{ margin: "4px 0 0", fontSize: "0.86rem", color: "#9ca3af" }}>
+                Curated combined stage sets offered by this collaboration team.
+              </p>
+            </div>
+            <span style={{ fontSize: "0.82rem", color: "#888" }}>
+              Standard rates & durations across shared coverage
+            </span>
+          </div>
+
+          {team.packages && team.packages.length > 0 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "20px" }}>
+              {team.packages.map((pkg) => (
+                <div
+                  key={pkg.id}
+                  style={{
+                    background: "#141414",
+                    border: "1px solid #282828",
+                    borderRadius: "10px",
+                    padding: "20px",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    transition: "transform 0.2s ease, border-color 0.2s ease",
+                  }}
+                >
+                  <div>
+                    {/* Header: Name, Category, Price */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "10px" }}>
+                      <div>
+                        <h3 style={{ fontSize: "1.15rem", fontWeight: 700, color: "#fff", margin: "0 0 6px" }}>
+                          {pkg.name}
+                        </h3>
+                        {pkg.category && (
+                          <span
+                            style={{
+                              background: "rgba(255, 87, 34, 0.15)",
+                              border: "1px solid rgba(255, 87, 34, 0.4)",
+                              color: "#FF5722",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {pkg.category}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: "1.25rem", fontWeight: 800, color: "#FF5722" }}>
+                          ₹{Number(pkg.starting_price).toLocaleString("en-IN")}
+                        </div>
+                        <span style={{ fontSize: "0.75rem", color: "#888" }}>starting from</span>
+                      </div>
+                    </div>
+
+                    {/* Duration badge */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#9ca3af", fontSize: "0.85rem", margin: "12px 0" }}>
+                      <Clock size={15} color="#FF5722" />
+                      <span>Duration: <strong>{pkg.duration_display || `${pkg.duration_minutes} mins`}</strong></span>
+                    </div>
+
+                    {/* Description */}
+                    {pkg.description && (
+                      <p style={{ color: "#d1d5db", fontSize: "0.88rem", lineHeight: 1.5, margin: "0 0 16px" }}>
+                        {pkg.description}
+                      </p>
+                    )}
+
+                    {/* Inclusions */}
+                    {pkg.included_services && pkg.included_services.length > 0 && (
+                      <div style={{ marginBottom: "16px" }}>
+                        <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                          What's Included:
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "6px" }}>
+                          {pkg.included_services.map((item, idx) => (
+                            <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "0.85rem", color: "#e4e4e7" }}>
+                              <CheckCircle2 size={15} color="#4ade80" style={{ flexShrink: 0, marginTop: "2px" }} />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Requirements / Rider */}
+                    {pkg.requirements && (
+                      <div style={{ background: "#1c1c1c", border: "1px solid #2a2a2a", borderRadius: "8px", padding: "10px 12px", marginBottom: "16px", fontSize: "0.82rem", color: "#9ca3af" }}>
+                        <strong style={{ color: "#ffc107" }}>Stage Rider / Requirements: </strong>
+                        {pkg.requirements}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Participating Artists */}
+                  {pkg.participating_members && pkg.participating_members.length > 0 && (
+                    <div style={{ borderTop: "1px solid #262626", paddingTop: "14px", marginTop: "12px" }}>
+                      <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "#888", marginBottom: "8px" }}>
+                        Participating Artists ({pkg.participating_members.length}):
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                        {pkg.participating_members.map((m) => (
+                          <a
+                            key={m.id || m.artist_id}
+                            href={`/artists/${m.id || m.artist_id}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              background: "#222",
+                              border: "1px solid #333",
+                              borderRadius: "16px",
+                              padding: "3px 10px 3px 4px",
+                              textDecoration: "none",
+                              color: "#fff",
+                              fontSize: "0.8rem",
+                            }}
+                          >
+                            {m.profile_image ? (
+                              <img src={m.profile_image} alt={m.stage_name} style={{ width: "20px", height: "20px", borderRadius: "50%", objectFit: "cover" }} />
+                            ) : (
+                              <div style={{ width: "20px", height: "20px", borderRadius: "50%", background: "#333", color: "#FF5722", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.65rem", fontWeight: 700 }}>
+                                {m.stage_name?.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <span>{m.stage_name}</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Book Package Action (Phase 6) */}
+                  <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid #242424" }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBookingModal(pkg)}
+                      style={{
+                        width: "100%",
+                        padding: "11px 16px",
+                        background: "#FF5722",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "8px",
+                        fontWeight: 700,
+                        fontSize: "0.95rem",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "8px",
+                        transition: "background 0.2s ease, transform 0.15s ease",
+                      }}
+                      onMouseOver={(e) => (e.currentTarget.style.background = "#e64a19")}
+                      onMouseOut={(e) => (e.currentTarget.style.background = "#FF5722")}
+                    >
+                      <Calendar size={17} />
+                      <span>Book Package</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ padding: "36px", textAlign: "center", background: "#141414", borderRadius: "8px", border: "1px dashed #333", color: "#888" }}>
+              <Package size={36} color="#555" style={{ marginBottom: "10px" }} />
+              <p style={{ margin: 0, fontSize: "0.92rem" }}>No performance packages currently listed for this team.</p>
+            </div>
+          )}
+        </section>
+
+        {/* Section 4: Team Portfolio & Media */}
         <section>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
             <h2 style={{ fontSize: "1.3rem", fontWeight: 700, color: "#fff", margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
@@ -662,6 +941,424 @@ export default function TeamDetails({
                   <ChevronRight size={20} />
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Team Booking Modal (Phase 6) */}
+      {selectedPackageForBooking && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.8)",
+            backdropFilter: "blur(6px)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "20px",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleCloseBookingModal();
+          }}
+        >
+          <div
+            style={{
+              background: "#181818",
+              border: "1px solid #2e2e2e",
+              borderRadius: "14px",
+              width: "100%",
+              maxWidth: "600px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "20px 24px",
+                borderBottom: "1px solid #282828",
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, color: "#fff", fontSize: "1.25rem", fontWeight: 700, display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Package size={20} color="#FF5722" />
+                  <span>Book Package: {selectedPackageForBooking.name}</span>
+                </h3>
+                <p style={{ margin: "4px 0 0", color: "#888", fontSize: "0.85rem" }}>
+                  Team: <strong>{team.name}</strong> • Starting from ₹{Number(selectedPackageForBooking.starting_price).toLocaleString("en-IN")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseBookingModal}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#aaa",
+                  cursor: "pointer",
+                  padding: "4px",
+                  borderRadius: "6px",
+                }}
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: "24px" }}>
+              {bookingSuccessData ? (
+                <div style={{ textAlign: "center", padding: "20px 10px" }}>
+                  <CheckCircle2 size={56} color="#4ade80" style={{ margin: "0 auto 16px" }} />
+                  <h4 style={{ color: "#fff", fontSize: "1.3rem", fontWeight: 700, margin: "0 0 10px" }}>
+                    Booking Request Submitted!
+                  </h4>
+                  <p style={{ color: "#bbb", fontSize: "0.95rem", lineHeight: 1.6, maxWidth: "460px", margin: "0 auto 24px" }}>
+                    Your request for <strong>{selectedPackageForBooking.name}</strong> with <strong>{team.name}</strong> has been sent to the team owner for review.
+                  </p>
+
+                  <div style={{ background: "#141414", border: "1px solid #282828", borderRadius: "10px", padding: "16px", textAlign: "left", marginBottom: "24px" }}>
+                    <div style={{ fontSize: "0.85rem", color: "#888", marginBottom: "6px" }}>
+                      Booking Reference: <strong>#{bookingSuccessData.id}</strong>
+                    </div>
+                    <div style={{ fontSize: "0.85rem", color: "#888", marginBottom: "6px" }}>
+                      Status: <span style={{ color: "#f59e0b", fontWeight: 700 }}>Pending Owner Review</span>
+                    </div>
+                    <div style={{ fontSize: "0.85rem", color: "#888" }}>
+                      Event Date: <strong>{bookingSuccessData.event?.date_display || bookingForm.event_date}</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleCloseBookingModal();
+                        if (navigate) {
+                          navigate("/customer/dashboard?tab=team-bookings");
+                        } else {
+                          window.location.href = "/customer/dashboard?tab=team-bookings";
+                        }
+                      }}
+                      style={{
+                        padding: "11px 22px",
+                        background: "#FF5722",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "8px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      View in My Bookings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCloseBookingModal}
+                      style={{
+                        padding: "11px 20px",
+                        background: "#282828",
+                        color: "#ddd",
+                        border: "none",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmitTeamBooking}>
+                  {bookingError && (
+                    <div
+                      style={{
+                        background: "rgba(239, 68, 68, 0.15)",
+                        border: "1px solid #ef4444",
+                        borderRadius: "8px",
+                        padding: "12px 14px",
+                        marginBottom: "18px",
+                        color: "#fca5a5",
+                        fontSize: "0.88rem",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "10px",
+                      }}
+                    >
+                      <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
+                      <span>{bookingError}</span>
+                    </div>
+                  )}
+
+                  {!user && (
+                    <div
+                      style={{
+                        background: "rgba(245, 158, 11, 0.15)",
+                        border: "1px solid #f59e0b",
+                        borderRadius: "8px",
+                        padding: "12px 14px",
+                        marginBottom: "18px",
+                        color: "#fde68a",
+                        fontSize: "0.88rem",
+                      }}
+                    >
+                      You are not logged in. Please{" "}
+                      <a href="/login" style={{ color: "#FF5722", textDecoration: "underline", fontWeight: 700 }}>
+                        Sign in as Customer
+                      </a>{" "}
+                      to submit a booking request.
+                    </div>
+                  )}
+
+                  {user && (user.is_artist || user.role === "artist") && (
+                    <div
+                      style={{
+                        background: "rgba(239, 68, 68, 0.15)",
+                        border: "1px solid #ef4444",
+                        borderRadius: "8px",
+                        padding: "12px 14px",
+                        marginBottom: "18px",
+                        color: "#fca5a5",
+                        fontSize: "0.88rem",
+                      }}
+                    >
+                      You are logged in as an Artist. Only customer accounts can book collaboration teams.
+                    </div>
+                  )}
+
+                  {/* Event Type & Date */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                    <div>
+                      <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                        Event Type *
+                      </label>
+                      <select
+                        value={bookingForm.event_type}
+                        onChange={(e) => setBookingForm({ ...bookingForm, event_type: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#121212",
+                          border: "1px solid #333",
+                          borderRadius: "8px",
+                          color: "#fff",
+                          fontSize: "0.9rem",
+                        }}
+                        required
+                      >
+                        <option value="Wedding">Wedding</option>
+                        <option value="Corporate Event">Corporate Event</option>
+                        <option value="Music Concert">Music Concert</option>
+                        <option value="College Fest">College Fest</option>
+                        <option value="Birthday Party">Birthday Party</option>
+                        <option value="Private Celebration">Private Celebration</option>
+                        <option value="Festival">Festival</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                        Event Date & Time *
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={bookingForm.event_date}
+                        min={new Date(Date.now() + 86400000).toISOString().slice(0, 16)}
+                        onChange={(e) => setBookingForm({ ...bookingForm, event_date: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#121212",
+                          border: "1px solid #333",
+                          borderRadius: "8px",
+                          color: "#fff",
+                          fontSize: "0.9rem",
+                        }}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Venue & Location */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                    <div>
+                      <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                        Venue Name / Landmark
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Grand Hyatt Ballroom"
+                        value={bookingForm.venue_name}
+                        onChange={(e) => setBookingForm({ ...bookingForm, venue_name: e.target.value, event_location: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#121212",
+                          border: "1px solid #333",
+                          borderRadius: "8px",
+                          color: "#fff",
+                          fontSize: "0.9rem",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                        City & State
+                      </label>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <input
+                          type="text"
+                          placeholder="City"
+                          value={bookingForm.city}
+                          onChange={(e) => setBookingForm({ ...bookingForm, city: e.target.value })}
+                          style={{
+                            width: "50%",
+                            padding: "10px",
+                            background: "#121212",
+                            border: "1px solid #333",
+                            borderRadius: "8px",
+                            color: "#fff",
+                            fontSize: "0.9rem",
+                          }}
+                        />
+                        <input
+                          type="text"
+                          placeholder="State"
+                          value={bookingForm.state}
+                          onChange={(e) => setBookingForm({ ...bookingForm, state: e.target.value })}
+                          style={{
+                            width: "50%",
+                            padding: "10px",
+                            background: "#121212",
+                            border: "1px solid #333",
+                            borderRadius: "8px",
+                            color: "#fff",
+                            fontSize: "0.9rem",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Audience & Contact Phone */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                    <div>
+                      <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                        Expected Audience Size
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 250"
+                        value={bookingForm.expected_audience_size}
+                        onChange={(e) => setBookingForm({ ...bookingForm, expected_audience_size: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#121212",
+                          border: "1px solid #333",
+                          borderRadius: "8px",
+                          color: "#fff",
+                          fontSize: "0.9rem",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                        Contact Phone
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="e.g. +91 98765 43210"
+                        value={bookingForm.customer_phone}
+                        onChange={(e) => setBookingForm({ ...bookingForm, customer_phone: e.target.value })}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#121212",
+                          border: "1px solid #333",
+                          borderRadius: "8px",
+                          color: "#fff",
+                          fontSize: "0.9rem",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Requirements & Notes */}
+                  <div style={{ marginBottom: "20px" }}>
+                    <label style={{ display: "block", color: "#ddd", fontSize: "0.85rem", fontWeight: 600, marginBottom: "6px" }}>
+                      Special Requirements / Message
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="Share details about stage setup, sound gear, guest list or any custom request..."
+                      value={bookingForm.customer_message}
+                      onChange={(e) => setBookingForm({ ...bookingForm, customer_message: e.target.value, additional_requirements: e.target.value })}
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        background: "#121212",
+                        border: "1px solid #333",
+                        borderRadius: "8px",
+                        color: "#fff",
+                        fontSize: "0.9rem",
+                        resize: "vertical",
+                      }}
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", borderTop: "1px solid #282828", paddingTop: "18px" }}>
+                    <button
+                      type="button"
+                      onClick={handleCloseBookingModal}
+                      style={{
+                        padding: "10px 18px",
+                        background: "#222",
+                        color: "#ccc",
+                        border: "1px solid #333",
+                        borderRadius: "8px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={bookingSubmitting || !user || user.is_artist || user.role === "artist"}
+                      style={{
+                        padding: "10px 22px",
+                        background: "#FF5722",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "8px",
+                        fontWeight: 700,
+                        cursor: bookingSubmitting ? "not-allowed" : "pointer",
+                        opacity: bookingSubmitting || !user || user.is_artist || user.role === "artist" ? 0.6 : 1,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <Send size={16} />
+                      <span>{bookingSubmitting ? "Submitting..." : "Submit Booking Request"}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>
